@@ -22,8 +22,8 @@ def load_mpv_module():
 
 
 def ensure_mpv_available() -> tuple[object, str]:
-    module = load_mpv_module()
     library_path = resolve_mpv_library_path()
     if library_path is None:
         raise PlaybackBackendError("libmpv could not be resolved")
+    module = load_mpv_module()
     return module, library_path

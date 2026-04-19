@@ -23,5 +23,6 @@ if [[ ! -x "${VENV_PYTHON}" ]]; then
 fi
 
 export PYTHONPATH="${PROJECT_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}"
+export YAYMP_PLAYBACK_BACKEND="${YAYMP_PLAYBACK_BACKEND:-mpv}"
 
 "${VENV_PYTHON}" -m app
