@@ -25,6 +25,22 @@ class FakeMusicService:
     def get_auth_session(self) -> AuthSession | None:
         return AuthSession(user_id="user-1", token="token")
 
+    def build_auth_session(
+        self,
+        token: str,
+        *,
+        expires_at: datetime | None = None,
+    ) -> AuthSession:
+        return AuthSession(
+            user_id="user-1",
+            token=token,
+            expires_at=expires_at,
+            display_name="listener",
+        )
+
+    def get_track(self, track_id: str) -> Track:
+        return Track(id=track_id, title=f"Track {track_id}", artists=("Artist",))
+
     def search_tracks(self, query: str, *, limit: int = 25) -> Sequence[Track]:
         return [Track(id=f"{query}-{limit}", title=query, artists=("Artist",))]
 

@@ -40,6 +40,9 @@ class PlaybackController(QObject):
     def select_index(self, index: int) -> None:
         self._execute(lambda: self._playback_service.select_index(index))
 
+    def play_track_by_id(self, track_id: str) -> None:
+        self._execute(lambda: self._playback_service.play_track_by_id(track_id))
+
     def _execute(self, operation) -> None:
         try:
             self._emit_snapshot(operation())

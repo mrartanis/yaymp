@@ -1,11 +1,16 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from os import environ
+
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import (
+    QApplication,
     QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMainWindow,
@@ -16,6 +21,8 @@ from PySide6.QtWidgets import (
 )
 
 from app.bootstrap.container import AppContainer
+from app.domain.errors import DomainError
+from app.presentation.qt.auth_dialog import AuthDialog
 from app.presentation.qt.playback_controller import PlaybackController
 
 
@@ -27,11 +34,21 @@ class MainWindow(QMainWindow):
             playback_service=container.services.playback_service,
             logger=container.logger,
         )
+        self._auth_dialog: AuthDialog | None = None
+        self._auth_flow_checked = False
         self.setWindowTitle("YAYMP")
         self.resize(1280, 820)
         self._build_ui()
         self._wire_controller()
         self._controller.initialize()
+        self._render_auth_state()
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        if self._auth_flow_checked:
+            return
+        self._auth_flow_checked = True
+        QTimer.singleShot(0, self._maybe_start_auth_flow)
 
     def _build_ui(self) -> None:
         root = QWidget(self)
@@ -53,8 +70,8 @@ class MainWindow(QMainWindow):
         self._now_playing_label = self._panel_label("Ready to play demo queue")
         layout.addWidget(self._now_playing_label)
         layout.addStretch(1)
-        self._backend_label = self._panel_label("Backend: bootstrapping", align_right=True)
-        layout.addWidget(self._backend_label)
+        self._auth_label = self._panel_label("Login required", align_right=True)
+        layout.addWidget(self._auth_label)
         return frame
 
     def _build_transport_bar(self) -> QHBoxLayout:
@@ -113,10 +130,18 @@ class MainWindow(QMainWindow):
         self._track_title_label = self._panel_label("Track: Starter Signal")
         self._track_meta_label = self._panel_label("Artist and album metadata will appear here")
         self._playback_state_label = self._panel_label("Playback status: stopped")
+        self._track_id_input = QLineEdit()
+        self._track_id_input.setPlaceholderText("Enter Yandex track id")
+        self._play_track_button = QPushButton("Play Track ID")
+        track_id_row = QHBoxLayout()
+        track_id_row.setSpacing(8)
+        track_id_row.addWidget(self._track_id_input, 1)
+        track_id_row.addWidget(self._play_track_button)
         layout.addWidget(self._track_title_label, 0, 0)
         layout.addWidget(self._track_meta_label, 1, 0)
         layout.addWidget(self._playback_state_label, 2, 0)
-        layout.setRowStretch(2, 1)
+        layout.addLayout(track_id_row, 3, 0)
+        layout.setRowStretch(4, 1)
         base_layout.addLayout(layout)
         return frame
 
@@ -150,6 +175,8 @@ class MainWindow(QMainWindow):
         self._seek_slider.sliderReleased.connect(self._apply_seek)
         self._volume_slider.valueChanged.connect(self._controller.set_volume)
         self._queue_list.itemDoubleClicked.connect(self._select_queue_item)
+        self._play_track_button.clicked.connect(self._play_track_by_id)
+        self._track_id_input.returnPressed.connect(self._play_track_by_id)
 
     def _apply_seek(self) -> None:
         self._controller.seek(self._seek_slider.value())
@@ -189,14 +216,13 @@ class MainWindow(QMainWindow):
         self._volume_slider.setValue(state.volume)
         self._volume_slider.blockSignals(False)
         self._volume_label.setText(f"Volume {state.volume}%")
-        self._backend_label.setText(
-            f"Backend: {self._container.services.playback_engine.__class__.__name__}"
-        )
         self._status_label.setText("Playback core active")
         self._queue_status_label.setText(
-            f"Queue {len(queue)} items | active index {state.active_index}"
+            f"{self._container.services.playback_engine.__class__.__name__} | "
+            f"queue {len(queue)} | active index {state.active_index}"
         )
         self._render_queue(snapshot)
+        self._render_auth_state()
 
     def _render_queue(self, snapshot) -> None:
         self._queue_list.blockSignals(True)
@@ -213,6 +239,56 @@ class MainWindow(QMainWindow):
 
     def _render_error(self, message: str) -> None:
         self._status_label.setText(f"Playback error: {message}")
+
+    def _render_auth_state(self) -> None:
+        session = self._container.services.auth_service.current_session()
+        if session is None:
+            self._auth_label.setText("Login required")
+            return
+        username = session.display_name or session.user_id
+        self._auth_label.setText(f"logged as {username}")
+
+    def _maybe_start_auth_flow(self) -> None:
+        if self._container.services.auth_service.current_session() is not None:
+            return
+        if self._is_headless_test_run():
+            return
+
+        self._auth_dialog = AuthDialog(parent=self)
+        self._auth_dialog.token_captured.connect(self._complete_auth_flow)
+        self._auth_dialog.finished.connect(self._clear_auth_dialog)
+        self._auth_dialog.open()
+
+    def _complete_auth_flow(self, token: str, expires_in: int | None) -> None:
+        try:
+            session = self._container.services.auth_service.authenticate_with_token(
+                token,
+                music_service=self._container.services.music_service,
+                expires_in=expires_in,
+            )
+        except DomainError as exc:
+            self._status_label.setText(f"Auth error: {exc}")
+            return
+
+        username = session.display_name or session.user_id
+        self._status_label.setText(f"Authenticated as {username}")
+        self._render_auth_state()
+
+    def _clear_auth_dialog(self) -> None:
+        self._auth_dialog = None
+
+    def _play_track_by_id(self) -> None:
+        track_id = self._track_id_input.text().strip()
+        if not track_id:
+            self._status_label.setText("Playback error: enter a Yandex track id")
+            return
+        self._controller.play_track_by_id(track_id)
+
+    def _is_headless_test_run(self) -> bool:
+        app = QApplication.instance()
+        if app is not None and app.platformName() == "offscreen":
+            return True
+        return environ.get("QT_QPA_PLATFORM") == "offscreen"
 
     def _panel_frame(self, title: str) -> QFrame:
         frame = QFrame()

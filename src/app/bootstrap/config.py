@@ -26,6 +26,10 @@ class AppConfig:
     def log_file(self) -> Path:
         return self.log_dir / "yaymp.log"
 
+    @property
+    def auth_session_file(self) -> Path:
+        return self.data_dir / "auth_session.json"
+
     def ensure_directories(self) -> None:
         for path in (self.config_dir, self.data_dir, self.cache_dir, self.log_dir):
             path.mkdir(parents=True, exist_ok=True)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -13,6 +14,7 @@ from app.domain import (
     Track,
 )
 from app.domain.errors import PlaybackBackendError, StreamResolveError
+from app.domain.protocols import MusicService
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,14 +25,25 @@ class PlaybackSnapshot:
 
 
 class PlaybackService:
-    def __init__(self, *, playback_engine: PlaybackEngine, logger: Logger) -> None:
+    def __init__(
+        self,
+        *,
+        playback_engine: PlaybackEngine,
+        logger: Logger,
+        music_service: MusicService | None = None,
+        randomizer: random.Random | None = None,
+    ) -> None:
         self._playback_engine = playback_engine
         self._logger = logger
+        self._music_service = music_service
+        self._randomizer = randomizer or random.Random()
         self._queue: list[QueueItem] = []
         self._active_index: int | None = None
         self._repeat_mode = RepeatMode.OFF
         self._shuffle_enabled = False
         self._volume = 100
+        self._play_order: list[int] = []
+        self._play_order_position: int | None = None
 
     def replace_queue(
         self,
@@ -45,6 +58,11 @@ class PlaybackService:
         if start_index < 0 or start_index >= len(tracks):
             raise IndexError("Playback start index is out of range")
 
+        previous_queue = self._queue
+        previous_index = self._active_index
+        previous_order = self._play_order
+        previous_order_position = self._play_order_position
+
         self._queue = [
             QueueItem(
                 track=track,
@@ -54,10 +72,17 @@ class PlaybackService:
             )
             for index, track in enumerate(tracks)
         ]
-        self._active_index = start_index
-        self._load_current_item()
-        self.play()
-        return self.snapshot()
+        self._rebuild_play_order(anchor_index=start_index)
+
+        try:
+            self._activate_index(start_index)
+            return self.play()
+        except Exception:
+            self._queue = previous_queue
+            self._active_index = previous_index
+            self._play_order = previous_order
+            self._play_order_position = previous_order_position
+            raise
 
     def snapshot(self) -> PlaybackSnapshot:
         return PlaybackSnapshot(
@@ -96,40 +121,58 @@ class PlaybackService:
         self._logger.info("Playback stopped")
         return self.snapshot()
 
+    def play_track(
+        self,
+        track: Track,
+        *,
+        source_type: str | None = "track",
+        source_id: str | None = None,
+    ) -> PlaybackSnapshot:
+        return self.replace_queue(
+            (track,),
+            start_index=0,
+            source_type=source_type,
+            source_id=source_id or track.id,
+        )
+
+    def play_track_by_id(self, track_id: str) -> PlaybackSnapshot:
+        if self._music_service is None:
+            raise PlaybackBackendError("Music service is not configured")
+        track = self._music_service.get_track(track_id)
+        return self.play_track(track, source_type="track", source_id=track_id)
+
     def next(self) -> PlaybackSnapshot:
         if self._active_index is None:
             raise PlaybackBackendError("No active queue item")
 
-        next_index = self._active_index + 1
-        if next_index >= len(self._queue):
-            if self._repeat_mode is RepeatMode.ALL:
-                next_index = 0
-            else:
-                self.stop()
-                return self.snapshot()
+        if self._repeat_mode is RepeatMode.ONE:
+            self._activate_index(self._active_index)
+            return self.play()
 
-        self._active_index = next_index
-        self._load_current_item()
+        next_index = self._resolve_next_index()
+        if next_index is None:
+            self.stop()
+            return self.snapshot()
+
+        self._activate_index(next_index)
         return self.play()
 
     def previous(self) -> PlaybackSnapshot:
         if self._active_index is None:
             raise PlaybackBackendError("No active queue item")
 
+        if self._repeat_mode is RepeatMode.ONE:
+            self.seek(0)
+            self._activate_index(self._active_index)
+            return self.play()
+
         current_state = self._playback_engine.get_state()
         if current_state.position_ms > 3_000:
             self.seek(0)
             return self.snapshot()
 
-        previous_index = self._active_index - 1
-        if previous_index < 0:
-            if self._repeat_mode is RepeatMode.ALL:
-                previous_index = len(self._queue) - 1
-            else:
-                previous_index = 0
-
-        self._active_index = previous_index
-        self._load_current_item()
+        previous_index = self._resolve_previous_index()
+        self._activate_index(previous_index)
         return self.play()
 
     def seek(self, position_ms: int) -> PlaybackSnapshot:
@@ -148,24 +191,113 @@ class PlaybackService:
 
     def set_shuffle_enabled(self, enabled: bool) -> PlaybackSnapshot:
         self._shuffle_enabled = enabled
+        self._rebuild_play_order(anchor_index=self._active_index)
         return self.snapshot()
 
     def select_index(self, index: int) -> PlaybackSnapshot:
         if index < 0 or index >= len(self._queue):
             raise IndexError("Queue index is out of range")
-        self._active_index = index
-        self._load_current_item()
+        self._activate_index(index)
         return self.play()
+
+    def _resolve_next_index(self) -> int | None:
+        if not self._queue or self._active_index is None:
+            raise PlaybackBackendError("No active queue item")
+
+        if self._play_order_position is None:
+            self._rebuild_play_order(anchor_index=self._active_index)
+
+        assert self._play_order_position is not None
+        next_position = self._play_order_position + 1
+        if next_position >= len(self._play_order):
+            if self._repeat_mode is RepeatMode.ALL:
+                next_position = 0
+            else:
+                return None
+        self._play_order_position = next_position
+        return self._play_order[next_position]
+
+    def _resolve_previous_index(self) -> int:
+        if not self._queue or self._active_index is None:
+            raise PlaybackBackendError("No active queue item")
+
+        if self._play_order_position is None:
+            self._rebuild_play_order(anchor_index=self._active_index)
+
+        assert self._play_order_position is not None
+        previous_position = self._play_order_position - 1
+        if previous_position < 0:
+            if self._repeat_mode is RepeatMode.ALL:
+                previous_position = len(self._play_order) - 1
+            else:
+                previous_position = 0
+        self._play_order_position = previous_position
+        return self._play_order[previous_position]
+
+    def _activate_index(self, index: int) -> None:
+        current_item = self._queue[index]
+        prepared_item = self._prepare_queue_item(current_item)
+        self._queue[index] = prepared_item
+        stream_ref = prepared_item.track.stream_ref or ""
+        self._playback_engine.load(prepared_item.track, stream_ref=stream_ref)
+        self._playback_engine.set_volume(self._volume)
+        self._active_index = index
+        self._sync_play_order_position(index)
+
+    def _prepare_queue_item(self, item: QueueItem) -> QueueItem:
+        stream_ref = item.track.stream_ref
+        if not stream_ref:
+            if self._music_service is None:
+                raise StreamResolveError("Track has no stream reference")
+            stream_ref = self._music_service.resolve_stream_ref(item.track)
+        if not stream_ref:
+            raise StreamResolveError("Track has no stream reference")
+        return QueueItem(
+            track=Track(
+                id=item.track.id,
+                title=item.track.title,
+                artists=item.track.artists,
+                album_title=item.track.album_title,
+                duration_ms=item.track.duration_ms,
+                stream_ref=stream_ref,
+                artwork_ref=item.track.artwork_ref,
+                available=item.track.available,
+            ),
+            source_type=item.source_type,
+            source_id=item.source_id,
+            source_index=item.source_index,
+        )
+
+    def _rebuild_play_order(self, *, anchor_index: int | None) -> None:
+        self._play_order = list(range(len(self._queue)))
+        if not self._play_order:
+            self._play_order_position = None
+            return
+
+        if self._shuffle_enabled:
+            self._randomizer.shuffle(self._play_order)
+            if anchor_index is not None and anchor_index in self._play_order:
+                self._play_order.remove(anchor_index)
+                self._play_order.insert(0, anchor_index)
+                self._play_order_position = 0
+                return
+
+        if anchor_index is None:
+            self._play_order_position = 0
+            return
+        self._play_order_position = self._play_order.index(anchor_index)
+
+    def _sync_play_order_position(self, index: int) -> None:
+        if index not in self._play_order:
+            self._rebuild_play_order(anchor_index=index)
+            return
+        self._play_order_position = self._play_order.index(index)
 
     def _load_current_item(self) -> None:
         current_item = self.current_item()
         if current_item is None:
             raise PlaybackBackendError("No current queue item")
-        if not current_item.track.stream_ref:
-            raise StreamResolveError("Track has no stream reference")
-
-        self._playback_engine.load(current_item.track, stream_ref=current_item.track.stream_ref)
-        self._playback_engine.set_volume(self._volume)
+        self._activate_index(self._active_index if self._active_index is not None else 0)
 
     def _compose_state(self, engine_state: PlaybackState) -> PlaybackState:
         return PlaybackState(

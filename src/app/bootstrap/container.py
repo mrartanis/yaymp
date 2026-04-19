@@ -4,17 +4,22 @@ import logging
 import os
 from dataclasses import dataclass
 
+from app.application.auth_service import AuthService
 from app.application.demo_library import build_demo_tracks
 from app.application.playback_service import PlaybackService
 from app.bootstrap.config import AppConfig
-from app.domain import Track
-from app.domain.errors import PlaybackBackendError
+from app.domain import MusicService, Track
+from app.domain.errors import AuthError, PlaybackBackendError
+from app.infrastructure.persistence import FileAuthRepo
 from app.infrastructure.playback.fake_playback_engine import FakePlaybackEngine
 from app.infrastructure.playback.mpv_playback_engine import MpvPlaybackEngine
+from app.infrastructure.yandex.yandex_music_service import YandexMusicService
 
 
 @dataclass(slots=True)
 class AppServices:
+    auth_service: AuthService
+    music_service: MusicService
     playback_engine: FakePlaybackEngine | MpvPlaybackEngine
     playback_service: PlaybackService
     demo_tracks: tuple[Track, ...]
@@ -29,10 +34,35 @@ class AppContainer:
 
 def build_container(config: AppConfig, logger: logging.Logger) -> AppContainer:
     logger.debug("Building application container")
+    auth_service = AuthService(
+        auth_repo=FileAuthRepo(file_path=config.auth_session_file),
+        logger=logger,
+    )
+    restored_session = auth_service.restore_session()
+    bootstrap_token = os.getenv("YAYMP_YANDEX_TOKEN")
+    music_service = YandexMusicService(
+        session=restored_session,
+        token=bootstrap_token,
+    )
+    if restored_session is not None or bootstrap_token:
+        token = restored_session.token if restored_session is not None else bootstrap_token
+        assert token is not None
+        try:
+            auth_service.authenticate_with_token(
+                token,
+                music_service=music_service,
+                expires_in=None,
+            )
+        except AuthError as exc:
+            logger.warning("Failed to restore Yandex session: %s", exc)
+            auth_service.clear_session()
+            music_service = YandexMusicService()
+
     playback_engine = _build_playback_engine(logger)
     playback_service = PlaybackService(
         playback_engine=playback_engine,
         logger=logger,
+        music_service=music_service,
     )
     demo_tracks = build_demo_tracks()
     playback_service.replace_queue(
@@ -45,6 +75,8 @@ def build_container(config: AppConfig, logger: logging.Logger) -> AppContainer:
         config=config,
         logger=logger,
         services=AppServices(
+            auth_service=auth_service,
+            music_service=music_service,
             playback_engine=playback_engine,
             playback_service=playback_service,
             demo_tracks=demo_tracks,

@@ -12,6 +12,7 @@ dependencies = [
     "platformdirs>=4.3,<5.0",
     "python-mpv>=1.0.8,<2.0",
     "PySide6>=6.8,<7.0",
+    "yandex-music>=3.0,<4.0",
 ]
 
 [project.optional-dependencies]
