@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "yaymp"
+version = "0.1.0"
+description = "Desktop Yandex Music player bootstrap."
+readme = "docs/bootstrap.md"
+requires-python = ">=3.12"
+dependencies = [
+    "platformdirs>=4.3,<5.0",
+    "PySide6>=6.8,<7.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3,<9.0",
+    "pytest-qt>=4.4,<5.0",
+    "ruff>=0.11,<0.12",
+]
+
+[project.scripts]
+yaymp = "app.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/app"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]

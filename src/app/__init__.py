@@ -1,0 +1,1 @@
+"""YAYMP application package."""
