@@ -4,6 +4,8 @@ This file is the milestone-level execution plan with Definition of Done for each
 
 ## Milestone 0: Skeleton / Bootstrap
 
+Status: done
+
 Goal:
 
 - establish the correct project shape and startup path
@@ -28,6 +30,8 @@ Definition of Done:
 
 ## Milestone 1: Playback Core Without Yandex
 
+Status: done
+
 Goal:
 
 - prove the player architecture and playback core
@@ -50,6 +54,8 @@ Definition of Done:
 - playback orchestration has integration tests
 
 ## Milestone 2: Yandex Auth and Track Resolve
+
+Status: next
 
 Goal:
 

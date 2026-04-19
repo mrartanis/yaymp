@@ -37,4 +37,3 @@ The app starts through the bootstrap path:
 - Platform-specific directories are resolved with `platformdirs`.
 - Logs are written to the platform log directory for the app.
 - The main window is intentionally a placeholder shell without business logic.
-- Step plans are stored in `docs/steps/`.

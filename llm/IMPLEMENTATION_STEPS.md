@@ -4,6 +4,8 @@ This file defines the preferred implementation order for the project. Follow it 
 
 ## Step 1: Bootstrap the Skeleton
 
+Status: done
+
 Create the minimal project shape:
 
 - `src/app/bootstrap`
@@ -36,6 +38,8 @@ Result:
 
 ## Step 2: Establish Domain Contracts
 
+Status: done
+
 Define stable entities and protocols before feature work expands.
 
 Add:
@@ -63,6 +67,8 @@ Result:
 
 ## Step 3: Build the Playback Core Without Yandex
 
+Status: done
+
 Prove that the player architecture works before API integration.
 
 Implement:
@@ -84,6 +90,8 @@ Result:
 - playback state appears in the UI
 
 ## Step 4: Add Playback-Focused Tests
+
+Status: next
 
 Before expanding product scope, lock down playback behavior.
 
