@@ -6,11 +6,13 @@ from dataclasses import dataclass
 
 from app.application.auth_service import AuthService
 from app.application.demo_library import build_demo_tracks
+from app.application.library_service import LibraryService
 from app.application.playback_service import PlaybackService
+from app.application.search_service import SearchService
 from app.bootstrap.config import AppConfig
 from app.domain import MusicService, Track
 from app.domain.errors import AuthError, PlaybackBackendError
-from app.infrastructure.persistence import FileAuthRepo
+from app.infrastructure.persistence import FileAuthRepo, FileLibraryCacheRepo
 from app.infrastructure.playback.fake_playback_engine import FakePlaybackEngine
 from app.infrastructure.playback.mpv_playback_engine import MpvPlaybackEngine
 from app.infrastructure.yandex.yandex_music_service import YandexMusicService
@@ -19,9 +21,11 @@ from app.infrastructure.yandex.yandex_music_service import YandexMusicService
 @dataclass(slots=True)
 class AppServices:
     auth_service: AuthService
+    library_service: LibraryService
     music_service: MusicService
     playback_engine: FakePlaybackEngine | MpvPlaybackEngine
     playback_service: PlaybackService
+    search_service: SearchService
     demo_tracks: tuple[Track, ...]
 
 
@@ -58,6 +62,17 @@ def build_container(config: AppConfig, logger: logging.Logger) -> AppContainer:
             auth_service.clear_session()
             music_service = YandexMusicService()
 
+    library_cache_repo = FileLibraryCacheRepo(file_path=config.recent_searches_file)
+    search_service = SearchService(
+        music_service=music_service,
+        library_cache_repo=library_cache_repo,
+        logger=logger,
+    )
+    library_service = LibraryService(
+        music_service=music_service,
+        logger=logger,
+    )
+
     playback_engine = _build_playback_engine(logger)
     playback_service = PlaybackService(
         playback_engine=playback_engine,
@@ -76,9 +91,11 @@ def build_container(config: AppConfig, logger: logging.Logger) -> AppContainer:
         logger=logger,
         services=AppServices(
             auth_service=auth_service,
+            library_service=library_service,
             music_service=music_service,
             playback_engine=playback_engine,
             playback_service=playback_service,
+            search_service=search_service,
             demo_tracks=demo_tracks,
         ),
     )

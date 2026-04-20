@@ -25,6 +25,9 @@ class PlaybackSnapshot:
 
 
 class PlaybackService:
+    _STATION_QUEUE_REFILL_THRESHOLD = 3
+    _STATION_QUEUE_BATCH_SIZE = 10
+
     def __init__(
         self,
         *,
@@ -85,6 +88,7 @@ class PlaybackService:
             raise
 
     def snapshot(self) -> PlaybackSnapshot:
+        self._ensure_station_queue_capacity(min_remaining=self._STATION_QUEUE_REFILL_THRESHOLD)
         return PlaybackSnapshot(
             queue=tuple(self._queue),
             state=self._compose_state(self._playback_engine.get_state()),
@@ -141,6 +145,22 @@ class PlaybackService:
         track = self._music_service.get_track(track_id)
         return self.play_track(track, source_type="track", source_id=track_id)
 
+    def play_station(self, station_id: str) -> PlaybackSnapshot:
+        if self._music_service is None:
+            raise PlaybackBackendError("Music service is not configured")
+        tracks = self._music_service.get_station_tracks(
+            station_id,
+            limit=self._STATION_QUEUE_BATCH_SIZE,
+        )
+        if not tracks:
+            raise PlaybackBackendError(f"Station {station_id} returned no tracks")
+        return self.replace_queue(
+            tracks,
+            start_index=0,
+            source_type="station",
+            source_id=station_id,
+        )
+
     def next(self) -> PlaybackSnapshot:
         if self._active_index is None:
             raise PlaybackBackendError("No active queue item")
@@ -177,6 +197,9 @@ class PlaybackService:
 
     def seek(self, position_ms: int) -> PlaybackSnapshot:
         self._playback_engine.seek(position_ms)
+        return self.snapshot()
+
+    def refresh(self) -> PlaybackSnapshot:
         return self.snapshot()
 
     def set_volume(self, volume: int) -> PlaybackSnapshot:
@@ -309,3 +332,47 @@ class PlaybackService:
             shuffle_enabled=self._shuffle_enabled,
             repeat_mode=self._repeat_mode,
         )
+
+    def _ensure_station_queue_capacity(self, *, min_remaining: int) -> None:
+        current_item = self.current_item()
+        if current_item is None or current_item.source_type != "station":
+            return
+        if self._music_service is None or self._active_index is None:
+            return
+
+        remaining = len(self._queue) - self._active_index - 1
+        if remaining >= min_remaining:
+            return
+
+        station_id = current_item.source_id
+        if not station_id:
+            return
+
+        fetched_tracks = self._music_service.get_station_tracks(
+            station_id,
+            limit=self._STATION_QUEUE_BATCH_SIZE,
+        )
+        if not fetched_tracks:
+            return
+
+        existing_ids = {item.track.id for item in self._queue}
+        next_source_index = len(self._queue)
+        appended = 0
+        for track in fetched_tracks:
+            if track.id in existing_ids:
+                continue
+            self._queue.append(
+                QueueItem(
+                    track=track,
+                    source_type="station",
+                    source_id=station_id,
+                    source_index=next_source_index,
+                )
+            )
+            existing_ids.add(track.id)
+            next_source_index += 1
+            appended += 1
+
+        if appended:
+            self._logger.info("Appended %s station tracks for %s", appended, station_id)
+            self._rebuild_play_order(anchor_index=self._active_index)

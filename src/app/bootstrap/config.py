@@ -30,6 +30,10 @@ class AppConfig:
     def auth_session_file(self) -> Path:
         return self.data_dir / "auth_session.json"
 
+    @property
+    def recent_searches_file(self) -> Path:
+        return self.cache_dir / "recent_searches.json"
+
     def ensure_directories(self) -> None:
         for path in (self.config_dir, self.data_dir, self.cache_dir, self.log_dir):
             path.mkdir(parents=True, exist_ok=True)

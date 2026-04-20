@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.domain import AuthError, AuthSession, NetworkError, Track, TrackUnavailableError
+from app.domain import AuthError, AuthSession, NetworkError, Station, Track, TrackUnavailableError
 from app.domain.playlist import Playlist
 from app.infrastructure.yandex.yandex_music_service import YandexMusicService
 
@@ -45,6 +45,19 @@ class PlaylistStub:
         self.kind = playlist_id
         self.title = f"Playlist {playlist_id}"
         self.tracks = [PlaylistEntryStub(track) for track in tracks]
+        self.description = f"Description {playlist_id}"
+        self.track_count = len(tracks)
+        self.owner = type("Owner", (), {"name": "listener"})()
+
+
+class GeneratedPlaylistStub:
+    def __init__(self, playlist: PlaylistStub) -> None:
+        self.data = playlist
+
+
+class FeedStub:
+    def __init__(self, generated_playlists: list[GeneratedPlaylistStub]) -> None:
+        self.generated_playlists = generated_playlists
 
 
 class SearchTracksStub:
@@ -74,9 +87,12 @@ class FakeYandexClient:
     def __init__(self) -> None:
         self.track = TrackStub(track_id="track-1", title="Remote")
         self.playlist = PlaylistStub("playlist-1", [self.track])
+        self.generated_playlist = PlaylistStub("generated-1", [self.track])
         self.search_result = SearchResultStub([self.track])
         self.likes = LikesStub([self.track])
         self.download_infos = [DownloadInfoStub("https://stream.example/track-1")]
+        self.account = type("Account", (), {"uid": 7, "login": "listener"})()
+        self.me = type("Me", (), {"account": self.account})()
 
     def tracks(self, track_ids):
         if track_ids == ["missing"]:
@@ -90,9 +106,39 @@ class FakeYandexClient:
     def users_likes_tracks(self):
         return self.likes
 
+    def users_playlists_list(self):
+        return [self.playlist]
+
     def users_playlists(self, playlist_id: str):
         del playlist_id
         return self.playlist
+
+    def feed(self):
+        return FeedStub([GeneratedPlaylistStub(self.generated_playlist)])
+
+    def rotor_stations_list(self):
+        station_id = type("Id", (), {"type": "user", "tag": "onyourwave"})()
+        station = type(
+            "StationStub",
+            (),
+            {"id": station_id, "name": "My Wave", "full_image_url": "station.jpg"},
+        )()
+        return [
+            type(
+                "StationResultStub",
+                (),
+                {
+                    "station": station,
+                    "rup_title": "My Wave",
+                    "rup_description": "Personal station",
+                },
+            )()
+        ]
+
+    def rotor_station_tracks(self, station_id: str):
+        del station_id
+        sequence_item = type("SequenceItem", (), {"track": self.track})()
+        return type("StationTracksResultStub", (), {"sequence": [sequence_item]})()
 
     def tracks_download_info(self, track_id: str, get_direct_links: bool = True):
         del track_id, get_direct_links
@@ -118,13 +164,35 @@ def test_yandex_music_service_maps_track_and_playlist_data() -> None:
     playlist_tracks = service.get_playlist_tracks("playlist-1")
     search_tracks = service.search_tracks("remote")
     liked_tracks = service.get_liked_tracks()
+    user_playlists = service.get_user_playlists()
+    generated_playlists = service.get_generated_playlists()
+    stations = service.get_stations()
+    station_tracks = service.get_station_tracks("user:onyourwave")
 
     assert track.id == "track-1"
     assert track.album_title == "Album"
-    assert playlist == Playlist(id="playlist-1", title="Playlist playlist-1", track_count=1)
+    assert playlist == Playlist(
+        id="playlist-1",
+        title="Playlist playlist-1",
+        owner_name="listener",
+        description="Description playlist-1",
+        track_count=1,
+        artwork_ref=None,
+    )
     assert [item.id for item in playlist_tracks] == ["track-1"]
     assert [item.id for item in search_tracks] == ["track-1"]
     assert [item.id for item in liked_tracks] == ["track-1"]
+    assert [item.id for item in user_playlists] == ["playlist-1"]
+    assert [item.id for item in generated_playlists] == ["generated-1"]
+    assert stations == (
+        Station(
+            id="user:onyourwave",
+            title="My Wave",
+            description="Personal station",
+            icon_ref="station.jpg",
+        ),
+    )
+    assert [item.id for item in station_tracks] == ["track-1"]
 
 
 def test_yandex_music_service_resolves_playable_stream() -> None:

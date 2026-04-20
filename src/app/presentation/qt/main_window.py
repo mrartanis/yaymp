@@ -6,6 +6,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import (
     QApplication,
+    QComboBox,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -21,8 +22,10 @@ from PySide6.QtWidgets import (
 )
 
 from app.bootstrap.container import AppContainer
+from app.domain import Playlist, Station, Track
 from app.domain.errors import DomainError
 from app.presentation.qt.auth_dialog import AuthDialog
+from app.presentation.qt.library_controller import BrowserContent, BrowserItem, LibraryController
 from app.presentation.qt.playback_controller import PlaybackController
 
 
@@ -34,14 +37,23 @@ class MainWindow(QMainWindow):
             playback_service=container.services.playback_service,
             logger=container.logger,
         )
+        self._library_controller = LibraryController(
+            search_service=container.services.search_service,
+            library_service=container.services.library_service,
+            logger=container.logger,
+        )
         self._auth_dialog: AuthDialog | None = None
         self._auth_flow_checked = False
+        self._playback_poll_timer = QTimer(self)
+        self._playback_poll_timer.setInterval(1000)
         self.setWindowTitle("YAYMP")
         self.resize(1280, 820)
         self._build_ui()
         self._wire_controller()
         self._controller.initialize()
+        self._library_controller.initialize()
         self._render_auth_state()
+        self._playback_poll_timer.start()
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
@@ -117,8 +129,17 @@ class MainWindow(QMainWindow):
         frame = self._panel_frame("Navigation")
         layout = frame.layout()
         assert layout is not None
-        for text in ("Home", "Search", "My Tracks", "Playlists"):
-            layout.addWidget(self._panel_label(text))
+        self._search_nav_button = QPushButton("Search")
+        self._liked_nav_button = QPushButton("My Tracks")
+        self._playlists_nav_button = QPushButton("Playlists")
+        self._my_wave_nav_button = QPushButton("My Wave")
+        for button in (
+            self._search_nav_button,
+            self._liked_nav_button,
+            self._playlists_nav_button,
+            self._my_wave_nav_button,
+        ):
+            layout.addWidget(button)
         layout.addStretch(1)
         return frame
 
@@ -130,9 +151,23 @@ class MainWindow(QMainWindow):
         self._track_title_label = self._panel_label("Track: Starter Signal")
         self._track_meta_label = self._panel_label("Artist and album metadata will appear here")
         self._playback_state_label = self._panel_label("Playback status: stopped")
+        self._search_input = QLineEdit()
+        self._search_input.setPlaceholderText("Search Yandex Music")
+        self._search_button = QPushButton("Search")
+        self._recent_searches_combo = QComboBox()
+        self._recent_searches_combo.setPlaceholderText("Recent searches")
+        self._recent_searches_combo.addItem("Recent searches")
+        self._browser_title_label = self._panel_label("Search")
+        self._content_list = QListWidget()
+        self._content_list.setAlternatingRowColors(True)
         self._track_id_input = QLineEdit()
         self._track_id_input.setPlaceholderText("Enter Yandex track id")
         self._play_track_button = QPushButton("Play Track ID")
+        search_row = QHBoxLayout()
+        search_row.setSpacing(8)
+        search_row.addWidget(self._search_input, 1)
+        search_row.addWidget(self._search_button)
+        search_row.addWidget(self._recent_searches_combo)
         track_id_row = QHBoxLayout()
         track_id_row.setSpacing(8)
         track_id_row.addWidget(self._track_id_input, 1)
@@ -140,8 +175,11 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._track_title_label, 0, 0)
         layout.addWidget(self._track_meta_label, 1, 0)
         layout.addWidget(self._playback_state_label, 2, 0)
-        layout.addLayout(track_id_row, 3, 0)
-        layout.setRowStretch(4, 1)
+        layout.addLayout(search_row, 3, 0)
+        layout.addWidget(self._browser_title_label, 4, 0)
+        layout.addWidget(self._content_list, 5, 0)
+        layout.addLayout(track_id_row, 6, 0)
+        layout.setRowStretch(5, 1)
         base_layout.addLayout(layout)
         return frame
 
@@ -168,6 +206,8 @@ class MainWindow(QMainWindow):
     def _wire_controller(self) -> None:
         self._controller.playback_changed.connect(self._render_snapshot)
         self._controller.playback_failed.connect(self._render_error)
+        self._library_controller.content_changed.connect(self._render_content)
+        self._library_controller.content_failed.connect(self._render_library_error)
         self._previous_button.clicked.connect(self._controller.previous)
         self._play_button.clicked.connect(self._controller.play)
         self._pause_button.clicked.connect(self._controller.pause)
@@ -175,8 +215,17 @@ class MainWindow(QMainWindow):
         self._seek_slider.sliderReleased.connect(self._apply_seek)
         self._volume_slider.valueChanged.connect(self._controller.set_volume)
         self._queue_list.itemDoubleClicked.connect(self._select_queue_item)
+        self._content_list.itemDoubleClicked.connect(self._open_content_item)
+        self._search_button.clicked.connect(self._run_search)
+        self._search_input.returnPressed.connect(self._run_search)
+        self._recent_searches_combo.activated.connect(self._apply_recent_search)
+        self._search_nav_button.clicked.connect(self._show_search)
+        self._liked_nav_button.clicked.connect(self._library_controller.load_liked_tracks)
+        self._playlists_nav_button.clicked.connect(self._library_controller.load_playlists)
+        self._my_wave_nav_button.clicked.connect(self._start_my_wave)
         self._play_track_button.clicked.connect(self._play_track_by_id)
         self._track_id_input.returnPressed.connect(self._play_track_by_id)
+        self._playback_poll_timer.timeout.connect(self._controller.refresh)
 
     def _apply_seek(self) -> None:
         self._controller.seek(self._seek_slider.value())
@@ -184,6 +233,44 @@ class MainWindow(QMainWindow):
     def _select_queue_item(self, item: QListWidgetItem) -> None:
         row = self._queue_list.row(item)
         self._controller.select_index(row)
+
+    def _open_content_item(self, item: QListWidgetItem) -> None:
+        browser_item = item.data(Qt.ItemDataRole.UserRole)
+        if not isinstance(browser_item, BrowserItem):
+            return
+
+        payload = browser_item.payload
+        if browser_item.kind == "track" and isinstance(payload, Track):
+            self._controller.play_track(payload)
+            return
+        if (
+            browser_item.kind in {"playlist", "generated_playlist"}
+            and isinstance(payload, Playlist)
+        ):
+            self._library_controller.open_playlist(payload)
+            return
+        if browser_item.kind == "station" and isinstance(payload, Station):
+            self._library_controller.open_station(payload)
+
+    def _run_search(self) -> None:
+        self._library_controller.search_tracks(self._search_input.text())
+
+    def _show_search(self) -> None:
+        self._browser_title_label.setText("Search")
+        self._content_list.clear()
+        self._search_input.setFocus()
+
+    def _start_my_wave(self) -> None:
+        station = Station(id="user:onyourwave", title="My Wave")
+        self._library_controller.open_station(station)
+        self._controller.play_station(station.id)
+
+    def _apply_recent_search(self, index: int) -> None:
+        if index <= 0:
+            return
+        query = self._recent_searches_combo.itemText(index)
+        self._search_input.setText(query)
+        self._library_controller.search_tracks(query)
 
     def _render_snapshot(self, snapshot) -> None:
         current_item = snapshot.current_item
@@ -225,6 +312,8 @@ class MainWindow(QMainWindow):
         self._render_auth_state()
 
     def _render_queue(self, snapshot) -> None:
+        scroll_bar = self._queue_list.verticalScrollBar()
+        previous_scroll = scroll_bar.value()
         self._queue_list.blockSignals(True)
         self._queue_list.clear()
         for index, item in enumerate(snapshot.queue):
@@ -236,6 +325,7 @@ class MainWindow(QMainWindow):
         if snapshot.state.active_index is not None:
             self._queue_list.setCurrentRow(snapshot.state.active_index)
         self._queue_list.blockSignals(False)
+        scroll_bar.setValue(previous_scroll)
 
     def _render_error(self, message: str) -> None:
         self._status_label.setText(f"Playback error: {message}")
@@ -247,6 +337,33 @@ class MainWindow(QMainWindow):
             return
         username = session.display_name or session.user_id
         self._auth_label.setText(f"logged as {username}")
+
+    def _render_content(self, content: BrowserContent) -> None:
+        self._browser_title_label.setText(content.title)
+        self._recent_searches_combo.blockSignals(True)
+        self._recent_searches_combo.clear()
+        self._recent_searches_combo.addItem("Recent searches")
+        for query in content.recent_searches:
+            self._recent_searches_combo.addItem(query)
+        self._recent_searches_combo.blockSignals(False)
+
+        self._content_list.blockSignals(True)
+        self._content_list.clear()
+        if not content.items:
+            empty_item = QListWidgetItem("No items")
+            empty_item.setFlags(empty_item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+            self._content_list.addItem(empty_item)
+        for browser_item in content.items:
+            text = browser_item.title
+            if browser_item.subtitle:
+                text = f"{browser_item.title}\n{browser_item.subtitle}"
+            widget_item = QListWidgetItem(text)
+            widget_item.setData(Qt.ItemDataRole.UserRole, browser_item)
+            self._content_list.addItem(widget_item)
+        self._content_list.blockSignals(False)
+
+    def _render_library_error(self, message: str) -> None:
+        self._status_label.setText(f"Library error: {message}")
 
     def _maybe_start_auth_flow(self) -> None:
         if self._container.services.auth_service.current_session() is not None:

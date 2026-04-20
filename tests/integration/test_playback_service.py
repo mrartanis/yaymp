@@ -30,6 +30,8 @@ class FakeMusicService:
         self.stream_ref = stream_ref
         self.resolved_track_ids: list[str] = []
         self.loaded_track_ids: list[str] = []
+        self.station_batches: dict[str, list[tuple[Track, ...]]] = {}
+        self.station_requests: list[str] = []
 
     def get_auth_session(self):
         return None
@@ -56,6 +58,23 @@ class FakeMusicService:
 
     def get_liked_tracks(self, *, limit: int = 100):
         del limit
+        return ()
+
+    def get_user_playlists(self):
+        return ()
+
+    def get_generated_playlists(self):
+        return ()
+
+    def get_stations(self):
+        return ()
+
+    def get_station_tracks(self, station_id: str, *, limit: int = 25):
+        del limit
+        self.station_requests.append(station_id)
+        batches = self.station_batches.get(station_id)
+        if batches:
+            return batches.pop(0)
         return ()
 
     def get_playlist(self, playlist_id: str):
@@ -260,6 +279,58 @@ def test_play_track_by_id_loads_track_from_music_service() -> None:
     assert snapshot.current_item is not None
     assert snapshot.current_item.track.id == "remote-1"
     assert music_service.loaded_track_ids == ["remote-1"]
+
+
+def test_play_station_loads_initial_station_queue_and_starts_playback() -> None:
+    music_service = FakeMusicService(stream_ref="resolved://wave")
+    music_service.station_batches["user:onyourwave"] = [
+        (
+            Track(id="w1", title="Wave 1", artists=("Artist",), duration_ms=1_000),
+            Track(id="w2", title="Wave 2", artists=("Artist",), duration_ms=1_000),
+        )
+    ]
+    service = PlaybackService(
+        playback_engine=FakePlaybackEngine(),
+        logger=TestLogger(),
+        music_service=music_service,
+    )
+
+    snapshot = service.play_station("user:onyourwave")
+
+    assert snapshot.state.status is PlaybackStatus.PLAYING
+    assert [item.track.id for item in snapshot.queue] == ["w1", "w2"]
+    assert snapshot.current_item is not None
+    assert snapshot.current_item.track.id == "w1"
+    assert music_service.station_requests[0] == "user:onyourwave"
+
+
+def test_station_queue_refills_when_near_end() -> None:
+    music_service = FakeMusicService(stream_ref="resolved://wave")
+    music_service.station_batches["user:onyourwave"] = [
+        (
+            Track(id="w1", title="Wave 1", artists=("Artist",), duration_ms=1_000),
+            Track(id="w2", title="Wave 2", artists=("Artist",), duration_ms=1_000),
+            Track(id="w3", title="Wave 3", artists=("Artist",), duration_ms=1_000),
+        ),
+        (
+            Track(id="w3", title="Wave 3", artists=("Artist",), duration_ms=1_000),
+            Track(id="w4", title="Wave 4", artists=("Artist",), duration_ms=1_000),
+            Track(id="w5", title="Wave 5", artists=("Artist",), duration_ms=1_000),
+        ),
+    ]
+    service = PlaybackService(
+        playback_engine=FakePlaybackEngine(),
+        logger=TestLogger(),
+        music_service=music_service,
+    )
+    service.play_station("user:onyourwave")
+
+    snapshot = service.next()
+
+    assert snapshot.current_item is not None
+    assert snapshot.current_item.track.id == "w2"
+    assert [item.track.id for item in snapshot.queue] == ["w1", "w2", "w3", "w4", "w5"]
+    assert music_service.station_requests == ["user:onyourwave", "user:onyourwave"]
 
 
 def test_next_rolls_back_active_index_when_backend_load_fails() -> None:

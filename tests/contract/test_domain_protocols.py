@@ -17,6 +17,7 @@ from app.domain import (
     PlaybackStatus,
     Playlist,
     SettingsRepo,
+    Station,
     Track,
 )
 
@@ -46,6 +47,18 @@ class FakeMusicService:
 
     def get_liked_tracks(self, *, limit: int = 100) -> Sequence[Track]:
         return [Track(id=f"liked-{limit}", title="Liked", artists=("Artist",))]
+
+    def get_user_playlists(self) -> Sequence[Playlist]:
+        return [Playlist(id="playlist-1", title="Playlist")]
+
+    def get_generated_playlists(self) -> Sequence[Playlist]:
+        return [Playlist(id="generated-1", title="Playlist of the day")]
+
+    def get_stations(self) -> Sequence[Station]:
+        return [Station(id="user:onyourwave", title="My Wave")]
+
+    def get_station_tracks(self, station_id: str, *, limit: int = 25) -> Sequence[Track]:
+        return [Track(id=f"{station_id}-{limit}", title="Wave Track", artists=("Artist",))]
 
     def get_playlist(self, playlist_id: str) -> Playlist:
         return Playlist(id=playlist_id, title="Playlist")

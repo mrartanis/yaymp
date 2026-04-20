@@ -20,6 +20,7 @@ from app.domain.protocols import (
     PlaybackEngine,
     SettingsRepo,
 )
+from app.domain.station import Station
 from app.domain.track import Track
 
 __all__ = [
@@ -39,6 +40,7 @@ __all__ = [
     "QueueItem",
     "RepeatMode",
     "SettingsRepo",
+    "Station",
     "StorageError",
     "StreamResolveError",
     "Track",

@@ -3,7 +3,7 @@ from __future__ import annotations
 from PySide6.QtCore import QObject, Signal
 
 from app.application.playback_service import PlaybackService, PlaybackSnapshot
-from app.domain import Logger
+from app.domain import Logger, Track
 from app.domain.errors import DomainError
 
 
@@ -42,6 +42,15 @@ class PlaybackController(QObject):
 
     def play_track_by_id(self, track_id: str) -> None:
         self._execute(lambda: self._playback_service.play_track_by_id(track_id))
+
+    def play_track(self, track: Track) -> None:
+        self._execute(lambda: self._playback_service.play_track(track))
+
+    def play_station(self, station_id: str) -> None:
+        self._execute(lambda: self._playback_service.play_station(station_id))
+
+    def refresh(self) -> None:
+        self._execute(self._playback_service.refresh)
 
     def _execute(self, operation) -> None:
         try:

@@ -55,7 +55,7 @@ Definition of Done:
 
 ## Milestone 2: Yandex Auth and Track Resolve
 
-Status: next
+Status: done
 
 Goal:
 
@@ -78,6 +78,8 @@ Definition of Done:
 - auth and unavailable-track errors are handled predictably
 
 ## Milestone 3: Search and Library Basics
+
+Status: next
 
 Goal:
 

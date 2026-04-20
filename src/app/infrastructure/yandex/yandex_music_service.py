@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
 
-from app.domain import AuthSession, MusicService, Playlist, Track
+from app.domain import AuthSession, MusicService, Playlist, Station, Track
 from app.domain.errors import AuthError, NetworkError, StreamResolveError, TrackUnavailableError
 
 
@@ -82,17 +82,62 @@ class YandexMusicService(MusicService):
             raise NetworkError("Failed to load liked tracks") from exc
         return tuple(self._map_track(track) for track in raw_tracks[:limit])
 
+    def get_user_playlists(self) -> Sequence[Playlist]:
+        client = self._require_client()
+        try:
+            raw_playlists = client.users_playlists_list()
+        except Exception as exc:
+            raise NetworkError("Failed to load user playlists") from exc
+        return tuple(self._map_playlist(playlist) for playlist in raw_playlists)
+
+    def get_generated_playlists(self) -> Sequence[Playlist]:
+        client = self._require_client()
+        try:
+            feed = client.feed()
+        except Exception as exc:
+            raise NetworkError("Failed to load generated playlists") from exc
+
+        generated = getattr(feed, "generated_playlists", None) or ()
+        playlists: list[Playlist] = []
+        for item in generated:
+            data = getattr(item, "data", None)
+            if data is not None:
+                playlists.append(self._map_playlist(data))
+        return tuple(playlists)
+
+    def get_stations(self) -> Sequence[Station]:
+        client = self._require_client()
+        try:
+            raw_stations = client.rotor_stations_list()
+        except Exception as exc:
+            raise NetworkError("Failed to load stations") from exc
+        return tuple(
+            self._map_station(item) for item in raw_stations if getattr(item, "station", None)
+        )
+
+    def get_station_tracks(self, station_id: str, *, limit: int = 25) -> Sequence[Track]:
+        client = self._require_client()
+        try:
+            result = client.rotor_station_tracks(station_id)
+        except Exception as exc:
+            raise NetworkError(f"Failed to load station tracks for {station_id}") from exc
+
+        tracks: list[Track] = []
+        for item in getattr(result, "sequence", None) or ():
+            raw_track = getattr(item, "track", None)
+            if raw_track is not None:
+                tracks.append(self._map_track(raw_track))
+            if len(tracks) >= limit:
+                break
+        return tuple(tracks)
+
     def get_playlist(self, playlist_id: str) -> Playlist:
         client = self._require_client()
         try:
             raw_playlist = client.users_playlists(playlist_id)
         except Exception as exc:
             raise NetworkError(f"Failed to load playlist {playlist_id}") from exc
-        return Playlist(
-            id=str(getattr(raw_playlist, "kind", playlist_id)),
-            title=getattr(raw_playlist, "title", playlist_id),
-            track_count=len(getattr(raw_playlist, "tracks", ()) or ()),
-        )
+        return self._map_playlist(raw_playlist)
 
     def get_playlist_tracks(self, playlist_id: str) -> Sequence[Track]:
         client = self._require_client()
@@ -173,3 +218,37 @@ class YandexMusicService(MusicService):
             artwork_ref=getattr(raw_track, "cover_uri", None),
             available=available,
         )
+
+    def _map_playlist(self, raw_playlist: Any) -> Playlist:
+        owner = getattr(raw_playlist, "owner", None)
+        owner_name = getattr(owner, "name", None) or getattr(owner, "login", None)
+        playlist_id = str(
+            getattr(raw_playlist, "kind", getattr(raw_playlist, "playlist_uuid", "unknown"))
+        )
+        artwork_ref = getattr(raw_playlist, "cover_uri", None)
+        if artwork_ref is None and hasattr(raw_playlist, "get_og_image_url"):
+            artwork_ref = raw_playlist.get_og_image_url()
+        return Playlist(
+            id=playlist_id,
+            title=getattr(raw_playlist, "title", playlist_id),
+            owner_name=owner_name,
+            description=getattr(raw_playlist, "description", None),
+            track_count=getattr(raw_playlist, "track_count", None),
+            artwork_ref=artwork_ref,
+        )
+
+    def _map_station(self, raw_result: Any) -> Station:
+        station = raw_result.station
+        station_id = self._station_key(station)
+        return Station(
+            id=station_id,
+            title=getattr(raw_result, "rup_title", None) or getattr(station, "name", station_id),
+            description=getattr(raw_result, "rup_description", None),
+            icon_ref=getattr(station, "full_image_url", None),
+        )
+
+    def _station_key(self, station: Any) -> str:
+        raw_id = getattr(station, "id", None)
+        if raw_id is None:
+            return str(getattr(station, "name", "station"))
+        return f"{raw_id.type}:{raw_id.tag}"

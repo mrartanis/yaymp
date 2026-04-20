@@ -91,7 +91,7 @@ Result:
 
 ## Step 4: Add Playback-Focused Tests
 
-Status: next
+Status: done
 
 Before expanding product scope, lock down playback behavior.
 
@@ -113,6 +113,8 @@ Rules:
 
 ## Step 5: Add Auth and Yandex Stream Resolution
 
+Status: done
+
 Integrate Yandex Music in a controlled way.
 
 Implement:
@@ -129,6 +131,8 @@ Result:
 - auth and unavailable-track errors are handled predictably
 
 ## Step 6: Add Search and Library Basics
+
+Status: next
 
 Ship the first useful user workflow.
 

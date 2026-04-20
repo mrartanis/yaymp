@@ -90,4 +90,26 @@ class MpvPlaybackEngine(PlaybackEngine):
         )
 
     def get_state(self) -> PlaybackState:
+        try:
+            paused = bool(getattr(self._player, "pause", False))
+            idle_active = bool(getattr(self._player, "idle_active", False))
+            time_pos = getattr(self._player, "time_pos", None)
+            duration = getattr(self._player, "duration", None)
+            volume = int(getattr(self._player, "volume", self._state.volume))
+        except Exception as exc:  # noqa: BLE001
+            raise PlaybackBackendError("Failed to query playback state") from exc
+
+        if idle_active:
+            status = PlaybackStatus.STOPPED
+        elif paused:
+            status = PlaybackStatus.PAUSED
+        else:
+            status = PlaybackStatus.PLAYING
+
+        self._state = PlaybackState(
+            status=status,
+            position_ms=int((time_pos or 0) * 1000),
+            duration_ms=int(duration * 1000) if duration is not None else self._state.duration_ms,
+            volume=volume,
+        )
         return self._state
