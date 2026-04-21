@@ -57,6 +57,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("YAYMP")
         self.resize(1280, 820)
         self._build_ui()
+        self._apply_saved_settings_to_ui()
         self._wire_controller()
         self._controller.initialize()
         self._library_controller.initialize()
@@ -260,7 +261,7 @@ class MainWindow(QMainWindow):
         self._pause_button.clicked.connect(self._controller.pause)
         self._next_button.clicked.connect(self._controller.next)
         self._seek_slider.sliderReleased.connect(self._apply_seek)
-        self._volume_slider.valueChanged.connect(self._controller.set_volume)
+        self._volume_slider.valueChanged.connect(self._apply_volume)
         self._queue_list.itemDoubleClicked.connect(self._select_queue_item)
         self._content_list.itemDoubleClicked.connect(self._open_content_item)
         self._search_button.clicked.connect(self._run_search)
@@ -290,7 +291,18 @@ class MainWindow(QMainWindow):
             return
         quality = AudioQuality(raw_quality)
         self._container.services.music_service.set_audio_quality(quality)
+        self._container.services.settings_service.save_audio_quality(quality)
         self._status_label.setText(f"Audio quality: {quality.name}")
+
+    def _apply_volume(self, volume: int) -> None:
+        self._controller.set_volume(volume)
+        self._container.services.settings_service.save_volume(volume)
+
+    def _apply_saved_settings_to_ui(self) -> None:
+        quality = self._container.services.settings_service.load_audio_quality()
+        quality_index = self._quality_combo.findData(quality.value)
+        if quality_index >= 0:
+            self._quality_combo.setCurrentIndex(quality_index)
 
     def _select_queue_item(self, item: QListWidgetItem) -> None:
         row = self._queue_list.row(item)

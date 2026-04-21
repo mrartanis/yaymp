@@ -14,4 +14,5 @@ def test_main_window_can_be_constructed(qtbot, qapp, tmp_path, monkeypatch) -> N
 
     assert context.main_window.windowTitle() == "YAYMP"
     assert context.container.config.settings_file.name == "settings.json"
+    assert context.container.services.settings_service.load_volume() == 100
     assert context.main_window.isVisible()

@@ -9,6 +9,7 @@ from app.application.demo_library import build_demo_tracks
 from app.application.library_service import LibraryService
 from app.application.playback_service import PlaybackService
 from app.application.search_service import SearchService
+from app.application.settings_service import SettingsService
 from app.bootstrap.config import AppConfig
 from app.domain import AuthSession, LibraryCacheRepo, MusicService, SettingsRepo, Track
 from app.domain.errors import AuthError, PlaybackBackendError, StorageError
@@ -29,6 +30,7 @@ from app.infrastructure.yandex.yandex_music_service import YandexMusicService
 class AppServices:
     auth_service: AuthService
     settings_repo: SettingsRepo
+    settings_service: SettingsService
     artwork_cache: FileArtworkCache
     library_service: LibraryService
     music_service: MusicService
@@ -48,6 +50,7 @@ class AppContainer:
 def build_container(config: AppConfig, logger: logging.Logger) -> AppContainer:
     logger.debug("Building application container")
     settings_repo = _build_settings_repo(config, logger)
+    settings_service = SettingsService(settings_repo=settings_repo, logger=logger)
     auth_service, restored_session = _build_auth_service(config, logger)
     bootstrap_token = os.getenv("YAYMP_YANDEX_TOKEN")
     music_service = YandexMusicService(
@@ -68,6 +71,7 @@ def build_container(config: AppConfig, logger: logging.Logger) -> AppContainer:
             logger.warning("Failed to restore Yandex session: %s", exc)
             auth_service.clear_session()
             music_service = YandexMusicService(logger=logger)
+    music_service.set_audio_quality(settings_service.load_audio_quality())
 
     library_cache_repo = _build_library_cache_repo(config, logger)
     artwork_cache = FileArtworkCache(cache_dir=config.artwork_cache_dir)
@@ -95,12 +99,14 @@ def build_container(config: AppConfig, logger: logging.Logger) -> AppContainer:
         source_type="demo",
         source_id="bootstrap-demo",
     )
+    playback_service.set_volume(settings_service.load_volume())
     return AppContainer(
         config=config,
         logger=logger,
         services=AppServices(
             auth_service=auth_service,
             settings_repo=settings_repo,
+            settings_service=settings_service,
             artwork_cache=artwork_cache,
             library_service=library_service,
             music_service=music_service,
