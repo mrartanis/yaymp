@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.application.error_presenter import user_facing_error_message
 from app.bootstrap.container import AppContainer
 from app.domain import Album, Artist, AudioQuality, Playlist, Station, Track
 from app.domain.errors import DomainError
@@ -675,7 +676,8 @@ class MainWindow(QMainWindow):
                 expires_in=expires_in,
             )
         except DomainError as exc:
-            self._status_label.setText(f"Auth error: {exc}")
+            self._container.logger.warning("Auth flow failed: %s", exc)
+            self._status_label.setText(f"Auth error: {user_facing_error_message(exc)}")
             return
 
         username = session.display_name or session.user_id

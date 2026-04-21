@@ -58,9 +58,9 @@ class PlaybackService:
         source_id: str | None = None,
     ) -> PlaybackSnapshot:
         if not tracks:
-            raise ValueError("Playback queue cannot be empty")
+            raise PlaybackBackendError("Playback queue cannot be empty")
         if start_index < 0 or start_index >= len(tracks):
-            raise IndexError("Playback start index is out of range")
+            raise PlaybackBackendError("Playback start index is out of range")
 
         previous_queue = self._queue
         previous_index = self._active_index
@@ -244,7 +244,7 @@ class PlaybackService:
 
     def select_index(self, index: int) -> PlaybackSnapshot:
         if index < 0 or index >= len(self._queue):
-            raise IndexError("Queue index is out of range")
+            raise PlaybackBackendError("Queue index is out of range")
         self._activate_index(index)
         return self.play()
 

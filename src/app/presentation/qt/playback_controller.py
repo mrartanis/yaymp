@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QObject, Signal
 
+from app.application.error_presenter import user_facing_error_message
 from app.application.playback_service import PlaybackService, PlaybackSnapshot
 from app.domain import Logger, Track
 from app.domain.errors import DomainError
@@ -89,7 +90,7 @@ class PlaybackController(QObject):
             self._emit_snapshot(operation())
         except DomainError as exc:
             self._logger.warning("Playback operation failed: %s", exc)
-            self.playback_failed.emit(str(exc))
+            self.playback_failed.emit(user_facing_error_message(exc))
 
     def _emit_snapshot(self, snapshot: PlaybackSnapshot) -> None:
         self.playback_changed.emit(snapshot)

@@ -454,6 +454,19 @@ def test_replace_queue_surfaces_backend_play_errors_without_losing_loaded_track(
     assert snapshot.current_item is None
 
 
+def test_playback_service_uses_domain_errors_for_invalid_queue_requests() -> None:
+    service = PlaybackService(
+        playback_engine=FakePlaybackEngine(),
+        logger=TestLogger(),
+    )
+
+    with pytest.raises(PlaybackBackendError):
+        service.replace_queue((), start_index=0)
+
+    with pytest.raises(PlaybackBackendError):
+        service.replace_queue(build_tracks(), start_index=99)
+
+
 def test_seek_and_volume_persist_across_track_transitions() -> None:
     service = PlaybackService(
         playback_engine=FakePlaybackEngine(),

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from PySide6.QtCore import QObject, Signal
 
+from app.application.error_presenter import user_facing_error_message
 from app.application.library_service import LibraryService
 from app.application.search_service import SearchService
 from app.domain import Album, Artist, CatalogSearchResults, Logger, Playlist, Station, Track
@@ -166,14 +167,14 @@ class LibraryController(QObject):
             self._emit_content(operation())
         except DomainError as exc:
             self._logger.warning("Library operation failed: %s", exc)
-            self.content_failed.emit(str(exc))
+            self.content_failed.emit(user_facing_error_message(exc))
 
     def _execute_mutation(self, operation) -> None:
         try:
             operation()
         except DomainError as exc:
             self._logger.warning("Library mutation failed: %s", exc)
-            self.content_failed.emit(str(exc))
+            self.content_failed.emit(user_facing_error_message(exc))
 
     def _emit_content(self, content: BrowserContent) -> None:
         self.content_changed.emit(content)
