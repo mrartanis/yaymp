@@ -56,7 +56,11 @@ def build_startup_context(
     logger = initialize_logging(config)
     logger.info("Starting application bootstrap")
     logger.info("Resolved config directory: %s", config.config_dir)
+    logger.info("Resolved data directory: %s", config.data_dir)
     logger.info("Resolved cache directory: %s", config.cache_dir)
+    logger.info("Resolved log file: %s", config.log_file)
+    logger.info("Resolved auth session file: %s", config.auth_session_file)
+    logger.info("Resolved settings file: %s", config.settings_file)
 
     container = build_container(config, logger)
     qt_app = existing_qt_app or create_qt_application(argv or sys.argv, config)

@@ -38,6 +38,14 @@ class AppConfig:
     def library_cache_file(self) -> Path:
         return self.cache_dir / "library_cache.json"
 
+    @property
+    def library_cache_db_file(self) -> Path:
+        return self.cache_dir / "library_cache.sqlite3"
+
+    @property
+    def artwork_cache_dir(self) -> Path:
+        return self.cache_dir / "artwork"
+
     def ensure_directories(self) -> None:
         for path in (self.config_dir, self.data_dir, self.cache_dir, self.log_dir):
             path.mkdir(parents=True, exist_ok=True)

@@ -10,9 +10,15 @@ from app.application.library_service import LibraryService
 from app.application.playback_service import PlaybackService
 from app.application.search_service import SearchService
 from app.bootstrap.config import AppConfig
-from app.domain import MusicService, Track
-from app.domain.errors import AuthError, PlaybackBackendError
-from app.infrastructure.persistence import FileAuthRepo, FileLibraryCacheRepo
+from app.domain import LibraryCacheRepo, MusicService, SettingsRepo, Track
+from app.domain.errors import AuthError, PlaybackBackendError, StorageError
+from app.infrastructure.persistence import (
+    FileArtworkCache,
+    FileAuthRepo,
+    FileLibraryCacheRepo,
+    FileSettingsRepo,
+    SQLiteLibraryCacheRepo,
+)
 from app.infrastructure.playback.fake_playback_engine import FakePlaybackEngine
 from app.infrastructure.playback.mpv_playback_engine import MpvPlaybackEngine
 from app.infrastructure.yandex.yandex_music_service import YandexMusicService
@@ -21,6 +27,8 @@ from app.infrastructure.yandex.yandex_music_service import YandexMusicService
 @dataclass(slots=True)
 class AppServices:
     auth_service: AuthService
+    settings_repo: SettingsRepo
+    artwork_cache: FileArtworkCache
     library_service: LibraryService
     music_service: MusicService
     playback_engine: FakePlaybackEngine | MpvPlaybackEngine
@@ -38,6 +46,8 @@ class AppContainer:
 
 def build_container(config: AppConfig, logger: logging.Logger) -> AppContainer:
     logger.debug("Building application container")
+    settings_repo = FileSettingsRepo(file_path=config.settings_file)
+    _log_settings_state(settings_repo, logger)
     auth_service = AuthService(
         auth_repo=FileAuthRepo(file_path=config.auth_session_file),
         logger=logger,
@@ -63,7 +73,8 @@ def build_container(config: AppConfig, logger: logging.Logger) -> AppContainer:
             auth_service.clear_session()
             music_service = YandexMusicService(logger=logger)
 
-    library_cache_repo = FileLibraryCacheRepo(file_path=config.recent_searches_file)
+    library_cache_repo = _build_library_cache_repo(config, logger)
+    artwork_cache = FileArtworkCache(cache_dir=config.artwork_cache_dir)
     search_service = SearchService(
         music_service=music_service,
         library_cache_repo=library_cache_repo,
@@ -93,6 +104,8 @@ def build_container(config: AppConfig, logger: logging.Logger) -> AppContainer:
         logger=logger,
         services=AppServices(
             auth_service=auth_service,
+            settings_repo=settings_repo,
+            artwork_cache=artwork_cache,
             library_service=library_service,
             music_service=music_service,
             playback_engine=playback_engine,
@@ -101,6 +114,25 @@ def build_container(config: AppConfig, logger: logging.Logger) -> AppContainer:
             demo_tracks=demo_tracks,
         ),
     )
+
+
+def _log_settings_state(settings_repo: SettingsRepo, logger: logging.Logger) -> None:
+    try:
+        settings = settings_repo.load_settings()
+    except StorageError as exc:
+        logger.warning("Settings are not readable and defaults will be used: %s", exc)
+        return
+    logger.info("Loaded %s settings keys", len(settings))
+
+
+def _build_library_cache_repo(config: AppConfig, logger: logging.Logger) -> LibraryCacheRepo:
+    try:
+        repo = SQLiteLibraryCacheRepo(db_path=config.library_cache_db_file)
+    except StorageError as exc:
+        logger.warning("Falling back to JSON library cache: %s", exc)
+        return FileLibraryCacheRepo(file_path=config.library_cache_file)
+    logger.info("Using SQLite library cache: %s", config.library_cache_db_file)
+    return repo
 
 
 def _build_playback_engine(logger: logging.Logger) -> FakePlaybackEngine | MpvPlaybackEngine:

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from hashlib import sha256
 from os import environ
 from pathlib import Path
 
@@ -594,12 +593,12 @@ class MainWindow(QMainWindow):
             self._clear_artwork()
             return
 
-        artwork_url = self._normalize_artwork_url(track.artwork_ref)
+        artwork_url = self._container.services.artwork_cache.normalize_url(track.artwork_ref)
         if artwork_url is None:
             self._clear_artwork()
             return
 
-        cache_path = self._artwork_cache_path(artwork_url)
+        cache_path = self._container.services.artwork_cache.cache_path_for_url(artwork_url)
         if cache_path.exists():
             self._set_artwork_pixmap(cache_path)
             return
@@ -621,8 +620,11 @@ class MainWindow(QMainWindow):
         reply.deleteLater()
         if not data:
             return
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        cache_path.write_bytes(data)
+        try:
+            self._container.services.artwork_cache.save_bytes(cache_path, data)
+        except DomainError as exc:
+            self._container.logger.warning("Artwork cache write failed: %s", exc)
+            return
         if track_id == self._pending_artwork_track_id:
             self._set_artwork_pixmap(cache_path)
 
@@ -643,20 +645,6 @@ class MainWindow(QMainWindow):
         self._pending_artwork_track_id = None
         self._artwork_label.clear()
         self._artwork_label.setText("No cover")
-
-    def _normalize_artwork_url(self, artwork_ref: str) -> str | None:
-        value = artwork_ref.strip()
-        if not value:
-            return None
-        if value.startswith("http://") or value.startswith("https://"):
-            return value.replace("%%", "200x200")
-        if value.startswith("//"):
-            return f"https:{value}".replace("%%", "200x200")
-        return f"https://{value}".replace("%%", "200x200")
-
-    def _artwork_cache_path(self, artwork_url: str) -> Path:
-        digest = sha256(artwork_url.encode("utf-8")).hexdigest()
-        return self._container.config.cache_dir / "artwork" / f"{digest}.img"
 
     def _format_year(self, year: int | None) -> str:
         return f" ({year})" if year else ""
