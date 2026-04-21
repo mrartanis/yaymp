@@ -161,7 +161,7 @@ class YandexMusicService(MusicService):
         for item in generated:
             data = getattr(item, "data", None)
             if data is not None:
-                playlists.append(self._map_playlist(data))
+                playlists.append(self._map_playlist(data, is_generated=True))
         return tuple(playlists)
 
     def get_stations(self) -> Sequence[Station]:
@@ -358,7 +358,7 @@ class YandexMusicService(MusicService):
             is_liked=is_liked,
         )
 
-    def _map_playlist(self, raw_playlist: Any) -> Playlist:
+    def _map_playlist(self, raw_playlist: Any, *, is_generated: bool = False) -> Playlist:
         owner = getattr(raw_playlist, "owner", None)
         owner_id = (
             getattr(raw_playlist, "uid", None)
@@ -380,6 +380,7 @@ class YandexMusicService(MusicService):
             description=getattr(raw_playlist, "description", None),
             track_count=getattr(raw_playlist, "track_count", None),
             artwork_ref=artwork_ref,
+            is_generated=is_generated,
         )
 
     def _map_album(self, raw_album: Any) -> Album:

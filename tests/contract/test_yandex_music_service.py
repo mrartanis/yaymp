@@ -339,6 +339,7 @@ def test_yandex_music_service_maps_track_and_playlist_data() -> None:
     assert liked_tracks[0].is_liked is True
     assert [item.id for item in user_playlists] == ["playlist-1"]
     assert [item.id for item in generated_playlists] == ["generated-1"]
+    assert generated_playlists[0].is_generated is True
     assert stations == (
         Station(
             id="user:onyourwave",

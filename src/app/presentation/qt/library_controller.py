@@ -29,6 +29,7 @@ class BrowserContent:
     recent_searches: tuple[str, ...] = ()
     source_type: str | None = None
     source_id: str | None = None
+    source_owner_id: str | None = None
     source_tracks: tuple[Track, ...] = ()
 
 
@@ -91,9 +92,15 @@ class LibraryController(QObject):
         self._execute(
             lambda: BrowserContent(
                 title="Playlists",
-                items=self._playlist_items(
-                    self._library_service.load_user_playlists(),
-                    kind="playlist",
+                items=(
+                    *self._playlist_items(
+                        self._library_service.load_generated_playlists(),
+                        kind="generated_playlist",
+                    ),
+                    *self._playlist_items(
+                        self._library_service.load_user_playlists(),
+                        kind="playlist",
+                    ),
                 ),
                 recent_searches=self.recent_searches(),
             )
@@ -106,8 +113,9 @@ class LibraryController(QObject):
         self._execute(
             lambda: self._source_content(
                 title=playlist.title,
-                source_type="playlist",
+                source_type="generated_playlist" if playlist.is_generated else "playlist",
                 source_id=playlist.id,
+                source_owner_id=playlist.owner_id,
                 tracks=self._library_service.load_playlist_tracks(
                     playlist.id,
                     owner_id=playlist.owner_id,
@@ -193,6 +201,7 @@ class LibraryController(QObject):
         source_type: str,
         source_id: str,
         tracks: tuple[Track, ...],
+        source_owner_id: str | None = None,
     ) -> BrowserContent:
         return BrowserContent(
             title=title,
@@ -205,6 +214,7 @@ class LibraryController(QObject):
             recent_searches=self.recent_searches(),
             source_type=source_type,
             source_id=source_id,
+            source_owner_id=source_owner_id,
             source_tracks=tracks,
         )
 

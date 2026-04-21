@@ -329,6 +329,8 @@ class MainWindow(QMainWindow):
             and isinstance(payload, Playlist)
         ):
             self._library_controller.open_playlist(payload)
+            if browser_item.kind == "generated_playlist":
+                self._controller.play_generated_playlist(payload.id, owner_id=payload.owner_id)
             return
         if browser_item.kind == "station" and isinstance(payload, Station):
             self._library_controller.open_station(payload)
@@ -484,7 +486,7 @@ class MainWindow(QMainWindow):
         self._content_list.blockSignals(False)
         can_play_source = bool(
             content.source_tracks
-            and content.source_type in {"album", "artist", "playlist"}
+            and content.source_type in {"album", "artist", "generated_playlist", "playlist"}
             and content.source_id
         )
         self._play_all_button.setEnabled(can_play_source)
@@ -535,6 +537,12 @@ class MainWindow(QMainWindow):
             or not content.source_type
             or not content.source_id
         ):
+            return
+        if content.source_type == "generated_playlist":
+            self._controller.play_generated_playlist(
+                content.source_id,
+                owner_id=content.source_owner_id,
+            )
             return
         self._controller.play_tracks(
             content.source_tracks,

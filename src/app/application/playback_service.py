@@ -48,6 +48,7 @@ class PlaybackService:
         self._play_order: list[int] = []
         self._play_order_position: int | None = None
         self._last_observed_status = PlaybackStatus.STOPPED
+        self._generated_playlist_owner_ids: dict[str, str | None] = {}
 
     def replace_queue(
         self,
@@ -181,6 +182,25 @@ class PlaybackService:
             start_index=0,
             source_type="station",
             source_id=station_id,
+        )
+
+    def play_generated_playlist(
+        self,
+        playlist_id: str,
+        *,
+        owner_id: str | None = None,
+    ) -> PlaybackSnapshot:
+        if self._music_service is None:
+            raise PlaybackBackendError("Music service is not configured")
+        tracks = self._music_service.get_playlist_tracks(playlist_id, owner_id=owner_id)
+        if not tracks:
+            raise PlaybackBackendError(f"Generated playlist {playlist_id} returned no tracks")
+        self._generated_playlist_owner_ids[playlist_id] = owner_id
+        return self.replace_queue(
+            tracks,
+            start_index=0,
+            source_type="generated_playlist",
+            source_id=playlist_id,
         )
 
     def next(self) -> PlaybackSnapshot:
@@ -381,6 +401,7 @@ class PlaybackService:
     def _ensure_station_queue_capacity(self, *, min_remaining: int) -> None:
         current_item = self.current_item()
         if current_item is None or current_item.source_type != "station":
+            self._ensure_generated_playlist_queue_capacity(min_remaining=min_remaining)
             return
         if self._music_service is None or self._active_index is None:
             return
@@ -420,4 +441,52 @@ class PlaybackService:
 
         if appended:
             self._logger.info("Appended %s station tracks for %s", appended, station_id)
+            self._rebuild_play_order(anchor_index=self._active_index)
+
+    def _ensure_generated_playlist_queue_capacity(self, *, min_remaining: int) -> None:
+        current_item = self.current_item()
+        if current_item is None or current_item.source_type != "generated_playlist":
+            return
+        if self._music_service is None or self._active_index is None:
+            return
+
+        remaining = len(self._queue) - self._active_index - 1
+        if remaining >= min_remaining:
+            return
+
+        playlist_id = current_item.source_id
+        if not playlist_id:
+            return
+
+        fetched_tracks = self._music_service.get_playlist_tracks(
+            playlist_id,
+            owner_id=self._generated_playlist_owner_ids.get(playlist_id),
+        )
+        if not fetched_tracks:
+            return
+
+        existing_ids = {item.track.id for item in self._queue}
+        next_source_index = len(self._queue)
+        appended = 0
+        for track in fetched_tracks:
+            if track.id in existing_ids:
+                continue
+            self._queue.append(
+                QueueItem(
+                    track=track,
+                    source_type="generated_playlist",
+                    source_id=playlist_id,
+                    source_index=next_source_index,
+                )
+            )
+            existing_ids.add(track.id)
+            next_source_index += 1
+            appended += 1
+
+        if appended:
+            self._logger.info(
+                "Appended %s generated playlist tracks for %s",
+                appended,
+                playlist_id,
+            )
             self._rebuild_play_order(anchor_index=self._active_index)

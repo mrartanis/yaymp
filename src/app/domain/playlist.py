@@ -12,3 +12,4 @@ class Playlist:
     description: str | None = None
     track_count: int | None = None
     artwork_ref: str | None = None
+    is_generated: bool = False
