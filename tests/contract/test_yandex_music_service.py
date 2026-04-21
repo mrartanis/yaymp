@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from yandex_music.exceptions import NotFoundError, UnauthorizedError
 
 from app.domain import (
     Album,
@@ -444,3 +445,33 @@ def test_yandex_music_service_maps_network_failures() -> None:
 
     with pytest.raises(NetworkError):
         service.get_track("track-1")
+
+
+def test_yandex_music_service_maps_unauthorized_failures_to_auth_error() -> None:
+    class UnauthorizedClient(FakeYandexClient):
+        def tracks(self, track_ids):
+            del track_ids
+            raise UnauthorizedError("expired token")
+
+    service = YandexMusicService(
+        session=AuthSession(user_id="user-1", token="token"),
+        client=UnauthorizedClient(),
+    )
+
+    with pytest.raises(AuthError):
+        service.get_track("track-1")
+
+
+def test_yandex_music_service_maps_not_found_tracks_to_unavailable() -> None:
+    class NotFoundClient(FakeYandexClient):
+        def tracks(self, track_ids):
+            del track_ids
+            raise NotFoundError("missing")
+
+    service = YandexMusicService(
+        session=AuthSession(user_id="user-1", token="token"),
+        client=NotFoundClient(),
+    )
+
+    with pytest.raises(TrackUnavailableError):
+        service.get_track("missing")

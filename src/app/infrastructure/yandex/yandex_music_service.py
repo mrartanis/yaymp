@@ -17,6 +17,23 @@ from app.domain import (
 )
 from app.domain.errors import AuthError, NetworkError, StreamResolveError, TrackUnavailableError
 
+try:
+    from yandex_music.exceptions import (
+        DeviceAuthError as YandexDeviceAuthError,
+    )
+    from yandex_music.exceptions import (
+        NotFoundError as YandexNotFoundError,
+    )
+    from yandex_music.exceptions import (
+        UnauthorizedError as YandexUnauthorizedError,
+    )
+except ImportError:  # pragma: no cover - package availability is checked at runtime too.
+    _YANDEX_AUTH_EXCEPTIONS: tuple[type[BaseException], ...] = ()
+    _YANDEX_NOT_FOUND_EXCEPTIONS: tuple[type[BaseException], ...] = ()
+else:
+    _YANDEX_AUTH_EXCEPTIONS = (YandexUnauthorizedError, YandexDeviceAuthError)
+    _YANDEX_NOT_FOUND_EXCEPTIONS = (YandexNotFoundError,)
+
 
 class YandexMusicService(MusicService):
     def __init__(
@@ -71,7 +88,11 @@ class YandexMusicService(MusicService):
             raw_tracks = client.tracks([track_id])
             raw_track = raw_tracks[0] if raw_tracks else None
         except Exception as exc:
-            raise NetworkError(f"Failed to load track {track_id}") from exc
+            raise self._map_client_error(
+                exc,
+                f"Failed to load track {track_id}",
+                not_found_error=TrackUnavailableError(f"Track {track_id} is unavailable"),
+            ) from exc
         if raw_track is None:
             raise TrackUnavailableError(f"Track {track_id} is unavailable")
         return self._map_track(raw_track)
@@ -81,7 +102,7 @@ class YandexMusicService(MusicService):
         try:
             search_result = client.search(query, type_="track")
         except Exception as exc:
-            raise NetworkError(f"Search failed for query {query!r}") from exc
+            raise self._map_client_error(exc, f"Search failed for query {query!r}") from exc
 
         tracks = getattr(getattr(search_result, "tracks", None), "results", None) or ()
         return tuple(self._map_track(track) for track in tracks[:limit])
@@ -94,7 +115,10 @@ class YandexMusicService(MusicService):
             except TypeError:
                 search_result = client.search(query, type_="all")
         except Exception as exc:
-            raise NetworkError(f"Catalog search failed for query {query!r}") from exc
+            raise self._map_client_error(
+                exc,
+                f"Catalog search failed for query {query!r}",
+            ) from exc
 
         tracks = getattr(getattr(search_result, "tracks", None), "results", None) or ()
         albums = getattr(getattr(search_result, "albums", None), "results", None) or ()
@@ -118,7 +142,7 @@ class YandexMusicService(MusicService):
             likes = client.users_likes_tracks()
             raw_tracks = likes.fetch_tracks() if hasattr(likes, "fetch_tracks") else ()
         except Exception as exc:
-            raise NetworkError("Failed to load liked tracks") from exc
+            raise self._map_client_error(exc, "Failed to load liked tracks") from exc
         return tuple(self._map_track(track, is_liked=True) for track in raw_tracks[:limit])
 
     def like_track(self, track_id: str) -> None:
@@ -126,14 +150,14 @@ class YandexMusicService(MusicService):
         try:
             self._call_track_mutation(client.users_likes_tracks_add, track_id)
         except Exception as exc:
-            raise NetworkError(f"Failed to like track {track_id}") from exc
+            raise self._map_client_error(exc, f"Failed to like track {track_id}") from exc
 
     def unlike_track(self, track_id: str) -> None:
         client = self._require_client()
         try:
             self._call_track_mutation(client.users_likes_tracks_remove, track_id)
         except Exception as exc:
-            raise NetworkError(f"Failed to unlike track {track_id}") from exc
+            raise self._map_client_error(exc, f"Failed to unlike track {track_id}") from exc
 
     def set_audio_quality(self, quality: AudioQuality) -> None:
         self._audio_quality = quality
@@ -146,7 +170,7 @@ class YandexMusicService(MusicService):
         try:
             raw_playlists = client.users_playlists_list()
         except Exception as exc:
-            raise NetworkError("Failed to load user playlists") from exc
+            raise self._map_client_error(exc, "Failed to load user playlists") from exc
         return tuple(self._map_playlist(playlist) for playlist in raw_playlists)
 
     def get_generated_playlists(self) -> Sequence[Playlist]:
@@ -154,7 +178,7 @@ class YandexMusicService(MusicService):
         try:
             feed = client.feed()
         except Exception as exc:
-            raise NetworkError("Failed to load generated playlists") from exc
+            raise self._map_client_error(exc, "Failed to load generated playlists") from exc
 
         generated = getattr(feed, "generated_playlists", None) or ()
         playlists: list[Playlist] = []
@@ -169,7 +193,7 @@ class YandexMusicService(MusicService):
         try:
             raw_stations = client.rotor_stations_list()
         except Exception as exc:
-            raise NetworkError("Failed to load stations") from exc
+            raise self._map_client_error(exc, "Failed to load stations") from exc
         return tuple(
             self._map_station(item) for item in raw_stations if getattr(item, "station", None)
         )
@@ -179,7 +203,10 @@ class YandexMusicService(MusicService):
         try:
             result = client.rotor_station_tracks(station_id)
         except Exception as exc:
-            raise NetworkError(f"Failed to load station tracks for {station_id}") from exc
+            raise self._map_client_error(
+                exc,
+                f"Failed to load station tracks for {station_id}",
+            ) from exc
 
         tracks: list[Track] = []
         for item in getattr(result, "sequence", None) or ():
@@ -195,7 +222,10 @@ class YandexMusicService(MusicService):
         try:
             raw_playlist = client.users_playlists(playlist_id, user_id=owner_id)
         except Exception as exc:
-            raise NetworkError(f"Failed to load playlist {playlist_id}") from exc
+            raise self._map_client_error(
+                exc,
+                f"Failed to load playlist {playlist_id}",
+            ) from exc
         return self._map_playlist(raw_playlist)
 
     def get_playlist_tracks(
@@ -209,7 +239,10 @@ class YandexMusicService(MusicService):
             raw_playlist = client.users_playlists(playlist_id, user_id=owner_id)
             entries = getattr(raw_playlist, "tracks", ()) or ()
         except Exception as exc:
-            raise NetworkError(f"Failed to load playlist tracks for {playlist_id}") from exc
+            raise self._map_client_error(
+                exc,
+                f"Failed to load playlist tracks for {playlist_id}",
+            ) from exc
 
         tracks: list[Track] = []
         for entry in entries:
@@ -223,7 +256,10 @@ class YandexMusicService(MusicService):
             raw_albums = client.albums(album_id)
             raw_album = raw_albums[0] if isinstance(raw_albums, Sequence) else raw_albums
         except Exception as exc:
-            raise NetworkError(f"Failed to load album {album_id}") from exc
+            raise self._map_client_error(
+                exc,
+                f"Failed to load album {album_id}",
+            ) from exc
         return self._map_album(raw_album)
 
     def get_album_tracks(self, album_id: str) -> Sequence[Track]:
@@ -233,7 +269,10 @@ class YandexMusicService(MusicService):
             raw_album = raw_albums[0] if isinstance(raw_albums, Sequence) else raw_albums
             raw_volumes = getattr(raw_album, "volumes", None) or ()
         except Exception as exc:
-            raise NetworkError(f"Failed to load album tracks for {album_id}") from exc
+            raise self._map_client_error(
+                exc,
+                f"Failed to load album tracks for {album_id}",
+            ) from exc
 
         tracks: list[Track] = []
         for volume in raw_volumes:
@@ -251,7 +290,10 @@ class YandexMusicService(MusicService):
                 sort_by="year",
             )
         except Exception as exc:
-            raise NetworkError(f"Failed to load artist albums for {artist_id}") from exc
+            raise self._map_client_error(
+                exc,
+                f"Failed to load artist albums for {artist_id}",
+            ) from exc
         albums = getattr(raw_albums, "albums", None) or raw_albums or ()
         return tuple(self._map_album(album) for album in albums[:limit])
 
@@ -270,7 +312,10 @@ class YandexMusicService(MusicService):
                 sort_by="year",
             )
         except Exception as exc:
-            raise NetworkError(f"Failed to load artist compilation albums for {artist_id}") from exc
+            raise self._map_client_error(
+                exc,
+                f"Failed to load artist compilation albums for {artist_id}",
+            ) from exc
         albums = getattr(raw_albums, "albums", None) or raw_albums or ()
         return tuple(self._map_album(album) for album in albums[:limit])
 
@@ -283,7 +328,10 @@ class YandexMusicService(MusicService):
                 page_size=limit,
             )
         except Exception as exc:
-            raise NetworkError(f"Failed to load artist tracks for {artist_id}") from exc
+            raise self._map_client_error(
+                exc,
+                f"Failed to load artist tracks for {artist_id}",
+            ) from exc
         tracks = getattr(raw_tracks, "tracks", None) or raw_tracks or ()
         return tuple(self._map_track(track) for track in tracks[:limit])
 
@@ -295,6 +343,12 @@ class YandexMusicService(MusicService):
         try:
             download_infos = client.tracks_download_info(track.id, get_direct_links=True)
         except Exception as exc:
+            mapped_error = self._map_client_error(
+                exc,
+                f"Failed to resolve stream for track {track.id}",
+            )
+            if isinstance(mapped_error, AuthError):
+                raise mapped_error from exc
             raise StreamResolveError(f"Failed to resolve stream for track {track.id}") from exc
 
         if not download_infos:
@@ -317,6 +371,19 @@ class YandexMusicService(MusicService):
                     return resolved
 
         raise TrackUnavailableError(f"Track {track.id} has no playable stream")
+
+    def _map_client_error(
+        self,
+        exc: Exception,
+        message: str,
+        *,
+        not_found_error: Exception | None = None,
+    ) -> AuthError | NetworkError | TrackUnavailableError:
+        if isinstance(exc, _YANDEX_AUTH_EXCEPTIONS):
+            return AuthError(message)
+        if not_found_error is not None and isinstance(exc, _YANDEX_NOT_FOUND_EXCEPTIONS):
+            return not_found_error
+        return NetworkError(message)
 
     def _require_client(self) -> Any:
         if self._session is None or not self._session.token:
