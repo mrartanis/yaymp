@@ -41,8 +41,6 @@ class FakeMusicService:
         self.loaded_track_ids: list[str] = []
         self.station_batches: dict[str, list[tuple[Track, ...]]] = {}
         self.station_requests: list[str] = []
-        self.playlist_batches: dict[str, list[tuple[Track, ...]]] = {}
-        self.playlist_requests: list[tuple[str, str | None]] = []
 
     def get_auth_session(self):
         return None
@@ -109,10 +107,7 @@ class FakeMusicService:
         raise NotImplementedError
 
     def get_playlist_tracks(self, playlist_id: str, *, owner_id: str | None = None):
-        self.playlist_requests.append((playlist_id, owner_id))
-        batches = self.playlist_batches.get(playlist_id)
-        if batches:
-            return batches.pop(0)
+        del playlist_id, owner_id
         return ()
 
     def get_album(self, album_id: str):
@@ -426,38 +421,6 @@ def test_station_queue_refills_when_near_end() -> None:
     assert snapshot.current_item.track.id == "w2"
     assert [item.track.id for item in snapshot.queue] == ["w1", "w2", "w3", "w4", "w5"]
     assert music_service.station_requests == ["user:onyourwave", "user:onyourwave"]
-
-
-def test_generated_playlist_queue_refills_when_near_end() -> None:
-    music_service = FakeMusicService(stream_ref="resolved://generated")
-    music_service.playlist_batches["generated-1"] = [
-        (
-            Track(id="g1", title="Generated 1", artists=("Artist",), duration_ms=1_000),
-            Track(id="g2", title="Generated 2", artists=("Artist",), duration_ms=1_000),
-            Track(id="g3", title="Generated 3", artists=("Artist",), duration_ms=1_000),
-        ),
-        (
-            Track(id="g3", title="Generated 3", artists=("Artist",), duration_ms=1_000),
-            Track(id="g4", title="Generated 4", artists=("Artist",), duration_ms=1_000),
-            Track(id="g5", title="Generated 5", artists=("Artist",), duration_ms=1_000),
-        ),
-    ]
-    service = PlaybackService(
-        playback_engine=FakePlaybackEngine(),
-        logger=TestLogger(),
-        music_service=music_service,
-    )
-    service.play_generated_playlist("generated-1", owner_id="owner-1")
-
-    snapshot = service.next()
-
-    assert snapshot.current_item is not None
-    assert snapshot.current_item.track.id == "g2"
-    assert [item.track.id for item in snapshot.queue] == ["g1", "g2", "g3", "g4", "g5"]
-    assert music_service.playlist_requests == [
-        ("generated-1", "owner-1"),
-        ("generated-1", "owner-1"),
-    ]
 
 
 def test_next_rolls_back_active_index_when_backend_load_fails() -> None:

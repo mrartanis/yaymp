@@ -81,14 +81,6 @@ class PlaybackController(QObject):
     def play_station(self, station_id: str) -> None:
         self._execute(lambda: self._playback_service.play_station(station_id))
 
-    def play_generated_playlist(self, playlist_id: str, *, owner_id: str | None = None) -> None:
-        self._execute(
-            lambda: self._playback_service.play_generated_playlist(
-                playlist_id,
-                owner_id=owner_id,
-            )
-        )
-
     def refresh(self) -> None:
         self._execute(self._playback_service.refresh)
 
