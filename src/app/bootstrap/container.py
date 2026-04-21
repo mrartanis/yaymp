@@ -10,7 +10,7 @@ from app.application.library_service import LibraryService
 from app.application.playback_service import PlaybackService
 from app.application.search_service import SearchService
 from app.bootstrap.config import AppConfig
-from app.domain import LibraryCacheRepo, MusicService, SettingsRepo, Track
+from app.domain import AuthSession, LibraryCacheRepo, MusicService, SettingsRepo, Track
 from app.domain.errors import AuthError, PlaybackBackendError, StorageError
 from app.infrastructure.persistence import (
     FileArtworkCache,
@@ -18,6 +18,7 @@ from app.infrastructure.persistence import (
     FileLibraryCacheRepo,
     FileSettingsRepo,
     SQLiteLibraryCacheRepo,
+    quarantine_state_file,
 )
 from app.infrastructure.playback.fake_playback_engine import FakePlaybackEngine
 from app.infrastructure.playback.mpv_playback_engine import MpvPlaybackEngine
@@ -46,13 +47,8 @@ class AppContainer:
 
 def build_container(config: AppConfig, logger: logging.Logger) -> AppContainer:
     logger.debug("Building application container")
-    settings_repo = FileSettingsRepo(file_path=config.settings_file)
-    _log_settings_state(settings_repo, logger)
-    auth_service = AuthService(
-        auth_repo=FileAuthRepo(file_path=config.auth_session_file),
-        logger=logger,
-    )
-    restored_session = auth_service.restore_session()
+    settings_repo = _build_settings_repo(config, logger)
+    auth_service, restored_session = _build_auth_service(config, logger)
     bootstrap_token = os.getenv("YAYMP_YANDEX_TOKEN")
     music_service = YandexMusicService(
         session=restored_session,
@@ -116,21 +112,54 @@ def build_container(config: AppConfig, logger: logging.Logger) -> AppContainer:
     )
 
 
-def _log_settings_state(settings_repo: SettingsRepo, logger: logging.Logger) -> None:
+def _build_settings_repo(config: AppConfig, logger: logging.Logger) -> SettingsRepo:
+    settings_repo = FileSettingsRepo(file_path=config.settings_file)
     try:
         settings = settings_repo.load_settings()
     except StorageError as exc:
         logger.warning("Settings are not readable and defaults will be used: %s", exc)
-        return
+        try:
+            quarantine_state_file(config.settings_file, logger=logger, reason=str(exc))
+        except StorageError as quarantine_exc:
+            logger.warning("Failed to quarantine settings file: %s", quarantine_exc)
+        return FileSettingsRepo(file_path=config.settings_file)
     logger.info("Loaded %s settings keys", len(settings))
+    return settings_repo
+
+
+def _build_auth_service(
+    config: AppConfig,
+    logger: logging.Logger,
+) -> tuple[AuthService, AuthSession | None]:
+    auth_service = AuthService(
+        auth_repo=FileAuthRepo(file_path=config.auth_session_file),
+        logger=logger,
+    )
+    try:
+        return auth_service, auth_service.restore_session()
+    except StorageError as exc:
+        logger.warning("Saved auth session is not readable and will be ignored: %s", exc)
+        try:
+            quarantine_state_file(config.auth_session_file, logger=logger, reason=str(exc))
+        except StorageError as quarantine_exc:
+            logger.warning("Failed to quarantine auth session file: %s", quarantine_exc)
+        return AuthService(
+            auth_repo=FileAuthRepo(file_path=config.auth_session_file),
+            logger=logger,
+        ), None
 
 
 def _build_library_cache_repo(config: AppConfig, logger: logging.Logger) -> LibraryCacheRepo:
     try:
         repo = SQLiteLibraryCacheRepo(db_path=config.library_cache_db_file)
     except StorageError as exc:
-        logger.warning("Falling back to JSON library cache: %s", exc)
-        return FileLibraryCacheRepo(file_path=config.library_cache_file)
+        logger.warning("SQLite library cache is not usable: %s", exc)
+        try:
+            quarantine_state_file(config.library_cache_db_file, logger=logger, reason=str(exc))
+            repo = SQLiteLibraryCacheRepo(db_path=config.library_cache_db_file)
+        except StorageError as recovery_exc:
+            logger.warning("Falling back to JSON library cache: %s", recovery_exc)
+            return FileLibraryCacheRepo(file_path=config.library_cache_file)
     logger.info("Using SQLite library cache: %s", config.library_cache_db_file)
     return repo
 
