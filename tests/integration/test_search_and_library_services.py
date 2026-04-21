@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from app.application.library_service import LibraryService
 from app.application.search_service import SearchService
-from app.domain import Playlist, Station, Track
+from app.domain import AudioQuality, Playlist, Station, Track
 
 
 class TestLogger:
@@ -25,12 +25,26 @@ class TestLogger:
 class InMemoryLibraryCacheRepo:
     def __init__(self) -> None:
         self.searches: tuple[str, ...] = ()
+        self.tracks: dict[str, Track] = {}
+        self.artwork: dict[str, str] = {}
 
     def load_recent_searches(self):
         return self.searches
 
     def save_recent_searches(self, searches):
         self.searches = tuple(searches)
+
+    def load_track_metadata(self, track_id: str):
+        return self.tracks.get(track_id)
+
+    def save_track_metadata(self, track: Track):
+        self.tracks[track.id] = track
+
+    def load_artwork_ref(self, item_id: str):
+        return self.artwork.get(item_id)
+
+    def save_artwork_ref(self, item_id: str, artwork_ref: str):
+        self.artwork[item_id] = artwork_ref
 
 
 class FakeMusicService:
@@ -52,7 +66,27 @@ class FakeMusicService:
         return (Track(id=f"{query}-{limit}", title=query, artists=("Artist",)),)
 
     def get_liked_tracks(self, *, limit: int = 100):
-        return (Track(id=f"liked-{limit}", title="Liked", artists=("Artist",)),)
+        return (
+            Track(
+                id=f"liked-{limit}",
+                title="Liked",
+                artists=("Artist",),
+                artwork_ref="liked-cover",
+                is_liked=True,
+            ),
+        )
+
+    def like_track(self, track_id: str):
+        self.liked_track_id = track_id
+
+    def unlike_track(self, track_id: str):
+        self.unliked_track_id = track_id
+
+    def set_audio_quality(self, quality: AudioQuality):
+        self.quality = quality
+
+    def get_audio_quality(self):
+        return getattr(self, "quality", AudioQuality.HQ)
 
     def get_user_playlists(self):
         return (Playlist(id="playlist-1", title="Playlist 1"),)
@@ -90,10 +124,16 @@ def test_search_service_updates_recent_searches() -> None:
 
     assert [track.id for track in tracks] == ["ambient-25"]
     assert service.load_recent_searches() == ("ambient", "jazz")
+    assert cache_repo.load_track_metadata("ambient-25") == tracks[0]
 
 
 def test_library_service_exposes_playlists_and_stations() -> None:
-    service = LibraryService(music_service=FakeMusicService(), logger=TestLogger())
+    cache_repo = InMemoryLibraryCacheRepo()
+    service = LibraryService(
+        music_service=FakeMusicService(),
+        library_cache_repo=cache_repo,
+        logger=TestLogger(),
+    )
 
     assert [item.id for item in service.load_liked_tracks()] == ["liked-100"]
     assert [item.id for item in service.load_user_playlists()] == ["playlist-1"]
@@ -102,3 +142,24 @@ def test_library_service_exposes_playlists_and_stations() -> None:
     assert [item.id for item in service.load_station_tracks("user:onyourwave")] == [
         "user:onyourwave-25"
     ]
+    assert cache_repo.load_artwork_ref("liked-100") == "liked-cover"
+
+
+def test_library_service_likes_and_unlikes_tracks() -> None:
+    music_service = FakeMusicService()
+    cache_repo = InMemoryLibraryCacheRepo()
+    service = LibraryService(
+        music_service=music_service,
+        library_cache_repo=cache_repo,
+        logger=TestLogger(),
+    )
+    track = Track(id="track-1", title="Track", artists=("Artist",))
+
+    liked = service.like_track(track)
+    unliked = service.unlike_track(liked)
+
+    assert music_service.liked_track_id == "track-1"
+    assert music_service.unliked_track_id == "track-1"
+    assert liked.is_liked is True
+    assert unliked.is_liked is False
+    assert cache_repo.load_track_metadata("track-1") == unliked

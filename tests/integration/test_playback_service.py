@@ -3,7 +3,14 @@ import random
 import pytest
 
 from app.application.playback_service import PlaybackService
-from app.domain import PlaybackBackendError, PlaybackStatus, RepeatMode, StreamResolveError, Track
+from app.domain import (
+    AudioQuality,
+    PlaybackBackendError,
+    PlaybackStatus,
+    RepeatMode,
+    StreamResolveError,
+    Track,
+)
 from app.infrastructure.playback.fake_playback_engine import FakePlaybackEngine
 
 
@@ -59,6 +66,18 @@ class FakeMusicService:
     def get_liked_tracks(self, *, limit: int = 100):
         del limit
         return ()
+
+    def like_track(self, track_id: str) -> None:
+        self.liked_track_id = track_id
+
+    def unlike_track(self, track_id: str) -> None:
+        self.unliked_track_id = track_id
+
+    def set_audio_quality(self, quality: AudioQuality) -> None:
+        self.quality = quality
+
+    def get_audio_quality(self) -> AudioQuality:
+        return getattr(self, "quality", AudioQuality.HQ)
 
     def get_user_playlists(self):
         return ()
@@ -154,6 +173,32 @@ def test_next_and_previous_move_inside_queue() -> None:
 
     assert next_snapshot.state.active_index == 2
     assert previous_snapshot.state.active_index == 1
+
+
+def test_refresh_auto_advances_when_active_track_finishes() -> None:
+    engine = FakePlaybackEngine()
+    service = PlaybackService(playback_engine=engine, logger=TestLogger())
+    service.replace_queue(build_tracks(), start_index=0, source_type="test")
+
+    engine.stop()
+    snapshot = service.refresh()
+
+    assert snapshot.state.status is PlaybackStatus.PLAYING
+    assert snapshot.state.active_index == 1
+    assert snapshot.current_item is not None
+    assert snapshot.current_item.track.id == "two"
+
+
+def test_refresh_does_not_auto_advance_after_manual_stop() -> None:
+    service = PlaybackService(playback_engine=FakePlaybackEngine(), logger=TestLogger())
+    service.replace_queue(build_tracks(), start_index=0, source_type="test")
+
+    stopped_snapshot = service.stop()
+    refreshed_snapshot = service.refresh()
+
+    assert stopped_snapshot.state.status is PlaybackStatus.STOPPED
+    assert refreshed_snapshot.state.status is PlaybackStatus.STOPPED
+    assert refreshed_snapshot.state.active_index == 0
 
 
 def test_queue_edges_stop_at_end_and_restart_track_at_beginning() -> None:

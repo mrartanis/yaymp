@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from hashlib import sha256
 from os import environ
+from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QShowEvent
+from PySide6.QtCore import Qt, QTimer, QUrl
+from PySide6.QtGui import QPixmap, QShowEvent
+from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -22,7 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.bootstrap.container import AppContainer
-from app.domain import Playlist, Station, Track
+from app.domain import AudioQuality, Playlist, Station, Track
 from app.domain.errors import DomainError
 from app.presentation.qt.auth_dialog import AuthDialog
 from app.presentation.qt.library_controller import BrowserContent, BrowserItem, LibraryController
@@ -42,6 +45,9 @@ class MainWindow(QMainWindow):
             library_service=container.services.library_service,
             logger=container.logger,
         )
+        self._current_track: Track | None = None
+        self._artwork_manager = QNetworkAccessManager(self)
+        self._pending_artwork_track_id: str | None = None
         self._auth_dialog: AuthDialog | None = None
         self._auth_flow_checked = False
         self._playback_poll_timer = QTimer(self)
@@ -110,11 +116,17 @@ class MainWindow(QMainWindow):
         self._volume_slider.setRange(0, 100)
         self._volume_slider.setValue(100)
         self._volume_label = self._panel_label("Volume 100%")
+        self._quality_combo = QComboBox()
+        self._quality_combo.addItem("HQ", AudioQuality.HQ.value)
+        self._quality_combo.addItem("SD", AudioQuality.SD.value)
+        self._quality_combo.addItem("LQ", AudioQuality.LQ.value)
+        self._quality_combo.setCurrentIndex(0)
 
         layout.addWidget(self._seek_slider, 1)
         layout.addWidget(self._seek_label)
         layout.addWidget(self._volume_slider)
         layout.addWidget(self._volume_label)
+        layout.addWidget(self._quality_combo)
         return layout
 
     def _build_body(self) -> QHBoxLayout:
@@ -150,6 +162,12 @@ class MainWindow(QMainWindow):
         layout = QGridLayout()
         self._track_title_label = self._panel_label("Track: Starter Signal")
         self._track_meta_label = self._panel_label("Artist and album metadata will appear here")
+        self._track_album_label = self._panel_label("Album: unknown")
+        self._track_technical_label = self._panel_label("Audio: unknown")
+        self._artwork_label = QLabel("No cover")
+        self._artwork_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._artwork_label.setFixedSize(180, 180)
+        self._artwork_label.setStyleSheet("border: 1px solid #777; border-radius: 4px;")
         self._playback_state_label = self._panel_label("Playback status: stopped")
         self._search_input = QLineEdit()
         self._search_input.setPlaceholderText("Search Yandex Music")
@@ -163,23 +181,35 @@ class MainWindow(QMainWindow):
         self._track_id_input = QLineEdit()
         self._track_id_input.setPlaceholderText("Enter Yandex track id")
         self._play_track_button = QPushButton("Play Track ID")
+        self._like_track_button = QPushButton("Like")
+        self._unlike_track_button = QPushButton("Unlike")
         search_row = QHBoxLayout()
         search_row.setSpacing(8)
         search_row.addWidget(self._search_input, 1)
         search_row.addWidget(self._search_button)
         search_row.addWidget(self._recent_searches_combo)
+        like_row = QHBoxLayout()
+        like_row.setSpacing(8)
+        like_row.addWidget(self._like_track_button)
+        like_row.addWidget(self._unlike_track_button)
+        like_row.addStretch(1)
         track_id_row = QHBoxLayout()
         track_id_row.setSpacing(8)
         track_id_row.addWidget(self._track_id_input, 1)
         track_id_row.addWidget(self._play_track_button)
-        layout.addWidget(self._track_title_label, 0, 0)
-        layout.addWidget(self._track_meta_label, 1, 0)
-        layout.addWidget(self._playback_state_label, 2, 0)
-        layout.addLayout(search_row, 3, 0)
-        layout.addWidget(self._browser_title_label, 4, 0)
-        layout.addWidget(self._content_list, 5, 0)
-        layout.addLayout(track_id_row, 6, 0)
-        layout.setRowStretch(5, 1)
+        layout.addWidget(self._artwork_label, 0, 0, 4, 1)
+        layout.addWidget(self._track_title_label, 0, 1)
+        layout.addWidget(self._track_meta_label, 1, 1)
+        layout.addWidget(self._track_album_label, 2, 1)
+        layout.addWidget(self._track_technical_label, 3, 1)
+        layout.addWidget(self._playback_state_label, 4, 0, 1, 2)
+        layout.addLayout(search_row, 5, 0, 1, 2)
+        layout.addWidget(self._browser_title_label, 6, 0, 1, 2)
+        layout.addWidget(self._content_list, 7, 0, 1, 2)
+        layout.addLayout(like_row, 8, 0, 1, 2)
+        layout.addLayout(track_id_row, 9, 0, 1, 2)
+        layout.setColumnStretch(1, 1)
+        layout.setRowStretch(7, 1)
         base_layout.addLayout(layout)
         return frame
 
@@ -208,6 +238,8 @@ class MainWindow(QMainWindow):
         self._controller.playback_failed.connect(self._render_error)
         self._library_controller.content_changed.connect(self._render_content)
         self._library_controller.content_failed.connect(self._render_library_error)
+        self._library_controller.track_liked.connect(self._render_track_liked)
+        self._library_controller.track_unliked.connect(self._render_track_unliked)
         self._previous_button.clicked.connect(self._controller.previous)
         self._play_button.clicked.connect(self._controller.play)
         self._pause_button.clicked.connect(self._controller.pause)
@@ -225,10 +257,22 @@ class MainWindow(QMainWindow):
         self._my_wave_nav_button.clicked.connect(self._start_my_wave)
         self._play_track_button.clicked.connect(self._play_track_by_id)
         self._track_id_input.returnPressed.connect(self._play_track_by_id)
+        self._like_track_button.clicked.connect(self._like_selected_or_current_track)
+        self._unlike_track_button.clicked.connect(self._unlike_selected_or_current_track)
+        self._quality_combo.currentIndexChanged.connect(self._apply_audio_quality)
         self._playback_poll_timer.timeout.connect(self._controller.refresh)
+        self._artwork_manager.finished.connect(self._handle_artwork_downloaded)
 
     def _apply_seek(self) -> None:
         self._controller.seek(self._seek_slider.value())
+
+    def _apply_audio_quality(self) -> None:
+        raw_quality = self._quality_combo.currentData()
+        if not isinstance(raw_quality, str):
+            return
+        quality = AudioQuality(raw_quality)
+        self._container.services.music_service.set_audio_quality(quality)
+        self._status_label.setText(f"Audio quality: {quality.name}")
 
     def _select_queue_item(self, item: QListWidgetItem) -> None:
         row = self._queue_list.row(item)
@@ -278,16 +322,29 @@ class MainWindow(QMainWindow):
         state = snapshot.state
 
         if current_item is not None:
+            self._current_track = current_item.track
             artists = ", ".join(current_item.track.artists)
             self._now_playing_label.setText(f"Now playing: {current_item.track.title}")
             self._track_title_label.setText(f"Track: {current_item.track.title}")
-            self._track_meta_label.setText(
-                f"{artists} | {current_item.track.album_title or 'Single'}"
+            self._track_meta_label.setText(f"Artist: {artists}")
+            self._track_album_label.setText(
+                "Album: "
+                f"{current_item.track.album_title or 'Single'}"
+                f"{self._format_year(current_item.track.album_year)}"
             )
+            self._track_technical_label.setText(
+                f"Audio: {self._format_audio_info(state.audio_codec, state.audio_bitrate)} | "
+                f"{'liked' if current_item.track.is_liked else 'not liked'}"
+            )
+            self._render_artwork(current_item.track)
         else:
+            self._current_track = None
             self._now_playing_label.setText("No active track")
             self._track_title_label.setText("Track: none")
             self._track_meta_label.setText("No metadata available")
+            self._track_album_label.setText("Album: unknown")
+            self._track_technical_label.setText("Audio: unknown")
+            self._clear_artwork()
 
         self._playback_state_label.setText(
             f"Playback status: {state.status.value} | repeat={state.repeat_mode.value}"
@@ -364,6 +421,146 @@ class MainWindow(QMainWindow):
 
     def _render_library_error(self, message: str) -> None:
         self._status_label.setText(f"Library error: {message}")
+
+    def _render_track_liked(self, track: Track) -> None:
+        if self._current_track is not None and self._current_track.id == track.id:
+            self._current_track = track
+        self._replace_content_track(track)
+        self._status_label.setText(f"Liked: {track.title}")
+
+    def _render_track_unliked(self, track: Track) -> None:
+        if self._current_track is not None and self._current_track.id == track.id:
+            self._current_track = track
+        self._replace_content_track(track)
+        self._status_label.setText(f"Unliked: {track.title}")
+
+    def _like_selected_or_current_track(self) -> None:
+        track = self._selected_or_current_track()
+        if track is None:
+            self._status_label.setText("Library error: select or play a track first")
+            return
+        self._library_controller.like_track(track)
+
+    def _unlike_selected_or_current_track(self) -> None:
+        track = self._selected_or_current_track()
+        if track is None:
+            self._status_label.setText("Library error: select or play a track first")
+            return
+        self._library_controller.unlike_track(track)
+
+    def _selected_or_current_track(self) -> Track | None:
+        item = self._content_list.currentItem()
+        if item is not None:
+            browser_item = item.data(Qt.ItemDataRole.UserRole)
+            if isinstance(browser_item, BrowserItem) and isinstance(browser_item.payload, Track):
+                return browser_item.payload
+        return self._current_track
+
+    def _replace_content_track(self, track: Track) -> None:
+        for index in range(self._content_list.count()):
+            item = self._content_list.item(index)
+            browser_item = item.data(Qt.ItemDataRole.UserRole)
+            if not isinstance(browser_item, BrowserItem):
+                continue
+            if not isinstance(browser_item.payload, Track):
+                continue
+            if browser_item.payload.id != track.id:
+                continue
+            title = f"{'❤️ ' if track.is_liked else ''}{track.title}"
+            text = title
+            subtitle = ", ".join(track.artists)
+            if subtitle:
+                text = f"{title}\n{subtitle}"
+            item.setText(text)
+            item.setData(
+                Qt.ItemDataRole.UserRole,
+                BrowserItem(
+                    kind=browser_item.kind,
+                    title=title,
+                    subtitle=subtitle,
+                    payload=track,
+                ),
+            )
+            break
+
+    def _render_artwork(self, track: Track) -> None:
+        if not track.artwork_ref:
+            self._clear_artwork()
+            return
+
+        artwork_url = self._normalize_artwork_url(track.artwork_ref)
+        if artwork_url is None:
+            self._clear_artwork()
+            return
+
+        cache_path = self._artwork_cache_path(artwork_url)
+        if cache_path.exists():
+            self._set_artwork_pixmap(cache_path)
+            return
+
+        self._pending_artwork_track_id = track.id
+        request = QNetworkRequest(QUrl(artwork_url))
+        reply = self._artwork_manager.get(request)
+        reply.setProperty("track_id", track.id)
+        reply.setProperty("cache_path", str(cache_path))
+
+    def _handle_artwork_downloaded(self, reply: QNetworkReply) -> None:
+        track_id = reply.property("track_id")
+        cache_path = Path(str(reply.property("cache_path")))
+        if reply.error() != QNetworkReply.NetworkError.NoError:
+            reply.deleteLater()
+            return
+
+        data = bytes(reply.readAll())
+        reply.deleteLater()
+        if not data:
+            return
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_bytes(data)
+        if track_id == self._pending_artwork_track_id:
+            self._set_artwork_pixmap(cache_path)
+
+    def _set_artwork_pixmap(self, path: Path) -> None:
+        pixmap = QPixmap(str(path))
+        if pixmap.isNull():
+            self._clear_artwork()
+            return
+        self._artwork_label.setPixmap(
+            pixmap.scaled(
+                self._artwork_label.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
+
+    def _clear_artwork(self) -> None:
+        self._pending_artwork_track_id = None
+        self._artwork_label.clear()
+        self._artwork_label.setText("No cover")
+
+    def _normalize_artwork_url(self, artwork_ref: str) -> str | None:
+        value = artwork_ref.strip()
+        if not value:
+            return None
+        if value.startswith("http://") or value.startswith("https://"):
+            return value.replace("%%", "200x200")
+        if value.startswith("//"):
+            return f"https:{value}".replace("%%", "200x200")
+        return f"https://{value}".replace("%%", "200x200")
+
+    def _artwork_cache_path(self, artwork_url: str) -> Path:
+        digest = sha256(artwork_url.encode("utf-8")).hexdigest()
+        return self._container.config.cache_dir / "artwork" / f"{digest}.img"
+
+    def _format_year(self, year: int | None) -> str:
+        return f" ({year})" if year else ""
+
+    def _format_audio_info(self, codec: str | None, bitrate: int | None) -> str:
+        codec_label = codec or "unknown codec"
+        if bitrate is None:
+            return codec_label
+        kbps = max(1, round(bitrate / 1000))
+        return f"{codec_label}, {kbps} kbps"
 
     def _maybe_start_auth_flow(self) -> None:
         if self._container.services.auth_service.current_session() is not None:

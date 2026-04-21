@@ -132,7 +132,7 @@ Result:
 
 ## Step 6: Add Search and Library Basics
 
-Status: next
+Status: done
 
 Ship the first useful user workflow.
 
@@ -151,6 +151,8 @@ Result:
 - the user can search, play, and like tracks
 
 ## Step 7: Add Playlist and Album Flows
+
+Status: next
 
 Expand from single-track behavior to catalog navigation.
 

@@ -47,6 +47,7 @@ def build_container(config: AppConfig, logger: logging.Logger) -> AppContainer:
     music_service = YandexMusicService(
         session=restored_session,
         token=bootstrap_token,
+        logger=logger,
     )
     if restored_session is not None or bootstrap_token:
         token = restored_session.token if restored_session is not None else bootstrap_token
@@ -60,7 +61,7 @@ def build_container(config: AppConfig, logger: logging.Logger) -> AppContainer:
         except AuthError as exc:
             logger.warning("Failed to restore Yandex session: %s", exc)
             auth_service.clear_session()
-            music_service = YandexMusicService()
+            music_service = YandexMusicService(logger=logger)
 
     library_cache_repo = FileLibraryCacheRepo(file_path=config.recent_searches_file)
     search_service = SearchService(
@@ -70,6 +71,7 @@ def build_container(config: AppConfig, logger: logging.Logger) -> AppContainer:
     )
     library_service = LibraryService(
         music_service=music_service,
+        library_cache_repo=library_cache_repo,
         logger=logger,
     )
 

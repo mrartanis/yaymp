@@ -21,6 +21,7 @@ class SearchService:
             return ()
 
         tracks = tuple(self._music_service.search_tracks(normalized_query, limit=limit))
+        self._cache_tracks(tracks)
         self._remember_recent_search(normalized_query)
         self._logger.info("Search returned %s tracks for query %s", len(tracks), normalized_query)
         return tracks
@@ -34,3 +35,9 @@ class SearchService:
         ]
         current.insert(0, query)
         self._library_cache_repo.save_recent_searches(tuple(current[:10]))
+
+    def _cache_tracks(self, tracks: tuple[Track, ...]) -> None:
+        for track in tracks:
+            self._library_cache_repo.save_track_metadata(track)
+            if track.artwork_ref:
+                self._library_cache_repo.save_artwork_ref(track.id, track.artwork_ref)

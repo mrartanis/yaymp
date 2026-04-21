@@ -36,3 +36,5 @@ class PlaybackState:
     volume: int = 100
     shuffle_enabled: bool = False
     repeat_mode: RepeatMode = RepeatMode.OFF
+    audio_codec: str | None = None
+    audio_bitrate: int | None = None

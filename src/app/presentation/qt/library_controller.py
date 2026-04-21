@@ -28,6 +28,8 @@ class BrowserContent:
 class LibraryController(QObject):
     content_changed = Signal(object)
     content_failed = Signal(str)
+    track_liked = Signal(object)
+    track_unliked = Signal(object)
 
     def __init__(
         self,
@@ -108,11 +110,28 @@ class LibraryController(QObject):
             )
         )
 
+    def like_track(self, track: Track) -> None:
+        self._execute_mutation(
+            lambda: self.track_liked.emit(self._library_service.like_track(track))
+        )
+
+    def unlike_track(self, track: Track) -> None:
+        self._execute_mutation(
+            lambda: self.track_unliked.emit(self._library_service.unlike_track(track))
+        )
+
     def _execute(self, operation) -> None:
         try:
             self._emit_content(operation())
         except DomainError as exc:
             self._logger.warning("Library operation failed: %s", exc)
+            self.content_failed.emit(str(exc))
+
+    def _execute_mutation(self, operation) -> None:
+        try:
+            operation()
+        except DomainError as exc:
+            self._logger.warning("Library mutation failed: %s", exc)
             self.content_failed.emit(str(exc))
 
     def _emit_content(self, content: BrowserContent) -> None:
@@ -122,7 +141,7 @@ class LibraryController(QObject):
         return tuple(
             BrowserItem(
                 kind="track",
-                title=track.title,
+                title=f"{'❤️ ' if track.is_liked else ''}{track.title}",
                 subtitle=", ".join(track.artists),
                 payload=track,
             )

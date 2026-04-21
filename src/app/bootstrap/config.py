@@ -32,7 +32,11 @@ class AppConfig:
 
     @property
     def recent_searches_file(self) -> Path:
-        return self.cache_dir / "recent_searches.json"
+        return self.library_cache_file
+
+    @property
+    def library_cache_file(self) -> Path:
+        return self.cache_dir / "library_cache.json"
 
     def ensure_directories(self) -> None:
         for path in (self.config_dir, self.data_dir, self.cache_dir, self.log_dir):

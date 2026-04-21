@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
 
-from app.domain import AuthSession, MusicService, Playlist, Station, Track
+from app.domain import AudioQuality, AuthSession, MusicService, Playlist, Station, Track
 from app.domain.errors import AuthError, NetworkError, StreamResolveError, TrackUnavailableError
 
 
@@ -15,6 +15,7 @@ class YandexMusicService(MusicService):
         session: AuthSession | None = None,
         token: str | None = None,
         client: Any | None = None,
+        logger: Any | None = None,
     ) -> None:
         effective_session = session
         if effective_session is None and token:
@@ -22,6 +23,8 @@ class YandexMusicService(MusicService):
 
         self._session = effective_session
         self._client = client
+        self._logger = logger
+        self._audio_quality = AudioQuality.HQ
 
     def get_auth_session(self) -> AuthSession | None:
         return self._session
@@ -80,7 +83,27 @@ class YandexMusicService(MusicService):
             raw_tracks = likes.fetch_tracks() if hasattr(likes, "fetch_tracks") else ()
         except Exception as exc:
             raise NetworkError("Failed to load liked tracks") from exc
-        return tuple(self._map_track(track) for track in raw_tracks[:limit])
+        return tuple(self._map_track(track, is_liked=True) for track in raw_tracks[:limit])
+
+    def like_track(self, track_id: str) -> None:
+        client = self._require_client()
+        try:
+            self._call_track_mutation(client.users_likes_tracks_add, track_id)
+        except Exception as exc:
+            raise NetworkError(f"Failed to like track {track_id}") from exc
+
+    def unlike_track(self, track_id: str) -> None:
+        client = self._require_client()
+        try:
+            self._call_track_mutation(client.users_likes_tracks_remove, track_id)
+        except Exception as exc:
+            raise NetworkError(f"Failed to unlike track {track_id}") from exc
+
+    def set_audio_quality(self, quality: AudioQuality) -> None:
+        self._audio_quality = quality
+
+    def get_audio_quality(self) -> AudioQuality:
+        return self._audio_quality
 
     def get_user_playlists(self) -> Sequence[Playlist]:
         client = self._require_client()
@@ -166,7 +189,9 @@ class YandexMusicService(MusicService):
         if not download_infos:
             raise TrackUnavailableError(f"Track {track.id} has no playable stream")
 
-        for info in download_infos:
+        ranked_infos = self._rank_download_infos(download_infos)
+        self._log_download_quality_options(track.id, ranked_infos)
+        for info in ranked_infos:
             direct_link = getattr(info, "direct_link", None)
             if direct_link:
                 return direct_link
@@ -198,7 +223,7 @@ class YandexMusicService(MusicService):
             raise AuthError("Failed to initialize Yandex Music client") from exc
         return self._client
 
-    def _map_track(self, raw_track: Any) -> Track:
+    def _map_track(self, raw_track: Any, *, is_liked: bool = False) -> Track:
         artists = tuple(
             getattr(artist, "name", str(artist))
             for artist in (getattr(raw_track, "artists", None) or ())
@@ -209,14 +234,17 @@ class YandexMusicService(MusicService):
         title = getattr(raw_track, "title", track_id)
         duration_ms = getattr(raw_track, "duration_ms", None)
         available = bool(getattr(raw_track, "available", True))
+        album_year = getattr(album, "year", None)
         return Track(
             id=track_id,
             title=title,
             artists=artists or ("Unknown Artist",),
             album_title=getattr(album, "title", None),
+            album_year=int(album_year) if album_year else None,
             duration_ms=duration_ms,
             artwork_ref=getattr(raw_track, "cover_uri", None),
             available=available,
+            is_liked=is_liked,
         )
 
     def _map_playlist(self, raw_playlist: Any) -> Playlist:
@@ -252,3 +280,52 @@ class YandexMusicService(MusicService):
         if raw_id is None:
             return str(getattr(station, "name", "station"))
         return f"{raw_id.type}:{raw_id.tag}"
+
+    def _call_track_mutation(self, operation: Any, track_id: str) -> None:
+        try:
+            operation(track_id)
+        except TypeError:
+            operation([track_id])
+
+    def _rank_download_infos(self, download_infos: Sequence[Any]) -> tuple[Any, ...]:
+        sorted_infos = sorted(
+            download_infos,
+            key=lambda info: int(getattr(info, "bitrate_in_kbps", 0) or 0),
+        )
+        if self._audio_quality is AudioQuality.LQ:
+            return tuple(sorted_infos)
+        if self._audio_quality is AudioQuality.HQ:
+            return tuple(reversed(sorted_infos))
+
+        target_bitrate = 192
+        return tuple(
+            sorted(
+                sorted_infos,
+                key=lambda info: (
+                    abs(int(getattr(info, "bitrate_in_kbps", 0) or 0) - target_bitrate),
+                    int(getattr(info, "bitrate_in_kbps", 0) or 0),
+                ),
+            )
+        )
+
+    def _log_download_quality_options(self, track_id: str, download_infos: Sequence[Any]) -> None:
+        if self._logger is None:
+            return
+        options = ", ".join(
+            f"{getattr(info, 'codec', '?')}:{getattr(info, 'bitrate_in_kbps', '?')}"
+            for info in download_infos
+        )
+        selected = download_infos[0] if download_infos else None
+        selected_label = "none"
+        if selected is not None:
+            selected_label = (
+                f"{getattr(selected, 'codec', '?')}:"
+                f"{getattr(selected, 'bitrate_in_kbps', '?')}"
+            )
+        self._logger.info(
+            "Yandex quality track=%s mode=%s selected=%s options=[%s]",
+            track_id,
+            self._audio_quality.value,
+            selected_label,
+            options,
+        )

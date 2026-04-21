@@ -47,6 +47,7 @@ class PlaybackService:
         self._volume = 100
         self._play_order: list[int] = []
         self._play_order_position: int | None = None
+        self._last_observed_status = PlaybackStatus.STOPPED
 
     def replace_queue(
         self,
@@ -89,11 +90,7 @@ class PlaybackService:
 
     def snapshot(self) -> PlaybackSnapshot:
         self._ensure_station_queue_capacity(min_remaining=self._STATION_QUEUE_REFILL_THRESHOLD)
-        return PlaybackSnapshot(
-            queue=tuple(self._queue),
-            state=self._compose_state(self._playback_engine.get_state()),
-            current_item=self.current_item(),
-        )
+        return self._build_snapshot(self._playback_engine.get_state())
 
     def current_item(self) -> QueueItem | None:
         if self._active_index is None:
@@ -200,7 +197,10 @@ class PlaybackService:
         return self.snapshot()
 
     def refresh(self) -> PlaybackSnapshot:
-        return self.snapshot()
+        engine_state = self._playback_engine.get_state()
+        if self._should_auto_advance(engine_state):
+            return self.next()
+        return self._build_snapshot(engine_state)
 
     def set_volume(self, volume: int) -> PlaybackSnapshot:
         bounded_volume = max(0, min(100, volume))
@@ -281,10 +281,12 @@ class PlaybackService:
                 title=item.track.title,
                 artists=item.track.artists,
                 album_title=item.track.album_title,
+                album_year=item.track.album_year,
                 duration_ms=item.track.duration_ms,
                 stream_ref=stream_ref,
                 artwork_ref=item.track.artwork_ref,
                 available=item.track.available,
+                is_liked=item.track.is_liked,
             ),
             source_type=item.source_type,
             source_id=item.source_id,
@@ -331,6 +333,24 @@ class PlaybackService:
             volume=engine_state.volume,
             shuffle_enabled=self._shuffle_enabled,
             repeat_mode=self._repeat_mode,
+            audio_codec=engine_state.audio_codec,
+            audio_bitrate=engine_state.audio_bitrate,
+        )
+
+    def _build_snapshot(self, engine_state: PlaybackState) -> PlaybackSnapshot:
+        state = self._compose_state(engine_state)
+        self._last_observed_status = state.status
+        return PlaybackSnapshot(
+            queue=tuple(self._queue),
+            state=state,
+            current_item=self.current_item(),
+        )
+
+    def _should_auto_advance(self, engine_state: PlaybackState) -> bool:
+        return (
+            engine_state.status is PlaybackStatus.STOPPED
+            and self._last_observed_status is PlaybackStatus.PLAYING
+            and self.current_item() is not None
         )
 
     def _ensure_station_queue_capacity(self, *, min_remaining: int) -> None:

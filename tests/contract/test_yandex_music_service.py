@@ -2,7 +2,15 @@ from __future__ import annotations
 
 import pytest
 
-from app.domain import AuthError, AuthSession, NetworkError, Station, Track, TrackUnavailableError
+from app.domain import (
+    AudioQuality,
+    AuthError,
+    AuthSession,
+    NetworkError,
+    Station,
+    Track,
+    TrackUnavailableError,
+)
 from app.domain.playlist import Playlist
 from app.infrastructure.yandex.yandex_music_service import YandexMusicService
 
@@ -71,8 +79,16 @@ class SearchResultStub:
 
 
 class DownloadInfoStub:
-    def __init__(self, direct_link: str | None = None) -> None:
+    def __init__(
+        self,
+        direct_link: str | None = None,
+        *,
+        bitrate_in_kbps: int = 192,
+        codec: str = "mp3",
+    ) -> None:
         self.direct_link = direct_link
+        self.bitrate_in_kbps = bitrate_in_kbps
+        self.codec = codec
 
 
 class LikesStub:
@@ -93,6 +109,8 @@ class FakeYandexClient:
         self.download_infos = [DownloadInfoStub("https://stream.example/track-1")]
         self.account = type("Account", (), {"uid": 7, "login": "listener"})()
         self.me = type("Me", (), {"account": self.account})()
+        self.liked_track_ids: list[str] = []
+        self.unliked_track_ids: list[str] = []
 
     def tracks(self, track_ids):
         if track_ids == ["missing"]:
@@ -105,6 +123,12 @@ class FakeYandexClient:
 
     def users_likes_tracks(self):
         return self.likes
+
+    def users_likes_tracks_add(self, track_id: str):
+        self.liked_track_ids.append(track_id)
+
+    def users_likes_tracks_remove(self, track_id: str):
+        self.unliked_track_ids.append(track_id)
 
     def users_playlists_list(self):
         return [self.playlist]
@@ -182,6 +206,7 @@ def test_yandex_music_service_maps_track_and_playlist_data() -> None:
     assert [item.id for item in playlist_tracks] == ["track-1"]
     assert [item.id for item in search_tracks] == ["track-1"]
     assert [item.id for item in liked_tracks] == ["track-1"]
+    assert liked_tracks[0].is_liked is True
     assert [item.id for item in user_playlists] == ["playlist-1"]
     assert [item.id for item in generated_playlists] == ["generated-1"]
     assert stations == (
@@ -206,6 +231,43 @@ def test_yandex_music_service_resolves_playable_stream() -> None:
     )
 
     assert stream_ref == "https://stream.example/track-1"
+
+
+def test_yandex_music_service_selects_stream_by_audio_quality() -> None:
+    client = FakeYandexClient()
+    client.download_infos = [
+        DownloadInfoStub("https://stream.example/lq", bitrate_in_kbps=64),
+        DownloadInfoStub("https://stream.example/sd", bitrate_in_kbps=192),
+        DownloadInfoStub("https://stream.example/hq", bitrate_in_kbps=320),
+    ]
+    service = YandexMusicService(
+        session=AuthSession(user_id="user-1", token="token"),
+        client=client,
+    )
+    track = Track(id="track-1", title="Remote", artists=("Artist",), available=True)
+
+    service.set_audio_quality(AudioQuality.LQ)
+    assert service.resolve_stream_ref(track) == "https://stream.example/lq"
+
+    service.set_audio_quality(AudioQuality.SD)
+    assert service.resolve_stream_ref(track) == "https://stream.example/sd"
+
+    service.set_audio_quality(AudioQuality.HQ)
+    assert service.resolve_stream_ref(track) == "https://stream.example/hq"
+
+
+def test_yandex_music_service_likes_and_unlikes_tracks() -> None:
+    client = FakeYandexClient()
+    service = YandexMusicService(
+        session=AuthSession(user_id="user-1", token="token"),
+        client=client,
+    )
+
+    service.like_track("track-1")
+    service.unlike_track("track-1")
+
+    assert client.liked_track_ids == ["track-1"]
+    assert client.unliked_track_ids == ["track-1"]
 
 
 def test_yandex_music_service_rejects_unavailable_tracks() -> None:

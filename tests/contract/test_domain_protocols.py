@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.domain import (
+    AudioQuality,
     AuthRepo,
     AuthSession,
     Clock,
@@ -47,6 +48,18 @@ class FakeMusicService:
 
     def get_liked_tracks(self, *, limit: int = 100) -> Sequence[Track]:
         return [Track(id=f"liked-{limit}", title="Liked", artists=("Artist",))]
+
+    def like_track(self, track_id: str) -> None:
+        self.liked_track_id = track_id
+
+    def unlike_track(self, track_id: str) -> None:
+        self.unliked_track_id = track_id
+
+    def set_audio_quality(self, quality: AudioQuality) -> None:
+        self.quality = quality
+
+    def get_audio_quality(self) -> AudioQuality:
+        return getattr(self, "quality", AudioQuality.HQ)
 
     def get_user_playlists(self) -> Sequence[Playlist]:
         return [Playlist(id="playlist-1", title="Playlist")]
@@ -114,6 +127,18 @@ class FakeLibraryCacheRepo:
 
     def save_recent_searches(self, searches: Sequence[str]) -> None:
         self.searches = list(searches)
+
+    def load_track_metadata(self, track_id: str) -> Track | None:
+        return Track(id=track_id, title="Cached", artists=("Artist",))
+
+    def save_track_metadata(self, track: Track) -> None:
+        self.track = track
+
+    def load_artwork_ref(self, item_id: str) -> str | None:
+        return f"art:{item_id}"
+
+    def save_artwork_ref(self, item_id: str, artwork_ref: str) -> None:
+        self.artwork = (item_id, artwork_ref)
 
 
 class FakeAuthRepo:

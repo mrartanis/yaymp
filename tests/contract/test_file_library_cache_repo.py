@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import json
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from app.domain import StorageError
+from app.domain.track import Track
 from app.infrastructure.persistence.file_library_cache_repo import FileLibraryCacheRepo
 
 
@@ -12,6 +16,53 @@ def test_file_library_cache_repo_round_trips_recent_searches(tmp_path) -> None:
     repo.save_recent_searches(("ambient", "jazz"))
 
     assert repo.load_recent_searches() == ("ambient", "jazz")
+
+
+def test_file_library_cache_repo_round_trips_track_metadata_and_artwork(tmp_path) -> None:
+    repo = FileLibraryCacheRepo(file_path=tmp_path / "library.json")
+    track = Track(
+        id="track-1",
+        title="Signal",
+        artists=("Artist",),
+        album_title="Album",
+        album_year=2024,
+        duration_ms=123_000,
+        artwork_ref="covers/track.jpg",
+        is_liked=True,
+    )
+
+    repo.save_track_metadata(track)
+    repo.save_artwork_ref(track.id, "covers/track.jpg")
+
+    assert repo.load_track_metadata("track-1") == track
+    assert repo.load_artwork_ref("track-1") == "covers/track.jpg"
+
+
+def test_file_library_cache_repo_expires_track_metadata_and_artwork_refs(tmp_path) -> None:
+    path = tmp_path / "library.json"
+    expired_at = (datetime.now(tz=UTC) - timedelta(days=8)).isoformat()
+    payload = {
+        "recent_searches": [],
+        "tracks": {
+            "track-1": {
+                "id": "track-1",
+                "title": "Signal",
+                "artists": ["Artist"],
+                "cached_at": expired_at,
+            }
+        },
+        "artwork": {
+            "track-1": {
+                "ref": "covers/track.jpg",
+                "cached_at": expired_at,
+            }
+        },
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    repo = FileLibraryCacheRepo(file_path=path)
+
+    assert repo.load_track_metadata("track-1") is None
+    assert repo.load_artwork_ref("track-1") is None
 
 
 def test_file_library_cache_repo_returns_empty_when_missing(tmp_path) -> None:
@@ -27,3 +78,11 @@ def test_file_library_cache_repo_rejects_invalid_payload(tmp_path) -> None:
 
     with pytest.raises(StorageError):
         repo.load_recent_searches()
+
+
+def test_file_library_cache_repo_migrates_legacy_recent_searches_list(tmp_path) -> None:
+    path = tmp_path / "recent.json"
+    path.write_text('["ambient", "jazz"]', encoding="utf-8")
+    repo = FileLibraryCacheRepo(file_path=path)
+
+    assert repo.load_recent_searches() == ("ambient", "jazz")

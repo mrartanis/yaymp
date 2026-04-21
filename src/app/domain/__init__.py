@@ -1,5 +1,6 @@
 """Domain layer exports."""
 
+from app.domain.audio_quality import AudioQuality
 from app.domain.auth import AuthSession
 from app.domain.errors import (
     AuthError,
@@ -27,6 +28,7 @@ __all__ = [
     "AuthError",
     "AuthRepo",
     "AuthSession",
+    "AudioQuality",
     "Clock",
     "LibraryCacheRepo",
     "Logger",

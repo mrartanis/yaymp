@@ -79,7 +79,7 @@ Definition of Done:
 
 ## Milestone 3: Search and Library Basics
 
-Status: next
+Status: done
 
 Goal:
 
@@ -103,6 +103,8 @@ Definition of Done:
 - main search/play flows are covered by tests
 
 ## Milestone 4: Playlists and Albums
+
+Status: next
 
 Goal:
 

@@ -16,6 +16,8 @@ class FakePlaybackEngine(PlaybackEngine):
             position_ms=0,
             duration_ms=track.duration_ms,
             volume=self._state.volume,
+            audio_codec="fake",
+            audio_bitrate=None,
         )
 
     def play(self) -> None:
@@ -24,6 +26,8 @@ class FakePlaybackEngine(PlaybackEngine):
             position_ms=self._state.position_ms,
             duration_ms=self._state.duration_ms,
             volume=self._state.volume,
+            audio_codec=self._state.audio_codec,
+            audio_bitrate=self._state.audio_bitrate,
         )
 
     def pause(self) -> None:
@@ -32,6 +36,8 @@ class FakePlaybackEngine(PlaybackEngine):
             position_ms=self._state.position_ms,
             duration_ms=self._state.duration_ms,
             volume=self._state.volume,
+            audio_codec=self._state.audio_codec,
+            audio_bitrate=self._state.audio_bitrate,
         )
 
     def stop(self) -> None:
@@ -40,6 +46,8 @@ class FakePlaybackEngine(PlaybackEngine):
             position_ms=0,
             duration_ms=self._state.duration_ms,
             volume=self._state.volume,
+            audio_codec=self._state.audio_codec,
+            audio_bitrate=self._state.audio_bitrate,
         )
 
     def seek(self, position_ms: int) -> None:
@@ -50,6 +58,8 @@ class FakePlaybackEngine(PlaybackEngine):
             position_ms=bounded_position,
             duration_ms=self._state.duration_ms,
             volume=self._state.volume,
+            audio_codec=self._state.audio_codec,
+            audio_bitrate=self._state.audio_bitrate,
         )
 
     def set_volume(self, volume: int) -> None:
@@ -58,6 +68,8 @@ class FakePlaybackEngine(PlaybackEngine):
             position_ms=self._state.position_ms,
             duration_ms=self._state.duration_ms,
             volume=max(0, min(100, volume)),
+            audio_codec=self._state.audio_codec,
+            audio_bitrate=self._state.audio_bitrate,
         )
 
     def get_state(self) -> PlaybackState:
