@@ -88,6 +88,31 @@ class PlaybackService:
             self._play_order_position = previous_order_position
             raise
 
+    def append_queue(
+        self,
+        tracks: Sequence[Track],
+        *,
+        source_type: str | None = None,
+        source_id: str | None = None,
+    ) -> PlaybackSnapshot:
+        start_source_index = sum(
+            1
+            for item in self._queue
+            if item.source_type == source_type and item.source_id == source_id
+        )
+        for offset, track in enumerate(tracks):
+            self._queue.append(
+                QueueItem(
+                    track=track,
+                    source_type=source_type,
+                    source_id=source_id,
+                    source_index=start_source_index + offset,
+                )
+            )
+        self._rebuild_play_order(anchor_index=self._active_index)
+        self._logger.info("Appended %s tracks to queue", len(tracks))
+        return self.snapshot()
+
     def snapshot(self) -> PlaybackSnapshot:
         self._ensure_station_queue_capacity(min_remaining=self._STATION_QUEUE_REFILL_THRESHOLD)
         return self._build_snapshot(self._playback_engine.get_state())

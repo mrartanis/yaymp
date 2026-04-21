@@ -4,7 +4,10 @@ from datetime import UTC, datetime
 import pytest
 
 from app.domain import (
+    Album,
+    Artist,
     AuthSession,
+    CatalogSearchResults,
     PlaybackState,
     PlaybackStatus,
     Playlist,
@@ -50,6 +53,30 @@ def test_playlist_and_queue_item_hold_metadata_without_behavior() -> None:
     assert playlist.title == "Daily Mix"
     assert queue_item.source_type == "playlist"
     assert queue_item.source_index == 3
+
+
+def test_catalog_entities_group_search_results() -> None:
+    track = Track(id="track-1", title="Track", artists=("Artist",))
+    album = Album(id="album-1", title="Album", artists=("Artist",), year=2024)
+    single = Album(id="single-1", title="Single", release_type="single")
+    compilation = Album(id="compilation-1", title="Compilation", release_type="compilation")
+    artist = Artist(id="artist-1", name="Artist")
+    playlist = Playlist(id="playlist-1", title="Playlist")
+
+    results = CatalogSearchResults(
+        tracks=(track,),
+        albums=(album,),
+        singles=(single,),
+        compilations=(compilation,),
+        artists=(artist,),
+        playlists=(playlist,),
+    )
+
+    assert results.tracks == (track,)
+    assert results.albums[0].year == 2024
+    assert results.singles[0].release_type == "single"
+    assert results.compilations[0].release_type == "compilation"
+    assert results.artists[0].name == "Artist"
 
 
 def test_playback_state_uses_bounded_enums() -> None:

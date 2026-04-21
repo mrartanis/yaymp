@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.domain import LibraryCacheRepo, Logger, MusicService, Playlist, Station, Track
+from app.domain import Album, LibraryCacheRepo, Logger, MusicService, Playlist, Station, Track
 
 
 class LibraryService:
@@ -36,16 +36,38 @@ class LibraryService:
         self._logger.info("Loaded %s stations", len(stations))
         return stations
 
-    def load_playlist_tracks(self, playlist_id: str) -> tuple[Track, ...]:
-        tracks = tuple(self._music_service.get_playlist_tracks(playlist_id))
+    def load_playlist_tracks(
+        self,
+        playlist_id: str,
+        *,
+        owner_id: str | None = None,
+    ) -> tuple[Track, ...]:
+        tracks = tuple(self._music_service.get_playlist_tracks(playlist_id, owner_id=owner_id))
         self._cache_tracks(tracks)
         self._logger.info("Loaded %s tracks for playlist %s", len(tracks), playlist_id)
+        return tracks
+
+    def load_album(self, album_id: str) -> Album:
+        album = self._music_service.get_album(album_id)
+        self._logger.info("Loaded album %s", album_id)
+        return album
+
+    def load_album_tracks(self, album_id: str) -> tuple[Track, ...]:
+        tracks = tuple(self._music_service.get_album_tracks(album_id))
+        self._cache_tracks(tracks)
+        self._logger.info("Loaded %s tracks for album %s", len(tracks), album_id)
         return tracks
 
     def load_station_tracks(self, station_id: str, *, limit: int = 25) -> tuple[Track, ...]:
         tracks = tuple(self._music_service.get_station_tracks(station_id, limit=limit))
         self._cache_tracks(tracks)
         self._logger.info("Loaded %s station tracks for %s", len(tracks), station_id)
+        return tracks
+
+    def load_artist_tracks(self, artist_id: str, *, limit: int = 50) -> tuple[Track, ...]:
+        tracks = tuple(self._music_service.get_artist_tracks(artist_id, limit=limit))
+        self._cache_tracks(tracks)
+        self._logger.info("Loaded %s artist tracks for %s", len(tracks), artist_id)
         return tracks
 
     def like_track(self, track: Track) -> Track:

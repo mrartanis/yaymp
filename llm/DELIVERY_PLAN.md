@@ -104,7 +104,7 @@ Definition of Done:
 
 ## Milestone 4: Playlists and Albums
 
-Status: next
+Status: done
 
 Goal:
 

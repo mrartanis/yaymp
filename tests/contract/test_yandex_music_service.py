@@ -3,6 +3,8 @@ from __future__ import annotations
 import pytest
 
 from app.domain import (
+    Album,
+    Artist,
     AudioQuality,
     AuthError,
     AuthSession,
@@ -21,8 +23,27 @@ class ArtistStub:
 
 
 class AlbumStub:
-    def __init__(self, title: str) -> None:
+    def __init__(
+        self,
+        title: str,
+        album_id: str = "album-1",
+        *,
+        album_type: str | None = None,
+    ) -> None:
+        self.id = album_id
         self.title = title
+        self.type = album_type
+        self.artists = [ArtistStub("Artist")]
+        self.year = 2024
+        self.track_count = 1
+        self.cover_uri = "covers/album.jpg"
+
+
+class ArtistResultStub:
+    def __init__(self) -> None:
+        self.id = "artist-1"
+        self.name = "Artist"
+        self.cover_uri = "covers/artist.jpg"
 
 
 class TrackStub:
@@ -49,13 +70,20 @@ class PlaylistEntryStub:
 
 
 class PlaylistStub:
-    def __init__(self, playlist_id: str, tracks: list[TrackStub]) -> None:
+    def __init__(
+        self,
+        playlist_id: str,
+        tracks: list[TrackStub],
+        *,
+        owner_uid: int = 7,
+    ) -> None:
+        self.uid = owner_uid
         self.kind = playlist_id
         self.title = f"Playlist {playlist_id}"
         self.tracks = [PlaylistEntryStub(track) for track in tracks]
         self.description = f"Description {playlist_id}"
         self.track_count = len(tracks)
-        self.owner = type("Owner", (), {"name": "listener"})()
+        self.owner = type("Owner", (), {"uid": owner_uid, "name": "listener"})()
 
 
 class GeneratedPlaylistStub:
@@ -73,9 +101,24 @@ class SearchTracksStub:
         self.results = results
 
 
+class SearchGroupStub:
+    def __init__(self, results: list[object]) -> None:
+        self.results = results
+
+
 class SearchResultStub:
-    def __init__(self, results: list[TrackStub]) -> None:
+    def __init__(
+        self,
+        results: list[TrackStub],
+        *,
+        albums: list[AlbumStub] | None = None,
+        artists: list[ArtistResultStub] | None = None,
+        playlists: list[PlaylistStub] | None = None,
+    ) -> None:
         self.tracks = SearchTracksStub(results)
+        self.albums = SearchGroupStub(albums or [])
+        self.artists = SearchGroupStub(artists or [])
+        self.playlists = SearchGroupStub(playlists or [])
 
 
 class DownloadInfoStub:
@@ -102,22 +145,42 @@ class LikesStub:
 class FakeYandexClient:
     def __init__(self) -> None:
         self.track = TrackStub(track_id="track-1", title="Remote")
+        self.album = AlbumStub("Album", album_id="album-1")
+        self.single = AlbumStub("Single", album_id="single-1", album_type="single")
+        self.compilation = AlbumStub(
+            "Compilation",
+            album_id="compilation-1",
+            album_type="compilation",
+        )
         self.playlist = PlaylistStub("playlist-1", [self.track])
         self.generated_playlist = PlaylistStub("generated-1", [self.track])
-        self.search_result = SearchResultStub([self.track])
+        self.search_result = SearchResultStub(
+            [self.track],
+            albums=[self.album, self.single, self.compilation],
+            artists=[ArtistResultStub()],
+            playlists=[self.playlist],
+        )
+        self.artist_albums = type("ArtistAlbumsStub", (), {"albums": [self.album, self.single]})()
+        self.artist_compilations = type(
+            "ArtistAlbumsStub",
+            (),
+            {"albums": [self.compilation]},
+        )()
+        self.artist_tracks = type("ArtistTracksStub", (), {"tracks": [self.track]})()
         self.likes = LikesStub([self.track])
         self.download_infos = [DownloadInfoStub("https://stream.example/track-1")]
         self.account = type("Account", (), {"uid": 7, "login": "listener"})()
         self.me = type("Me", (), {"account": self.account})()
         self.liked_track_ids: list[str] = []
         self.unliked_track_ids: list[str] = []
+        self.playlist_requests: list[tuple[str, str | None]] = []
 
     def tracks(self, track_ids):
         if track_ids == ["missing"]:
             return []
         return [self.track]
 
-    def search(self, query: str, *, type_: str):
+    def search(self, query: str, *, type_: str | None = None):
         del query, type_
         return self.search_result
 
@@ -133,9 +196,51 @@ class FakeYandexClient:
     def users_playlists_list(self):
         return [self.playlist]
 
-    def users_playlists(self, playlist_id: str):
-        del playlist_id
+    def users_playlists(self, playlist_id: str, user_id: str | None = None):
+        self.playlist_requests.append((playlist_id, user_id))
         return self.playlist
+
+    def albums(self, album_id: str):
+        del album_id
+        return [self.album]
+
+    def albums_with_tracks(self, album_id: str):
+        del album_id
+        album = AlbumStub("Album", album_id="album-1")
+        album.volumes = [[self.track]]
+        return album
+
+    def artists_direct_albums(
+        self,
+        artist_id: str,
+        *,
+        page: int = 0,
+        page_size: int = 20,
+        sort_by: str = "year",
+    ):
+        del artist_id, page, page_size, sort_by
+        return self.artist_albums
+
+    def artists_also_albums(
+        self,
+        artist_id: str,
+        *,
+        page: int = 0,
+        page_size: int = 20,
+        sort_by: str = "year",
+    ):
+        del artist_id, page, page_size, sort_by
+        return self.artist_compilations
+
+    def artists_tracks(
+        self,
+        artist_id: str,
+        *,
+        page: int = 0,
+        page_size: int = 20,
+    ):
+        del artist_id, page, page_size
+        return self.artist_tracks
 
     def feed(self):
         return FeedStub([GeneratedPlaylistStub(self.generated_playlist)])
@@ -187,24 +292,49 @@ def test_yandex_music_service_maps_track_and_playlist_data() -> None:
     playlist = service.get_playlist("playlist-1")
     playlist_tracks = service.get_playlist_tracks("playlist-1")
     search_tracks = service.search_tracks("remote")
+    search_results = service.search_catalog("remote")
     liked_tracks = service.get_liked_tracks()
     user_playlists = service.get_user_playlists()
     generated_playlists = service.get_generated_playlists()
     stations = service.get_stations()
     station_tracks = service.get_station_tracks("user:onyourwave")
+    album = service.get_album("album-1")
+    album_tracks = service.get_album_tracks("album-1")
+    artist_albums = service.get_artist_direct_albums("artist-1")
+    artist_compilations = service.get_artist_compilation_albums("artist-1")
+    artist_tracks = service.get_artist_tracks("artist-1")
 
     assert track.id == "track-1"
     assert track.album_title == "Album"
     assert playlist == Playlist(
         id="playlist-1",
         title="Playlist playlist-1",
+        owner_id="7",
         owner_name="listener",
         description="Description playlist-1",
         track_count=1,
         artwork_ref=None,
     )
+    assert client.playlist_requests == [("playlist-1", None), ("playlist-1", None)]
     assert [item.id for item in playlist_tracks] == ["track-1"]
     assert [item.id for item in search_tracks] == ["track-1"]
+    assert search_results.albums == (
+        Album(
+            id="album-1",
+            title="Album",
+            artists=("Artist",),
+            release_type=None,
+            year=2024,
+            track_count=1,
+            artwork_ref="covers/album.jpg",
+        ),
+    )
+    assert [item.id for item in search_results.singles] == ["single-1"]
+    assert [item.id for item in search_results.compilations] == ["compilation-1"]
+    assert search_results.artists == (
+        Artist(id="artist-1", name="Artist", artwork_ref="covers/artist.jpg"),
+    )
+    assert [item.id for item in search_results.playlists] == ["playlist-1"]
     assert [item.id for item in liked_tracks] == ["track-1"]
     assert liked_tracks[0].is_liked is True
     assert [item.id for item in user_playlists] == ["playlist-1"]
@@ -218,6 +348,24 @@ def test_yandex_music_service_maps_track_and_playlist_data() -> None:
         ),
     )
     assert [item.id for item in station_tracks] == ["track-1"]
+    assert album.id == "album-1"
+    assert [item.id for item in album_tracks] == ["track-1"]
+    assert [item.id for item in artist_albums] == ["album-1", "single-1"]
+    assert [item.id for item in artist_compilations] == ["compilation-1"]
+    assert [item.id for item in artist_tracks] == ["track-1"]
+
+
+def test_yandex_music_service_loads_playlist_tracks_with_owner_context() -> None:
+    client = FakeYandexClient()
+    service = YandexMusicService(
+        session=AuthSession(user_id="user-1", token="token"),
+        client=client,
+    )
+
+    tracks = service.get_playlist_tracks("164404", owner_id="music-blog")
+
+    assert [track.id for track in tracks] == ["track-1"]
+    assert client.playlist_requests == [("164404", "music-blog")]
 
 
 def test_yandex_music_service_resolves_playable_stream() -> None:

@@ -6,9 +6,11 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.domain import (
+    Album,
     AudioQuality,
     AuthRepo,
     AuthSession,
+    CatalogSearchResults,
     Clock,
     LibraryCacheRepo,
     Logger,
@@ -46,6 +48,12 @@ class FakeMusicService:
     def search_tracks(self, query: str, *, limit: int = 25) -> Sequence[Track]:
         return [Track(id=f"{query}-{limit}", title=query, artists=("Artist",))]
 
+    def search_catalog(self, query: str, *, limit: int = 25) -> CatalogSearchResults:
+        return CatalogSearchResults(
+            tracks=tuple(self.search_tracks(query, limit=limit)),
+            albums=(Album(id=f"album-{query}", title=f"Album {query}"),),
+        )
+
     def get_liked_tracks(self, *, limit: int = 100) -> Sequence[Track]:
         return [Track(id=f"liked-{limit}", title="Liked", artists=("Artist",))]
 
@@ -73,11 +81,40 @@ class FakeMusicService:
     def get_station_tracks(self, station_id: str, *, limit: int = 25) -> Sequence[Track]:
         return [Track(id=f"{station_id}-{limit}", title="Wave Track", artists=("Artist",))]
 
-    def get_playlist(self, playlist_id: str) -> Playlist:
+    def get_playlist(self, playlist_id: str, *, owner_id: str | None = None) -> Playlist:
+        del owner_id
         return Playlist(id=playlist_id, title="Playlist")
 
-    def get_playlist_tracks(self, playlist_id: str) -> Sequence[Track]:
+    def get_playlist_tracks(
+        self,
+        playlist_id: str,
+        *,
+        owner_id: str | None = None,
+    ) -> Sequence[Track]:
+        del owner_id
         return [Track(id=f"{playlist_id}-track", title="Playlist Track", artists=("Artist",))]
+
+    def get_album(self, album_id: str) -> Album:
+        return Album(id=album_id, title="Album")
+
+    def get_album_tracks(self, album_id: str) -> Sequence[Track]:
+        return [Track(id=f"{album_id}-track", title="Album Track", artists=("Artist",))]
+
+    def get_artist_direct_albums(self, artist_id: str, *, limit: int = 50) -> Sequence[Album]:
+        del limit
+        return [Album(id=f"{artist_id}-album", title="Artist Album")]
+
+    def get_artist_compilation_albums(
+        self,
+        artist_id: str,
+        *,
+        limit: int = 50,
+    ) -> Sequence[Album]:
+        del limit
+        return [Album(id=f"{artist_id}-compilation", title="Artist Compilation")]
+
+    def get_artist_tracks(self, artist_id: str, *, limit: int = 50) -> Sequence[Track]:
+        return [Track(id=f"{artist_id}-track-{limit}", title="Artist Track", artists=("Artist",))]
 
     def resolve_stream_ref(self, track: Track) -> str:
         return track.stream_ref or f"stream:{track.id}"

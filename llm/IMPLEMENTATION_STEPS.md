@@ -152,7 +152,7 @@ Result:
 
 ## Step 7: Add Playlist and Album Flows
 
-Status: next
+Status: done
 
 Expand from single-track behavior to catalog navigation.
 
@@ -172,6 +172,8 @@ Result:
 - album and playlist playback behaves like a real music player
 
 ## Step 8: Harden Persistence and Error Handling
+
+Status: next
 
 Prevent state sprawl before the app becomes harder to change.
 

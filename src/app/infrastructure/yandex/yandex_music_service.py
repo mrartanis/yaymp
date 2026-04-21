@@ -4,7 +4,17 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
 
-from app.domain import AudioQuality, AuthSession, MusicService, Playlist, Station, Track
+from app.domain import (
+    Album,
+    Artist,
+    AudioQuality,
+    AuthSession,
+    CatalogSearchResults,
+    MusicService,
+    Playlist,
+    Station,
+    Track,
+)
 from app.domain.errors import AuthError, NetworkError, StreamResolveError, TrackUnavailableError
 
 
@@ -75,6 +85,32 @@ class YandexMusicService(MusicService):
 
         tracks = getattr(getattr(search_result, "tracks", None), "results", None) or ()
         return tuple(self._map_track(track) for track in tracks[:limit])
+
+    def search_catalog(self, query: str, *, limit: int = 25) -> CatalogSearchResults:
+        client = self._require_client()
+        try:
+            try:
+                search_result = client.search(query)
+            except TypeError:
+                search_result = client.search(query, type_="all")
+        except Exception as exc:
+            raise NetworkError(f"Catalog search failed for query {query!r}") from exc
+
+        tracks = getattr(getattr(search_result, "tracks", None), "results", None) or ()
+        albums = getattr(getattr(search_result, "albums", None), "results", None) or ()
+        artists = getattr(getattr(search_result, "artists", None), "results", None) or ()
+        playlists = getattr(getattr(search_result, "playlists", None), "results", None) or ()
+        album_buckets = self._bucket_albums(
+            tuple(self._map_album(album) for album in albums[:limit])
+        )
+        return CatalogSearchResults(
+            tracks=tuple(self._map_track(track) for track in tracks[:limit]),
+            albums=album_buckets[0],
+            singles=album_buckets[1],
+            compilations=album_buckets[2],
+            artists=tuple(self._map_artist(artist) for artist in artists[:limit]),
+            playlists=tuple(self._map_playlist(playlist) for playlist in playlists[:limit]),
+        )
 
     def get_liked_tracks(self, *, limit: int = 100) -> Sequence[Track]:
         client = self._require_client()
@@ -154,18 +190,23 @@ class YandexMusicService(MusicService):
                 break
         return tuple(tracks)
 
-    def get_playlist(self, playlist_id: str) -> Playlist:
+    def get_playlist(self, playlist_id: str, *, owner_id: str | None = None) -> Playlist:
         client = self._require_client()
         try:
-            raw_playlist = client.users_playlists(playlist_id)
+            raw_playlist = client.users_playlists(playlist_id, user_id=owner_id)
         except Exception as exc:
             raise NetworkError(f"Failed to load playlist {playlist_id}") from exc
         return self._map_playlist(raw_playlist)
 
-    def get_playlist_tracks(self, playlist_id: str) -> Sequence[Track]:
+    def get_playlist_tracks(
+        self,
+        playlist_id: str,
+        *,
+        owner_id: str | None = None,
+    ) -> Sequence[Track]:
         client = self._require_client()
         try:
-            raw_playlist = client.users_playlists(playlist_id)
+            raw_playlist = client.users_playlists(playlist_id, user_id=owner_id)
             entries = getattr(raw_playlist, "tracks", ()) or ()
         except Exception as exc:
             raise NetworkError(f"Failed to load playlist tracks for {playlist_id}") from exc
@@ -175,6 +216,76 @@ class YandexMusicService(MusicService):
             raw_track = getattr(entry, "track", entry)
             tracks.append(self._map_track(raw_track))
         return tuple(tracks)
+
+    def get_album(self, album_id: str) -> Album:
+        client = self._require_client()
+        try:
+            raw_albums = client.albums(album_id)
+            raw_album = raw_albums[0] if isinstance(raw_albums, Sequence) else raw_albums
+        except Exception as exc:
+            raise NetworkError(f"Failed to load album {album_id}") from exc
+        return self._map_album(raw_album)
+
+    def get_album_tracks(self, album_id: str) -> Sequence[Track]:
+        client = self._require_client()
+        try:
+            raw_albums = client.albums_with_tracks(album_id)
+            raw_album = raw_albums[0] if isinstance(raw_albums, Sequence) else raw_albums
+            raw_volumes = getattr(raw_album, "volumes", None) or ()
+        except Exception as exc:
+            raise NetworkError(f"Failed to load album tracks for {album_id}") from exc
+
+        tracks: list[Track] = []
+        for volume in raw_volumes:
+            for raw_track in volume or ():
+                tracks.append(self._map_track(raw_track))
+        return tuple(tracks)
+
+    def get_artist_direct_albums(self, artist_id: str, *, limit: int = 50) -> Sequence[Album]:
+        client = self._require_client()
+        try:
+            raw_albums = client.artists_direct_albums(
+                artist_id,
+                page=0,
+                page_size=limit,
+                sort_by="year",
+            )
+        except Exception as exc:
+            raise NetworkError(f"Failed to load artist albums for {artist_id}") from exc
+        albums = getattr(raw_albums, "albums", None) or raw_albums or ()
+        return tuple(self._map_album(album) for album in albums[:limit])
+
+    def get_artist_compilation_albums(
+        self,
+        artist_id: str,
+        *,
+        limit: int = 50,
+    ) -> Sequence[Album]:
+        client = self._require_client()
+        try:
+            raw_albums = client.artists_also_albums(
+                artist_id,
+                page=0,
+                page_size=limit,
+                sort_by="year",
+            )
+        except Exception as exc:
+            raise NetworkError(f"Failed to load artist compilation albums for {artist_id}") from exc
+        albums = getattr(raw_albums, "albums", None) or raw_albums or ()
+        return tuple(self._map_album(album) for album in albums[:limit])
+
+    def get_artist_tracks(self, artist_id: str, *, limit: int = 50) -> Sequence[Track]:
+        client = self._require_client()
+        try:
+            raw_tracks = client.artists_tracks(
+                artist_id,
+                page=0,
+                page_size=limit,
+            )
+        except Exception as exc:
+            raise NetworkError(f"Failed to load artist tracks for {artist_id}") from exc
+        tracks = getattr(raw_tracks, "tracks", None) or raw_tracks or ()
+        return tuple(self._map_track(track) for track in tracks[:limit])
 
     def resolve_stream_ref(self, track: Track) -> str:
         if not track.available:
@@ -249,6 +360,11 @@ class YandexMusicService(MusicService):
 
     def _map_playlist(self, raw_playlist: Any) -> Playlist:
         owner = getattr(raw_playlist, "owner", None)
+        owner_id = (
+            getattr(raw_playlist, "uid", None)
+            or getattr(owner, "uid", None)
+            or getattr(owner, "id", None)
+        )
         owner_name = getattr(owner, "name", None) or getattr(owner, "login", None)
         playlist_id = str(
             getattr(raw_playlist, "kind", getattr(raw_playlist, "playlist_uuid", "unknown"))
@@ -259,9 +375,54 @@ class YandexMusicService(MusicService):
         return Playlist(
             id=playlist_id,
             title=getattr(raw_playlist, "title", playlist_id),
+            owner_id=str(owner_id) if owner_id is not None else None,
             owner_name=owner_name,
             description=getattr(raw_playlist, "description", None),
             track_count=getattr(raw_playlist, "track_count", None),
+            artwork_ref=artwork_ref,
+        )
+
+    def _map_album(self, raw_album: Any) -> Album:
+        album_id = str(getattr(raw_album, "id", "unknown"))
+        artists = tuple(
+            getattr(artist, "name", str(artist))
+            for artist in (getattr(raw_album, "artists", None) or ())
+        )
+        year = getattr(raw_album, "year", None)
+        return Album(
+            id=album_id,
+            title=getattr(raw_album, "title", album_id),
+            artists=artists,
+            release_type=getattr(raw_album, "type", None),
+            year=int(year) if year else None,
+            track_count=getattr(raw_album, "track_count", None),
+            artwork_ref=getattr(raw_album, "cover_uri", None),
+        )
+
+    def _bucket_albums(
+        self,
+        albums: tuple[Album, ...],
+    ) -> tuple[tuple[Album, ...], tuple[Album, ...], tuple[Album, ...]]:
+        regular: list[Album] = []
+        singles: list[Album] = []
+        compilations: list[Album] = []
+        for album in albums:
+            if album.release_type == "single":
+                singles.append(album)
+            elif album.release_type == "compilation":
+                compilations.append(album)
+            else:
+                regular.append(album)
+        return tuple(regular), tuple(singles), tuple(compilations)
+
+    def _map_artist(self, raw_artist: Any) -> Artist:
+        artist_id = str(getattr(raw_artist, "id", "unknown"))
+        artwork_ref = getattr(raw_artist, "cover_uri", None)
+        if artwork_ref is None and hasattr(raw_artist, "get_cover_url"):
+            artwork_ref = raw_artist.get_cover_url()
+        return Artist(
+            id=artist_id,
+            name=getattr(raw_artist, "name", artist_id),
             artwork_ref=artwork_ref,
         )
 

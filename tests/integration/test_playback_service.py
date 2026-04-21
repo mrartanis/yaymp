@@ -4,7 +4,9 @@ import pytest
 
 from app.application.playback_service import PlaybackService
 from app.domain import (
+    Album,
     AudioQuality,
+    CatalogSearchResults,
     PlaybackBackendError,
     PlaybackStatus,
     RepeatMode,
@@ -63,6 +65,10 @@ class FakeMusicService:
         del query, limit
         return ()
 
+    def search_catalog(self, query: str, *, limit: int = 25):
+        del query, limit
+        return CatalogSearchResults()
+
     def get_liked_tracks(self, *, limit: int = 100):
         del limit
         return ()
@@ -96,11 +102,31 @@ class FakeMusicService:
             return batches.pop(0)
         return ()
 
-    def get_playlist(self, playlist_id: str):
+    def get_playlist(self, playlist_id: str, *, owner_id: str | None = None):
+        del owner_id
         raise NotImplementedError
 
-    def get_playlist_tracks(self, playlist_id: str):
-        del playlist_id
+    def get_playlist_tracks(self, playlist_id: str, *, owner_id: str | None = None):
+        del playlist_id, owner_id
+        return ()
+
+    def get_album(self, album_id: str):
+        return Album(id=album_id, title=f"Album {album_id}")
+
+    def get_album_tracks(self, album_id: str):
+        del album_id
+        return ()
+
+    def get_artist_direct_albums(self, artist_id: str, *, limit: int = 50):
+        del artist_id, limit
+        return ()
+
+    def get_artist_compilation_albums(self, artist_id: str, *, limit: int = 50):
+        del artist_id, limit
+        return ()
+
+    def get_artist_tracks(self, artist_id: str, *, limit: int = 50):
+        del artist_id, limit
         return ()
 
     def resolve_stream_ref(self, track: Track) -> str:
@@ -148,6 +174,25 @@ def test_replace_queue_and_play_from_index() -> None:
     assert snapshot.current_item is not None
     assert snapshot.current_item.track.id == "two"
     assert len(snapshot.queue) == 3
+
+
+def test_append_queue_preserves_source_context() -> None:
+    service = PlaybackService(
+        playback_engine=FakePlaybackEngine(),
+        logger=TestLogger(),
+    )
+    service.replace_queue(build_tracks()[:1], start_index=0, source_type="track", source_id="one")
+
+    snapshot = service.append_queue(
+        build_tracks()[1:],
+        source_type="album",
+        source_id="album-1",
+    )
+
+    assert [item.track.id for item in snapshot.queue] == ["one", "two", "three"]
+    assert snapshot.queue[1].source_type == "album"
+    assert snapshot.queue[1].source_id == "album-1"
+    assert snapshot.queue[1].source_index == 0
 
 
 def test_play_single_track_replaces_queue_and_starts_playback() -> None:

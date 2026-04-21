@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from app.application.library_service import LibraryService
 from app.application.search_service import SearchService
-from app.domain import AudioQuality, Playlist, Station, Track
+from app.domain import Album, Artist, AudioQuality, CatalogSearchResults, Playlist, Station, Track
 
 
 class TestLogger:
@@ -65,6 +65,22 @@ class FakeMusicService:
     def search_tracks(self, query: str, *, limit: int = 25):
         return (Track(id=f"{query}-{limit}", title=query, artists=("Artist",)),)
 
+    def search_catalog(self, query: str, *, limit: int = 25):
+        return CatalogSearchResults(
+            tracks=(Track(id=f"{query}-{limit}", title=query, artists=("Artist",)),),
+            albums=(Album(id=f"album-{query}", title=f"Album {query}", artists=("Artist",)),),
+            singles=(
+                Album(
+                    id=f"single-{query}",
+                    title=f"Single {query}",
+                    artists=("Artist",),
+                    release_type="single",
+                ),
+            ),
+            artists=(Artist(id=f"artist-{query}", name=f"Artist {query}"),),
+            playlists=(Playlist(id=f"playlist-{query}", title=f"Playlist {query}"),),
+        )
+
     def get_liked_tracks(self, *, limit: int = 100):
         return (
             Track(
@@ -100,11 +116,51 @@ class FakeMusicService:
     def get_station_tracks(self, station_id: str, *, limit: int = 25):
         return (Track(id=f"{station_id}-{limit}", title="Wave", artists=("Artist",)),)
 
-    def get_playlist(self, playlist_id: str):
+    def get_playlist(self, playlist_id: str, *, owner_id: str | None = None):
+        del owner_id
         return Playlist(id=playlist_id, title=f"Playlist {playlist_id}")
 
-    def get_playlist_tracks(self, playlist_id: str):
+    def get_playlist_tracks(self, playlist_id: str, *, owner_id: str | None = None):
+        del owner_id
         return (Track(id=f"{playlist_id}-track", title="Playlist Track", artists=("Artist",)),)
+
+    def get_album(self, album_id: str):
+        return Album(id=album_id, title=f"Album {album_id}", artists=("Artist",))
+
+    def get_album_tracks(self, album_id: str):
+        return (Track(id=f"{album_id}-track", title="Album Track", artists=("Artist",)),)
+
+    def get_artist_direct_albums(self, artist_id: str, *, limit: int = 50):
+        del limit
+        return (
+            Album(id=f"{artist_id}-direct", title="Direct Album", artists=("Artist",)),
+            Album(
+                id=f"{artist_id}-single",
+                title="Direct Single",
+                artists=("Artist",),
+                release_type="single",
+            ),
+        )
+
+    def get_artist_compilation_albums(self, artist_id: str, *, limit: int = 50):
+        del limit
+        return (
+            Album(
+                id=f"{artist_id}-also",
+                title="Also Album",
+                artists=("Various",),
+                release_type="compilation",
+            ),
+        )
+
+    def get_artist_tracks(self, artist_id: str, *, limit: int = 50):
+        return (
+            Track(
+                id=f"{artist_id}-top-{limit}",
+                title="Top Track",
+                artists=("Artist",),
+            ),
+        )
 
     def resolve_stream_ref(self, track: Track) -> str:
         return track.stream_ref or f"stream:{track.id}"
@@ -127,6 +183,31 @@ def test_search_service_updates_recent_searches() -> None:
     assert cache_repo.load_track_metadata("ambient-25") == tracks[0]
 
 
+def test_search_service_returns_grouped_catalog_results() -> None:
+    cache_repo = InMemoryLibraryCacheRepo()
+    service = SearchService(
+        music_service=FakeMusicService(),
+        library_cache_repo=cache_repo,
+        logger=TestLogger(),
+    )
+
+    results = service.search_catalog("ambient")
+
+    assert [track.id for track in results.tracks] == ["ambient-25"]
+    assert [album.id for album in results.albums] == [
+        "album-ambient",
+        "artist-ambient-direct",
+    ]
+    assert [album.id for album in results.singles] == [
+        "single-ambient",
+        "artist-ambient-single",
+    ]
+    assert [album.id for album in results.compilations] == ["artist-ambient-also"]
+    assert [artist.id for artist in results.artists] == ["artist-ambient"]
+    assert [playlist.id for playlist in results.playlists] == ["playlist-ambient"]
+    assert cache_repo.load_track_metadata("ambient-25") == results.tracks[0]
+
+
 def test_library_service_exposes_playlists_and_stations() -> None:
     cache_repo = InMemoryLibraryCacheRepo()
     service = LibraryService(
@@ -142,6 +223,8 @@ def test_library_service_exposes_playlists_and_stations() -> None:
     assert [item.id for item in service.load_station_tracks("user:onyourwave")] == [
         "user:onyourwave-25"
     ]
+    assert [item.id for item in service.load_album_tracks("album-1")] == ["album-1-track"]
+    assert [item.id for item in service.load_artist_tracks("artist-1")] == ["artist-1-top-50"]
     assert cache_repo.load_artwork_ref("liked-100") == "liked-cover"
 
 

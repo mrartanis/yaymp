@@ -46,6 +46,38 @@ class PlaybackController(QObject):
     def play_track(self, track: Track) -> None:
         self._execute(lambda: self._playback_service.play_track(track))
 
+    def play_tracks(
+        self,
+        tracks: tuple[Track, ...],
+        *,
+        start_index: int,
+        source_type: str,
+        source_id: str,
+    ) -> None:
+        self._execute(
+            lambda: self._playback_service.replace_queue(
+                tracks,
+                start_index=start_index,
+                source_type=source_type,
+                source_id=source_id,
+            )
+        )
+
+    def append_tracks(
+        self,
+        tracks: tuple[Track, ...],
+        *,
+        source_type: str,
+        source_id: str,
+    ) -> None:
+        self._execute(
+            lambda: self._playback_service.append_queue(
+                tracks,
+                source_type=source_type,
+                source_id=source_id,
+            )
+        )
+
     def play_station(self, station_id: str) -> None:
         self._execute(lambda: self._playback_service.play_station(station_id))
 

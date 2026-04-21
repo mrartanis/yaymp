@@ -2,6 +2,7 @@
 
 from app.domain.audio_quality import AudioQuality
 from app.domain.auth import AuthSession
+from app.domain.catalog import Album, Artist, CatalogSearchResults
 from app.domain.errors import (
     AuthError,
     NetworkError,
@@ -29,6 +30,9 @@ __all__ = [
     "AuthRepo",
     "AuthSession",
     "AudioQuality",
+    "Album",
+    "Artist",
+    "CatalogSearchResults",
     "Clock",
     "LibraryCacheRepo",
     "Logger",

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 class Playlist:
     id: str
     title: str
+    owner_id: str | None = None
     owner_name: str | None = None
     description: str | None = None
     track_count: int | None = None

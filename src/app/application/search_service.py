@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.domain import LibraryCacheRepo, Logger, MusicService, Track
+from app.domain import CatalogSearchResults, LibraryCacheRepo, Logger, MusicService, Track
 
 
 class SearchService:
@@ -25,6 +25,77 @@ class SearchService:
         self._remember_recent_search(normalized_query)
         self._logger.info("Search returned %s tracks for query %s", len(tracks), normalized_query)
         return tracks
+
+    def search_catalog(self, query: str, *, limit: int = 25) -> CatalogSearchResults:
+        normalized_query = query.strip()
+        if not normalized_query:
+            return CatalogSearchResults()
+
+        results = self._music_service.search_catalog(normalized_query, limit=limit)
+        results = self._with_artist_albums(results, limit=limit)
+        self._cache_tracks(results.tracks)
+        self._remember_recent_search(normalized_query)
+        self._logger.info(
+            (
+                "Search returned %s tracks, %s albums, %s singles, %s compilations, "
+                "%s artists, %s playlists for query %s"
+            ),
+            len(results.tracks),
+            len(results.albums),
+            len(results.singles),
+            len(results.compilations),
+            len(results.artists),
+            len(results.playlists),
+            normalized_query,
+        )
+        return results
+
+    def _with_artist_albums(
+        self,
+        results: CatalogSearchResults,
+        *,
+        limit: int,
+    ) -> CatalogSearchResults:
+        albums_by_id = {album.id: album for album in results.albums}
+        singles_by_id = {album.id: album for album in results.singles}
+        compilations_by_id = {album.id: album for album in results.compilations}
+        for artist in results.artists[:3]:
+            for album in self._music_service.get_artist_direct_albums(artist.id, limit=limit):
+                self._add_album_to_bucket(
+                    album,
+                    albums_by_id=albums_by_id,
+                    singles_by_id=singles_by_id,
+                    compilations_by_id=compilations_by_id,
+                )
+            for album in self._music_service.get_artist_compilation_albums(
+                artist.id,
+                limit=limit,
+            ):
+                compilations_by_id.setdefault(album.id, album)
+        return CatalogSearchResults(
+            tracks=results.tracks,
+            albums=tuple(albums_by_id.values()),
+            singles=tuple(singles_by_id.values()),
+            compilations=tuple(compilations_by_id.values()),
+            artists=results.artists,
+            playlists=results.playlists,
+        )
+
+    def _add_album_to_bucket(
+        self,
+        album,
+        *,
+        albums_by_id,
+        singles_by_id,
+        compilations_by_id,
+    ) -> None:
+        if album.release_type == "single":
+            singles_by_id.setdefault(album.id, album)
+            return
+        if album.release_type == "compilation":
+            compilations_by_id.setdefault(album.id, album)
+            return
+        albums_by_id.setdefault(album.id, album)
 
     def load_recent_searches(self) -> tuple[str, ...]:
         return tuple(self._library_cache_repo.load_recent_searches())
