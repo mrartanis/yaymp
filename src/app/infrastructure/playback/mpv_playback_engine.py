@@ -74,17 +74,11 @@ class MpvPlaybackEngine(PlaybackEngine):
         )
 
     def seek(self, position_ms: int) -> None:
-        position_seconds = position_ms / 1000.0
+        position_arg = str(round(position_ms / 1000.0))
         try:
-            self._player.command("seek", f"{position_seconds:.3f}", "absolute+exact")
-        except Exception as exact_exc:  # noqa: BLE001
-            try:
-                self._player.command("seek", f"{position_seconds:.3f}", "absolute+keyframes")
-            except Exception as keyframes_exc:  # noqa: BLE001
-                raise PlaybackBackendError(
-                    "Failed to seek playback: "
-                    f"exact={exact_exc}; keyframes={keyframes_exc}"
-                ) from keyframes_exc
+            self._player.string_command("set", "time-pos", position_arg)
+        except Exception as exc:  # noqa: BLE001
+            raise PlaybackBackendError(f"Failed to seek playback: {exc}") from exc
         self._state = PlaybackState(
             status=self._state.status,
             position_ms=position_ms,
