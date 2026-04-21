@@ -173,7 +173,7 @@ Result:
 
 ## Step 8: Harden Persistence and Error Handling
 
-Status: next
+Status: done
 
 Prevent state sprawl before the app becomes harder to change.
 
