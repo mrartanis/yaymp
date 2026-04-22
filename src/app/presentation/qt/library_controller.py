@@ -12,6 +12,12 @@ from app.domain.errors import DomainError
 
 
 @dataclass(frozen=True, slots=True)
+class BrowserTab:
+    id: str
+    title: str
+
+
+@dataclass(frozen=True, slots=True)
 class BrowserItem:
     kind: str
     title: str
@@ -28,6 +34,8 @@ class BrowserContent:
     title: str
     items: tuple[BrowserItem, ...]
     recent_searches: tuple[str, ...] = ()
+    tabs: tuple[BrowserTab, ...] = ()
+    active_tab: str | None = None
     source_type: str | None = None
     source_id: str | None = None
     source_tracks: tuple[Track, ...] = ()
@@ -53,33 +61,53 @@ class LibraryController(QObject):
         self._last_search_query: str | None = None
         self._last_search_results: CatalogSearchResults | None = None
         self._active_search_tab = "tracks"
+        self._active_page: tuple[str, object | None] = ("search", None)
 
     def initialize(self) -> None:
-        self._emit_content(
-            BrowserContent(title="Search", items=(), recent_searches=self.recent_searches())
-        )
+        self._emit_content(self._empty_search_content(self._active_search_tab))
 
     def recent_searches(self) -> tuple[str, ...]:
         return self._search_service.load_recent_searches()
 
-    def search_tracks(self, query: str) -> None:
-        self._execute(
-            lambda: self._search_content(query, tab=self._active_search_tab, refresh=True)
-        )
-
-    def show_search_tab(self, tab: str) -> None:
-        self._active_search_tab = tab
+    def show_search_page(self) -> None:
+        self._active_page = ("search", None)
         if self._last_search_results is None or self._last_search_query is None:
+            self._emit_content(self._empty_search_content(self._active_search_tab))
             return
         self._execute(
             lambda: self._search_content(
                 self._last_search_query or "",
-                tab=tab,
+                tab=self._active_search_tab,
                 refresh=False,
             )
         )
 
+    def search_tracks(self, query: str) -> None:
+        self._active_page = ("search", None)
+        self._execute(
+            lambda: self._search_content(query, tab=self._active_search_tab, refresh=True)
+        )
+
+    def show_browser_tab(self, tab: str) -> None:
+        page, payload = self._active_page
+        if page == "artist" and isinstance(payload, Artist):
+            self._execute(lambda: self._artist_content(payload, tab=tab))
+            return
+        if page == "search":
+            self._active_search_tab = tab
+            if self._last_search_results is None or self._last_search_query is None:
+                self._emit_content(self._empty_search_content(tab))
+                return
+            self._execute(
+                lambda: self._search_content(
+                    self._last_search_query or "",
+                    tab=tab,
+                    refresh=False,
+                )
+            )
+
     def load_liked_tracks(self) -> None:
+        self._active_page = ("list", None)
         self._execute(
             lambda: BrowserContent(
                 title="My Tracks",
@@ -88,7 +116,28 @@ class LibraryController(QObject):
             )
         )
 
+    def load_liked_albums(self) -> None:
+        self._active_page = ("list", None)
+        self._execute(
+            lambda: BrowserContent(
+                title="My Albums",
+                items=self._album_items(self._library_service.load_liked_albums()),
+                recent_searches=self.recent_searches(),
+            )
+        )
+
+    def load_liked_artists(self) -> None:
+        self._active_page = ("list", None)
+        self._execute(
+            lambda: BrowserContent(
+                title="My Artists",
+                items=self._artist_items(self._library_service.load_liked_artists()),
+                recent_searches=self.recent_searches(),
+            )
+        )
+
     def load_playlists(self) -> None:
+        self._active_page = ("list", None)
         self._execute(
             lambda: BrowserContent(
                 title="Playlists",
@@ -110,6 +159,7 @@ class LibraryController(QObject):
         self.open_station(Station(id="user:onyourwave", title="My Wave"))
 
     def open_playlist(self, playlist: Playlist) -> None:
+        self._active_page = ("source", playlist)
         self._execute(
             lambda: self._source_content(
                 title=playlist.title,
@@ -123,6 +173,7 @@ class LibraryController(QObject):
         )
 
     def open_album(self, album: Album) -> None:
+        self._active_page = ("source", album)
         self._execute(
             lambda: self._source_content(
                 title=album.title,
@@ -133,6 +184,7 @@ class LibraryController(QObject):
         )
 
     def open_station(self, station: Station) -> None:
+        self._active_page = ("source", station)
         self._execute(
             lambda: self._source_content(
                 title=station.title,
@@ -143,14 +195,8 @@ class LibraryController(QObject):
         )
 
     def open_artist(self, artist: Artist) -> None:
-        self._execute(
-            lambda: self._source_content(
-                title=f"{artist.name} | Top Tracks",
-                source_type="artist",
-                source_id=artist.id,
-                tracks=self._library_service.load_artist_tracks(artist.id),
-            )
-        )
+        self._active_page = ("artist", artist)
+        self._execute(lambda: self._artist_content(artist, tab="top_tracks"))
 
     def like_track(self, track: Track) -> None:
         self._execute_mutation(
@@ -191,6 +237,70 @@ class LibraryController(QObject):
             title=f"{title} | {self._search_tab_title(tab)}",
             items=self._search_tab_items(results, tab=tab, query=normalized_query),
             recent_searches=self.recent_searches(),
+            tabs=self._search_tabs(),
+            active_tab=tab,
+        )
+
+    def _empty_search_content(self, tab: str) -> BrowserContent:
+        return BrowserContent(
+            title=f"Search | {self._search_tab_title(tab)}",
+            items=(),
+            recent_searches=self.recent_searches(),
+            tabs=self._search_tabs(),
+            active_tab=tab,
+        )
+
+    def _artist_content(self, artist: Artist, *, tab: str) -> BrowserContent:
+        if tab == "albums":
+            return BrowserContent(
+                title=f"Artist: {artist.name} | Albums",
+                items=self._album_items(self._artist_albums(artist.id, release_type=None)),
+                recent_searches=self.recent_searches(),
+                tabs=self._artist_tabs(),
+                active_tab=tab,
+            )
+        if tab == "singles":
+            return BrowserContent(
+                title=f"Artist: {artist.name} | Singles",
+                items=self._album_items(self._artist_albums(artist.id, release_type="single")),
+                recent_searches=self.recent_searches(),
+                tabs=self._artist_tabs(),
+                active_tab=tab,
+            )
+        if tab == "compilations":
+            return BrowserContent(
+                title=f"Artist: {artist.name} | Compilations",
+                items=self._album_items(
+                    self._library_service.load_artist_compilation_albums(artist.id)
+                ),
+                recent_searches=self.recent_searches(),
+                tabs=self._artist_tabs(),
+                active_tab=tab,
+            )
+        if tab == "radio":
+            return BrowserContent(
+                title=f"Artist: {artist.name} | Radio",
+                items=self._artist_radio_items((artist,)),
+                recent_searches=self.recent_searches(),
+                tabs=self._artist_tabs(),
+                active_tab=tab,
+            )
+
+        tracks = self._library_service.load_artist_tracks(artist.id)
+        return BrowserContent(
+            title=f"Artist: {artist.name} | Top Tracks",
+            items=self._track_items(
+                tracks,
+                source_type="artist",
+                source_id=artist.id,
+                source_tracks=tracks,
+            ),
+            recent_searches=self.recent_searches(),
+            tabs=self._artist_tabs(),
+            active_tab="top_tracks",
+            source_type="artist",
+            source_id=artist.id,
+            source_tracks=tracks,
         )
 
     def _source_content(
@@ -268,6 +378,32 @@ class LibraryController(QObject):
             "artist_radio": "Artist Radio",
             "tracks": "Tracks",
         }.get(tab, "Tracks")
+
+    def _search_tabs(self) -> tuple[BrowserTab, ...]:
+        return (
+            BrowserTab("tracks", "Tracks"),
+            BrowserTab("playlists", "Playlists"),
+            BrowserTab("albums", "Albums"),
+            BrowserTab("singles", "Singles"),
+            BrowserTab("compilations", "Compilations"),
+            BrowserTab("artists", "Artists"),
+            BrowserTab("artist_radio", "Artist Radio"),
+        )
+
+    def _artist_tabs(self) -> tuple[BrowserTab, ...]:
+        return (
+            BrowserTab("top_tracks", "Top Tracks"),
+            BrowserTab("albums", "Albums"),
+            BrowserTab("singles", "Singles"),
+            BrowserTab("compilations", "Compilations"),
+            BrowserTab("radio", "Radio"),
+        )
+
+    def _artist_albums(self, artist_id: str, *, release_type: str | None) -> tuple[Album, ...]:
+        albums = self._library_service.load_artist_direct_albums(artist_id)
+        if release_type is None:
+            return tuple(album for album in albums if album.release_type != "single")
+        return tuple(album for album in albums if album.release_type == release_type)
 
     def _album_items(self, albums: tuple[Album, ...]) -> tuple[BrowserItem, ...]:
         return tuple(

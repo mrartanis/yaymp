@@ -6,8 +6,8 @@ from typing import Any, Protocol, runtime_checkable
 
 from app.domain.audio_quality import AudioQuality
 from app.domain.auth import AuthSession
-from app.domain.catalog import Album, CatalogSearchResults
-from app.domain.playback import PlaybackState
+from app.domain.catalog import Album, Artist, CatalogSearchResults
+from app.domain.playback import PlaybackState, QueueItem, SavedPlaybackQueue
 from app.domain.playlist import Playlist
 from app.domain.station import Station
 from app.domain.track import Track
@@ -31,6 +31,10 @@ class MusicService(Protocol):
     def search_catalog(self, query: str, *, limit: int = 25) -> CatalogSearchResults: ...
 
     def get_liked_tracks(self, *, limit: int = 100) -> Sequence[Track]: ...
+
+    def get_liked_albums(self, *, limit: int = 100) -> Sequence[Album]: ...
+
+    def get_liked_artists(self, *, limit: int = 100) -> Sequence[Artist]: ...
 
     def like_track(self, track_id: str) -> None: ...
 
@@ -90,6 +94,19 @@ class PlaybackEngine(Protocol):
     def set_volume(self, volume: int) -> None: ...
 
     def get_state(self) -> PlaybackState: ...
+
+
+@runtime_checkable
+class PlaybackStateRepo(Protocol):
+    def load_playback_queue(self) -> SavedPlaybackQueue | None: ...
+
+    def save_playback_queue(
+        self,
+        queue: Sequence[QueueItem],
+        *,
+        active_index: int | None,
+        position_ms: int = 0,
+    ) -> None: ...
 
 
 @runtime_checkable

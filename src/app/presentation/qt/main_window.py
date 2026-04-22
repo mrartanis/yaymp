@@ -29,7 +29,12 @@ from app.bootstrap.container import AppContainer
 from app.domain import Album, Artist, AudioQuality, Playlist, Station, Track
 from app.domain.errors import DomainError
 from app.presentation.qt.auth_dialog import AuthDialog
-from app.presentation.qt.library_controller import BrowserContent, BrowserItem, LibraryController
+from app.presentation.qt.library_controller import (
+    BrowserContent,
+    BrowserItem,
+    BrowserTab,
+    LibraryController,
+)
 from app.presentation.qt.playback_controller import PlaybackController
 
 
@@ -52,6 +57,8 @@ class MainWindow(QMainWindow):
         self._pending_artwork_track_id: str | None = None
         self._auth_dialog: AuthDialog | None = None
         self._auth_flow_checked = False
+        self._browser_tab_ids: tuple[str, ...] = ()
+        self._updating_browser_tabs = False
         self._playback_poll_timer = QTimer(self)
         self._playback_poll_timer.setInterval(1000)
         self.setWindowTitle("YAYMP")
@@ -146,11 +153,15 @@ class MainWindow(QMainWindow):
         assert layout is not None
         self._search_nav_button = QPushButton("Search")
         self._liked_nav_button = QPushButton("My Tracks")
+        self._liked_albums_nav_button = QPushButton("My Albums")
+        self._liked_artists_nav_button = QPushButton("My Artists")
         self._playlists_nav_button = QPushButton("Playlists")
         self._my_wave_nav_button = QPushButton("My Wave")
         for button in (
             self._search_nav_button,
             self._liked_nav_button,
+            self._liked_albums_nav_button,
+            self._liked_artists_nav_button,
             self._playlists_nav_button,
             self._my_wave_nav_button,
         ):
@@ -179,14 +190,8 @@ class MainWindow(QMainWindow):
         self._recent_searches_combo.setPlaceholderText("Recent searches")
         self._recent_searches_combo.addItem("Recent searches")
         self._browser_title_label = self._panel_label("Search")
-        self._search_tabs = QTabWidget()
-        self._search_tabs.addTab(QWidget(), "Tracks")
-        self._search_tabs.addTab(QWidget(), "Playlists")
-        self._search_tabs.addTab(QWidget(), "Albums")
-        self._search_tabs.addTab(QWidget(), "Singles")
-        self._search_tabs.addTab(QWidget(), "Compilations")
-        self._search_tabs.addTab(QWidget(), "Artists")
-        self._search_tabs.addTab(QWidget(), "Artist Radio")
+        self._browser_tabs = QTabWidget()
+        self._browser_tabs.setVisible(False)
         self._content_list = QListWidget()
         self._content_list.setAlternatingRowColors(True)
         self._track_id_input = QLineEdit()
@@ -220,7 +225,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._playback_state_label, 4, 0, 1, 2)
         layout.addLayout(search_row, 5, 0, 1, 2)
         layout.addWidget(self._browser_title_label, 6, 0, 1, 2)
-        layout.addWidget(self._search_tabs, 7, 0, 1, 2)
+        layout.addWidget(self._browser_tabs, 7, 0, 1, 2)
         layout.addWidget(self._content_list, 8, 0, 1, 2)
         layout.addLayout(like_row, 9, 0, 1, 2)
         layout.addLayout(track_id_row, 10, 0, 1, 2)
@@ -269,6 +274,10 @@ class MainWindow(QMainWindow):
         self._recent_searches_combo.activated.connect(self._apply_recent_search)
         self._search_nav_button.clicked.connect(self._show_search)
         self._liked_nav_button.clicked.connect(self._library_controller.load_liked_tracks)
+        self._liked_albums_nav_button.clicked.connect(self._library_controller.load_liked_albums)
+        self._liked_artists_nav_button.clicked.connect(
+            self._library_controller.load_liked_artists
+        )
         self._playlists_nav_button.clicked.connect(self._library_controller.load_playlists)
         self._my_wave_nav_button.clicked.connect(self._start_my_wave)
         self._play_track_button.clicked.connect(self._play_track_by_id)
@@ -277,7 +286,7 @@ class MainWindow(QMainWindow):
         self._unlike_track_button.clicked.connect(self._unlike_selected_or_current_track)
         self._play_all_button.clicked.connect(self._play_current_source)
         self._append_all_button.clicked.connect(self._append_current_source)
-        self._search_tabs.currentChanged.connect(self._change_search_tab)
+        self._browser_tabs.currentChanged.connect(self._change_browser_tab)
         self._quality_combo.currentIndexChanged.connect(self._apply_audio_quality)
         self._playback_poll_timer.timeout.connect(self._controller.refresh)
         self._artwork_manager.finished.connect(self._handle_artwork_downloaded)
@@ -356,26 +365,15 @@ class MainWindow(QMainWindow):
         self._library_controller.search_tracks(self._search_input.text())
 
     def _show_search(self) -> None:
-        self._browser_title_label.setText("Search")
-        self._content_list.clear()
-        self._current_browser_content = None
-        self._play_all_button.setEnabled(False)
-        self._append_all_button.setEnabled(False)
+        self._library_controller.show_search_page()
         self._search_input.setFocus()
 
-    def _change_search_tab(self, index: int) -> None:
-        tabs = (
-            "tracks",
-            "playlists",
-            "albums",
-            "singles",
-            "compilations",
-            "artists",
-            "artist_radio",
-        )
-        if index < 0 or index >= len(tabs):
+    def _change_browser_tab(self, index: int) -> None:
+        if self._updating_browser_tabs:
             return
-        self._library_controller.show_search_tab(tabs[index])
+        if index < 0 or index >= len(self._browser_tab_ids):
+            return
+        self._library_controller.show_browser_tab(self._browser_tab_ids[index])
 
     def _start_my_wave(self) -> None:
         station = Station(id="user:onyourwave", title="My Wave")
@@ -471,6 +469,7 @@ class MainWindow(QMainWindow):
     def _render_content(self, content: BrowserContent) -> None:
         self._current_browser_content = content
         self._browser_title_label.setText(content.title)
+        self._render_browser_tabs(content.tabs, active_tab=content.active_tab)
         self._recent_searches_combo.blockSignals(True)
         self._recent_searches_combo.clear()
         self._recent_searches_combo.addItem("Recent searches")
@@ -501,6 +500,27 @@ class MainWindow(QMainWindow):
         )
         self._play_all_button.setEnabled(can_play_source)
         self._append_all_button.setEnabled(can_play_source)
+
+    def _render_browser_tabs(
+        self,
+        tabs: tuple[BrowserTab, ...],
+        *,
+        active_tab: str | None = None,
+    ) -> None:
+        self._updating_browser_tabs = True
+        self._browser_tabs.clear()
+        self._browser_tab_ids = tuple(tab.id for tab in tabs)
+        for tab in tabs:
+            self._browser_tabs.addTab(QWidget(), tab.title)
+        active_index = (
+            self._browser_tab_ids.index(active_tab)
+            if active_tab in self._browser_tab_ids
+            else 0
+        )
+        if self._browser_tab_ids:
+            self._browser_tabs.setCurrentIndex(active_index)
+        self._browser_tabs.setVisible(bool(self._browser_tab_ids))
+        self._updating_browser_tabs = False
 
     def _render_library_error(self, message: str) -> None:
         self._status_label.setText(f"Library error: {message}")

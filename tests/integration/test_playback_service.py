@@ -9,7 +9,9 @@ from app.domain import (
     CatalogSearchResults,
     PlaybackBackendError,
     PlaybackStatus,
+    QueueItem,
     RepeatMode,
+    SavedPlaybackQueue,
     StreamResolveError,
     Track,
 )
@@ -70,6 +72,14 @@ class FakeMusicService:
         return CatalogSearchResults()
 
     def get_liked_tracks(self, *, limit: int = 100):
+        del limit
+        return ()
+
+    def get_liked_albums(self, *, limit: int = 100):
+        del limit
+        return ()
+
+    def get_liked_artists(self, *, limit: int = 100):
         del limit
         return ()
 
@@ -137,10 +147,17 @@ class FakeMusicService:
 
 
 class FailingPlaybackEngine(FakePlaybackEngine):
-    def __init__(self, *, fail_on_load: bool = False, fail_on_play: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        fail_on_load: bool = False,
+        fail_on_play: bool = False,
+        fail_on_seek: bool = False,
+    ) -> None:
         super().__init__()
         self.fail_on_load = fail_on_load
         self.fail_on_play = fail_on_play
+        self.fail_on_seek = fail_on_seek
 
     def load(self, track: Track, *, stream_ref: str) -> None:
         if self.fail_on_load:
@@ -151,6 +168,32 @@ class FailingPlaybackEngine(FakePlaybackEngine):
         if self.fail_on_play:
             raise PlaybackBackendError("Cannot start playback")
         super().play()
+
+    def seek(self, position_ms: int) -> None:
+        if self.fail_on_seek:
+            raise PlaybackBackendError("Cannot seek yet")
+        super().seek(position_ms)
+
+
+class InMemoryPlaybackStateRepo:
+    def __init__(self, saved_queue: SavedPlaybackQueue | None = None) -> None:
+        self.saved_queue = saved_queue
+
+    def load_playback_queue(self) -> SavedPlaybackQueue | None:
+        return self.saved_queue
+
+    def save_playback_queue(
+        self,
+        queue,
+        *,
+        active_index: int | None,
+        position_ms: int = 0,
+    ) -> None:
+        self.saved_queue = SavedPlaybackQueue(
+            queue=tuple(queue),
+            active_index=active_index,
+            position_ms=position_ms,
+        )
 
 
 def build_tracks() -> tuple[Track, ...]:
@@ -193,6 +236,102 @@ def test_append_queue_preserves_source_context() -> None:
     assert snapshot.queue[1].source_type == "album"
     assert snapshot.queue[1].source_id == "album-1"
     assert snapshot.queue[1].source_index == 0
+
+
+def test_playback_service_persists_queue_after_replace_and_append() -> None:
+    state_repo = InMemoryPlaybackStateRepo()
+    service = PlaybackService(
+        playback_engine=FakePlaybackEngine(),
+        logger=TestLogger(),
+        playback_state_repo=state_repo,
+    )
+
+    service.replace_queue(build_tracks()[:1], start_index=0, source_type="track", source_id="one")
+    service.append_queue(build_tracks()[1:], source_type="album", source_id="album-1")
+
+    assert state_repo.saved_queue is not None
+    assert [item.track.id for item in state_repo.saved_queue.queue] == ["one", "two", "three"]
+    assert state_repo.saved_queue.active_index == 0
+    assert state_repo.saved_queue.position_ms == 0
+
+
+def test_playback_service_persists_seek_position() -> None:
+    state_repo = InMemoryPlaybackStateRepo()
+    service = PlaybackService(
+        playback_engine=FakePlaybackEngine(),
+        logger=TestLogger(),
+        playback_state_repo=state_repo,
+    )
+
+    service.replace_queue(build_tracks(), start_index=0, source_type="album", source_id="album-1")
+    service.seek(45_000)
+
+    assert state_repo.saved_queue is not None
+    assert state_repo.saved_queue.position_ms == 45_000
+
+
+def test_playback_service_restores_saved_queue_without_autoplay() -> None:
+    state_repo = InMemoryPlaybackStateRepo(
+        SavedPlaybackQueue(
+            queue=(
+                QueueItem(
+                    track=Track(id="one", title="One", artists=("Artist",)),
+                    source_type="album",
+                    source_id="album-1",
+                    source_index=0,
+                ),
+            ),
+            active_index=0,
+            position_ms=45_000,
+        )
+    )
+    music_service = FakeMusicService(stream_ref="resolved://one")
+    service = PlaybackService(
+        playback_engine=FakePlaybackEngine(),
+        logger=TestLogger(),
+        music_service=music_service,
+        playback_state_repo=state_repo,
+    )
+
+    restored = service.restore_saved_queue()
+    played = service.play()
+    refreshed = service.refresh()
+
+    assert restored.state.status is PlaybackStatus.STOPPED
+    assert restored.state.position_ms == 45_000
+    assert restored.current_item is not None
+    assert restored.current_item.track.id == "one"
+    assert music_service.resolved_track_ids == ["one"]
+    assert played.state.status is PlaybackStatus.PLAYING
+    assert refreshed.state.status is PlaybackStatus.PLAYING
+    assert refreshed.state.position_ms == 45_000
+
+
+def test_playback_service_retries_restore_seek_until_backend_accepts_it() -> None:
+    state_repo = InMemoryPlaybackStateRepo(
+        SavedPlaybackQueue(
+            queue=(QueueItem(track=Track(id="one", title="One", artists=("Artist",))),),
+            active_index=0,
+            position_ms=45_000,
+        )
+    )
+    engine = FailingPlaybackEngine(fail_on_seek=True)
+    service = PlaybackService(
+        playback_engine=engine,
+        logger=TestLogger(),
+        music_service=FakeMusicService(stream_ref="resolved://one"),
+        playback_state_repo=state_repo,
+    )
+    service.restore_saved_queue()
+    played = service.play()
+    first_refresh = service.refresh()
+    engine.fail_on_seek = False
+    second_refresh = service.refresh()
+
+    assert played.state.status is PlaybackStatus.PLAYING
+    assert first_refresh.state.status is PlaybackStatus.PLAYING
+    assert first_refresh.state.position_ms == 0
+    assert second_refresh.state.position_ms == 45_000
 
 
 def test_play_single_track_replaces_queue_and_starts_playback() -> None:
@@ -421,6 +560,31 @@ def test_station_queue_refills_when_near_end() -> None:
     assert snapshot.current_item.track.id == "w2"
     assert [item.track.id for item in snapshot.queue] == ["w1", "w2", "w3", "w4", "w5"]
     assert music_service.station_requests == ["user:onyourwave", "user:onyourwave"]
+
+
+def test_station_queue_persistence_is_bounded_around_active_item() -> None:
+    state_repo = InMemoryPlaybackStateRepo()
+    tracks = tuple(
+        Track(id=f"w{index}", title=f"Wave {index}", artists=("Artist",), stream_ref=f"s://{index}")
+        for index in range(80)
+    )
+    service = PlaybackService(
+        playback_engine=FakePlaybackEngine(),
+        logger=TestLogger(),
+        playback_state_repo=state_repo,
+    )
+
+    service.replace_queue(
+        tracks,
+        start_index=70,
+        source_type="station",
+        source_id="user:onyourwave",
+    )
+
+    assert state_repo.saved_queue is not None
+    assert len(state_repo.saved_queue.queue) == 50
+    assert state_repo.saved_queue.active_index == 40
+    assert state_repo.saved_queue.queue[40].track.id == "w70"
 
 
 def test_next_rolls_back_active_index_when_backend_load_fails() -> None:

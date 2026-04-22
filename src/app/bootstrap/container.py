@@ -11,7 +11,14 @@ from app.application.playback_service import PlaybackService
 from app.application.search_service import SearchService
 from app.application.settings_service import SettingsService
 from app.bootstrap.config import AppConfig
-from app.domain import AuthSession, LibraryCacheRepo, MusicService, SettingsRepo, Track
+from app.domain import (
+    AuthSession,
+    LibraryCacheRepo,
+    MusicService,
+    PlaybackStateRepo,
+    SettingsRepo,
+    Track,
+)
 from app.domain.errors import AuthError, PlaybackBackendError, StorageError
 from app.infrastructure.persistence import (
     FileArtworkCache,
@@ -19,6 +26,7 @@ from app.infrastructure.persistence import (
     FileLibraryCacheRepo,
     FileSettingsRepo,
     SQLiteLibraryCacheRepo,
+    SQLitePlaybackStateRepo,
     quarantine_state_file,
 )
 from app.infrastructure.playback.fake_playback_engine import FakePlaybackEngine
@@ -74,6 +82,7 @@ def build_container(config: AppConfig, logger: logging.Logger) -> AppContainer:
     music_service.set_audio_quality(settings_service.load_audio_quality())
 
     library_cache_repo = _build_library_cache_repo(config, logger)
+    playback_state_repo = _build_playback_state_repo(config, logger)
     artwork_cache = FileArtworkCache(cache_dir=config.artwork_cache_dir)
     search_service = SearchService(
         music_service=music_service,
@@ -91,14 +100,17 @@ def build_container(config: AppConfig, logger: logging.Logger) -> AppContainer:
         playback_engine=playback_engine,
         logger=logger,
         music_service=music_service,
+        playback_state_repo=playback_state_repo,
     )
     demo_tracks = build_demo_tracks()
-    playback_service.replace_queue(
-        demo_tracks,
-        start_index=0,
-        source_type="demo",
-        source_id="bootstrap-demo",
-    )
+    restored_snapshot = playback_service.restore_saved_queue()
+    if not restored_snapshot.queue:
+        playback_service.replace_queue(
+            demo_tracks,
+            start_index=0,
+            source_type="demo",
+            source_id="bootstrap-demo",
+        )
     playback_service.set_volume(settings_service.load_volume())
     return AppContainer(
         config=config,
@@ -167,6 +179,18 @@ def _build_library_cache_repo(config: AppConfig, logger: logging.Logger) -> Libr
             logger.warning("Falling back to JSON library cache: %s", recovery_exc)
             return FileLibraryCacheRepo(file_path=config.library_cache_file)
     logger.info("Using SQLite library cache: %s", config.library_cache_db_file)
+    return repo
+
+
+def _build_playback_state_repo(
+    config: AppConfig,
+    logger: logging.Logger,
+) -> PlaybackStateRepo | None:
+    try:
+        repo = SQLitePlaybackStateRepo(db_path=config.library_cache_db_file)
+    except StorageError as exc:
+        logger.warning("Playback queue state will not be persisted: %s", exc)
+        return None
     return repo
 
 

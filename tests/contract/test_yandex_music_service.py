@@ -143,6 +143,13 @@ class LikesStub:
         return self._tracks
 
 
+class LikeStub:
+    def __init__(self, *, album=None, artist=None, entity_id: str | None = None) -> None:
+        self.album = album
+        self.artist = artist
+        self.id = entity_id
+
+
 class FakeYandexClient:
     def __init__(self) -> None:
         self.track = TrackStub(track_id="track-1", title="Remote")
@@ -169,6 +176,8 @@ class FakeYandexClient:
         )()
         self.artist_tracks = type("ArtistTracksStub", (), {"tracks": [self.track]})()
         self.likes = LikesStub([self.track])
+        self.album_likes = [LikeStub(album=self.album)]
+        self.artist_likes = [LikeStub(artist=ArtistResultStub())]
         self.download_infos = [DownloadInfoStub("https://stream.example/track-1")]
         self.account = type("Account", (), {"uid": 7, "login": "listener"})()
         self.me = type("Me", (), {"account": self.account})()
@@ -188,6 +197,14 @@ class FakeYandexClient:
     def users_likes_tracks(self):
         return self.likes
 
+    def users_likes_albums(self, user_id=None, rich: bool = True):
+        del user_id, rich
+        return self.album_likes
+
+    def users_likes_artists(self, user_id=None, with_timestamps: bool = True):
+        del user_id, with_timestamps
+        return self.artist_likes
+
     def users_likes_tracks_add(self, track_id: str):
         self.liked_track_ids.append(track_id)
 
@@ -204,6 +221,10 @@ class FakeYandexClient:
     def albums(self, album_id: str):
         del album_id
         return [self.album]
+
+    def artists(self, artist_ids):
+        del artist_ids
+        return [ArtistResultStub()]
 
     def albums_with_tracks(self, album_id: str):
         del album_id
@@ -295,6 +316,8 @@ def test_yandex_music_service_maps_track_and_playlist_data() -> None:
     search_tracks = service.search_tracks("remote")
     search_results = service.search_catalog("remote")
     liked_tracks = service.get_liked_tracks()
+    liked_albums = service.get_liked_albums()
+    liked_artists = service.get_liked_artists()
     user_playlists = service.get_user_playlists()
     generated_playlists = service.get_generated_playlists()
     stations = service.get_stations()
@@ -338,6 +361,8 @@ def test_yandex_music_service_maps_track_and_playlist_data() -> None:
     assert [item.id for item in search_results.playlists] == ["playlist-1"]
     assert [item.id for item in liked_tracks] == ["track-1"]
     assert liked_tracks[0].is_liked is True
+    assert [item.id for item in liked_albums] == ["album-1"]
+    assert [item.id for item in liked_artists] == ["artist-1"]
     assert [item.id for item in user_playlists] == ["playlist-1"]
     assert [item.id for item in generated_playlists] == ["generated-1"]
     assert generated_playlists[0].is_generated is True

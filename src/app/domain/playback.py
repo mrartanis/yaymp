@@ -28,6 +28,13 @@ class QueueItem:
 
 
 @dataclass(frozen=True, slots=True)
+class SavedPlaybackQueue:
+    queue: tuple[QueueItem, ...] = ()
+    active_index: int | None = None
+    position_ms: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class PlaybackState:
     status: PlaybackStatus = PlaybackStatus.STOPPED
     active_index: int | None = None

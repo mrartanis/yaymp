@@ -11,7 +11,13 @@ from app.domain.errors import (
     StreamResolveError,
     TrackUnavailableError,
 )
-from app.domain.playback import PlaybackState, PlaybackStatus, QueueItem, RepeatMode
+from app.domain.playback import (
+    PlaybackState,
+    PlaybackStatus,
+    QueueItem,
+    RepeatMode,
+    SavedPlaybackQueue,
+)
 from app.domain.playlist import Playlist
 from app.domain.protocols import (
     AuthRepo,
@@ -20,6 +26,7 @@ from app.domain.protocols import (
     Logger,
     MusicService,
     PlaybackEngine,
+    PlaybackStateRepo,
     SettingsRepo,
 )
 from app.domain.station import Station
@@ -41,10 +48,12 @@ __all__ = [
     "PlaybackBackendError",
     "PlaybackEngine",
     "PlaybackState",
+    "PlaybackStateRepo",
     "PlaybackStatus",
     "Playlist",
     "QueueItem",
     "RepeatMode",
+    "SavedPlaybackQueue",
     "SettingsRepo",
     "Station",
     "StorageError",

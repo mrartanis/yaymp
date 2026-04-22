@@ -7,6 +7,7 @@ from typing import Any
 
 from app.domain import (
     Album,
+    Artist,
     AudioQuality,
     AuthRepo,
     AuthSession,
@@ -17,8 +18,11 @@ from app.domain import (
     MusicService,
     PlaybackEngine,
     PlaybackState,
+    PlaybackStateRepo,
     PlaybackStatus,
     Playlist,
+    QueueItem,
+    SavedPlaybackQueue,
     SettingsRepo,
     Station,
     Track,
@@ -56,6 +60,12 @@ class FakeMusicService:
 
     def get_liked_tracks(self, *, limit: int = 100) -> Sequence[Track]:
         return [Track(id=f"liked-{limit}", title="Liked", artists=("Artist",))]
+
+    def get_liked_albums(self, *, limit: int = 100) -> Sequence[Album]:
+        return [Album(id=f"liked-album-{limit}", title="Liked Album")]
+
+    def get_liked_artists(self, *, limit: int = 100) -> Sequence[Artist]:
+        return [Artist(id=f"liked-artist-{limit}", name="Liked Artist")]
 
     def like_track(self, track_id: str) -> None:
         self.liked_track_id = track_id
@@ -178,6 +188,27 @@ class FakeLibraryCacheRepo:
         self.artwork = (item_id, artwork_ref)
 
 
+class FakePlaybackStateRepo:
+    def load_playback_queue(self) -> SavedPlaybackQueue | None:
+        return SavedPlaybackQueue(
+            queue=(QueueItem(track=Track(id="track-1", title="Track", artists=("Artist",))),),
+            active_index=0,
+        )
+
+    def save_playback_queue(
+        self,
+        queue: Sequence[QueueItem],
+        *,
+        active_index: int | None,
+        position_ms: int = 0,
+    ) -> None:
+        self.saved_queue = SavedPlaybackQueue(
+            queue=tuple(queue),
+            active_index=active_index,
+            position_ms=position_ms,
+        )
+
+
 class FakeAuthRepo:
     def load_session(self) -> AuthSession | None:
         return AuthSession(user_id="user-2", token="token-2")
@@ -197,6 +228,7 @@ class FakeClock:
 def test_fakes_satisfy_runtime_checkable_protocols() -> None:
     assert isinstance(FakeMusicService(), MusicService)
     assert isinstance(FakePlaybackEngine(), PlaybackEngine)
+    assert isinstance(FakePlaybackStateRepo(), PlaybackStateRepo)
     assert isinstance(FakeSettingsRepo(), SettingsRepo)
     assert isinstance(FakeLibraryCacheRepo(), LibraryCacheRepo)
     assert isinstance(FakeAuthRepo(), AuthRepo)

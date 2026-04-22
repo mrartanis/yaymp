@@ -92,6 +92,18 @@ class FakeMusicService:
             ),
         )
 
+    def get_liked_albums(self, *, limit: int = 100):
+        return (
+            Album(
+                id=f"liked-album-{limit}",
+                title="Liked Album",
+                artists=("Artist",),
+            ),
+        )
+
+    def get_liked_artists(self, *, limit: int = 100):
+        return (Artist(id=f"liked-artist-{limit}", name="Liked Artist"),)
+
     def like_track(self, track_id: str):
         self.liked_track_id = track_id
 
@@ -217,6 +229,8 @@ def test_library_service_exposes_playlists_and_stations() -> None:
     )
 
     assert [item.id for item in service.load_liked_tracks()] == ["liked-100"]
+    assert [item.id for item in service.load_liked_albums()] == ["liked-album-100"]
+    assert [item.id for item in service.load_liked_artists()] == ["liked-artist-100"]
     assert [item.id for item in service.load_user_playlists()] == ["playlist-1"]
     assert [item.id for item in service.load_generated_playlists()] == ["generated-1"]
     assert [item.id for item in service.load_stations()] == ["user:onyourwave"]

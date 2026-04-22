@@ -145,6 +145,32 @@ class YandexMusicService(MusicService):
             raise self._map_client_error(exc, "Failed to load liked tracks") from exc
         return tuple(self._map_track(track, is_liked=True) for track in raw_tracks[:limit])
 
+    def get_liked_albums(self, *, limit: int = 100) -> Sequence[Album]:
+        client = self._require_client()
+        try:
+            likes = client.users_likes_albums(rich=True)
+            raw_albums = self._liked_entities(
+                likes,
+                entity_attr="album",
+                fetch_missing=client.albums,
+            )
+        except Exception as exc:
+            raise self._map_client_error(exc, "Failed to load liked albums") from exc
+        return tuple(self._map_album(album) for album in raw_albums[:limit])
+
+    def get_liked_artists(self, *, limit: int = 100) -> Sequence[Artist]:
+        client = self._require_client()
+        try:
+            likes = client.users_likes_artists()
+            raw_artists = self._liked_entities(
+                likes,
+                entity_attr="artist",
+                fetch_missing=client.artists,
+            )
+        except Exception as exc:
+            raise self._map_client_error(exc, "Failed to load liked artists") from exc
+        return tuple(self._map_artist(artist) for artist in raw_artists[:limit])
+
     def like_track(self, track_id: str) -> None:
         client = self._require_client()
         try:
@@ -515,6 +541,32 @@ class YandexMusicService(MusicService):
             operation(track_id)
         except TypeError:
             operation([track_id])
+
+    def _liked_entities(
+        self,
+        likes: Sequence[Any],
+        *,
+        entity_attr: str,
+        fetch_missing: Any,
+    ) -> tuple[Any, ...]:
+        entities: list[Any] = []
+        missing_ids: list[str] = []
+        for like in likes:
+            entity = getattr(like, entity_attr, None)
+            if entity is not None:
+                entities.append(entity)
+                continue
+            entity_id = getattr(like, "id", None)
+            if entity_id is not None:
+                missing_ids.append(str(entity_id))
+
+        if missing_ids:
+            fetched = fetch_missing(missing_ids)
+            if isinstance(fetched, Sequence) and not isinstance(fetched, str):
+                entities.extend(fetched)
+            elif fetched is not None:
+                entities.append(fetched)
+        return tuple(entities)
 
     def _rank_download_infos(self, download_infos: Sequence[Any]) -> tuple[Any, ...]:
         sorted_infos = sorted(

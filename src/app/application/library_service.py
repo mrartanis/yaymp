@@ -1,6 +1,15 @@
 from __future__ import annotations
 
-from app.domain import Album, LibraryCacheRepo, Logger, MusicService, Playlist, Station, Track
+from app.domain import (
+    Album,
+    Artist,
+    LibraryCacheRepo,
+    Logger,
+    MusicService,
+    Playlist,
+    Station,
+    Track,
+)
 
 
 class LibraryService:
@@ -20,6 +29,16 @@ class LibraryService:
         self._cache_tracks(tracks)
         self._logger.info("Loaded %s liked tracks", len(tracks))
         return tracks
+
+    def load_liked_albums(self, *, limit: int = 100) -> tuple[Album, ...]:
+        albums = tuple(self._music_service.get_liked_albums(limit=limit))
+        self._logger.info("Loaded %s liked albums", len(albums))
+        return albums
+
+    def load_liked_artists(self, *, limit: int = 100) -> tuple[Artist, ...]:
+        artists = tuple(self._music_service.get_liked_artists(limit=limit))
+        self._logger.info("Loaded %s liked artists", len(artists))
+        return artists
 
     def load_user_playlists(self) -> tuple[Playlist, ...]:
         playlists = tuple(self._music_service.get_user_playlists())
@@ -69,6 +88,26 @@ class LibraryService:
         self._cache_tracks(tracks)
         self._logger.info("Loaded %s artist tracks for %s", len(tracks), artist_id)
         return tracks
+
+    def load_artist_direct_albums(
+        self,
+        artist_id: str,
+        *,
+        limit: int = 50,
+    ) -> tuple[Album, ...]:
+        albums = tuple(self._music_service.get_artist_direct_albums(artist_id, limit=limit))
+        self._logger.info("Loaded %s direct artist albums for %s", len(albums), artist_id)
+        return albums
+
+    def load_artist_compilation_albums(
+        self,
+        artist_id: str,
+        *,
+        limit: int = 50,
+    ) -> tuple[Album, ...]:
+        albums = tuple(self._music_service.get_artist_compilation_albums(artist_id, limit=limit))
+        self._logger.info("Loaded %s artist compilation albums for %s", len(albums), artist_id)
+        return albums
 
     def like_track(self, track: Track) -> Track:
         self._music_service.like_track(track.id)

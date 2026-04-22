@@ -3,11 +3,13 @@ from __future__ import annotations
 import random
 from collections.abc import Sequence
 from dataclasses import dataclass
+from time import monotonic
 
 from app.domain import (
     Logger,
     PlaybackEngine,
     PlaybackState,
+    PlaybackStateRepo,
     PlaybackStatus,
     QueueItem,
     RepeatMode,
@@ -27,6 +29,10 @@ class PlaybackSnapshot:
 class PlaybackService:
     _STATION_QUEUE_REFILL_THRESHOLD = 3
     _STATION_QUEUE_BATCH_SIZE = 10
+    _STATION_QUEUE_RETAIN_BEFORE_ACTIVE = 10
+    _STATION_QUEUE_MAX_LENGTH = 60
+    _STATION_QUEUE_PERSIST_LENGTH = 50
+    _POSITION_PERSIST_INTERVAL_SECONDS = 5.0
 
     def __init__(
         self,
@@ -34,20 +40,26 @@ class PlaybackService:
         playback_engine: PlaybackEngine,
         logger: Logger,
         music_service: MusicService | None = None,
+        playback_state_repo: PlaybackStateRepo | None = None,
         randomizer: random.Random | None = None,
     ) -> None:
         self._playback_engine = playback_engine
         self._logger = logger
         self._music_service = music_service
+        self._playback_state_repo = playback_state_repo
         self._randomizer = randomizer or random.Random()
         self._queue: list[QueueItem] = []
         self._active_index: int | None = None
+        self._active_item_loaded = False
+        self._restored_position_ms = 0
+        self._pending_restore_seek_ms = 0
         self._repeat_mode = RepeatMode.OFF
         self._shuffle_enabled = False
         self._volume = 100
         self._play_order: list[int] = []
         self._play_order_position: int | None = None
         self._last_observed_status = PlaybackStatus.STOPPED
+        self._last_position_persisted_at = 0.0
 
     def replace_queue(
         self,
@@ -64,6 +76,7 @@ class PlaybackService:
 
         previous_queue = self._queue
         previous_index = self._active_index
+        previous_loaded = self._active_item_loaded
         previous_order = self._play_order
         previous_order_position = self._play_order_position
 
@@ -80,10 +93,13 @@ class PlaybackService:
 
         try:
             self._activate_index(start_index)
-            return self.play()
+            snapshot = self.play()
+            self._persist_playback_queue(position_ms=0)
+            return snapshot
         except Exception:
             self._queue = previous_queue
             self._active_index = previous_index
+            self._active_item_loaded = previous_loaded
             self._play_order = previous_order
             self._play_order_position = previous_order_position
             raise
@@ -111,6 +127,30 @@ class PlaybackService:
             )
         self._rebuild_play_order(anchor_index=self._active_index)
         self._logger.info("Appended %s tracks to queue", len(tracks))
+        self._persist_playback_queue(position_ms=self._current_position_ms())
+        return self.snapshot()
+
+    def restore_saved_queue(self) -> PlaybackSnapshot:
+        if self._playback_state_repo is None:
+            return self.snapshot()
+        try:
+            saved_queue = self._playback_state_repo.load_playback_queue()
+        except Exception as exc:
+            self._logger.warning("Failed to restore playback queue: %s", exc)
+            return self.snapshot()
+
+        if saved_queue is None or not saved_queue.queue:
+            return self.snapshot()
+
+        self._queue = list(saved_queue.queue)
+        if saved_queue.active_index is None:
+            self._active_index = 0
+        else:
+            self._active_index = max(0, min(len(self._queue) - 1, saved_queue.active_index))
+        self._active_item_loaded = False
+        self._restored_position_ms = saved_queue.position_ms
+        self._rebuild_play_order(anchor_index=self._active_index)
+        self._logger.info("Restored %s playback queue items", len(self._queue))
         return self.snapshot()
 
     def snapshot(self) -> PlaybackSnapshot:
@@ -127,6 +167,9 @@ class PlaybackService:
     def play(self) -> PlaybackSnapshot:
         if self.current_item() is None:
             raise PlaybackBackendError("No active queue item to play")
+        if not self._active_item_loaded:
+            self._pending_restore_seek_ms = self._restored_position_ms
+            self._load_current_item()
         self._playback_engine.play()
         self._logger.info("Playback started for index %s", self._active_index)
         return self.snapshot()
@@ -134,6 +177,7 @@ class PlaybackService:
     def pause(self) -> PlaybackSnapshot:
         self._playback_engine.pause()
         self._logger.info("Playback paused")
+        self._persist_playback_queue(position_ms=self._current_position_ms())
         return self.snapshot()
 
     def toggle_play_pause(self) -> PlaybackSnapshot:
@@ -145,6 +189,7 @@ class PlaybackService:
     def stop(self) -> PlaybackSnapshot:
         self._playback_engine.stop()
         self._logger.info("Playback stopped")
+        self._persist_playback_queue(position_ms=0)
         return self.snapshot()
 
     def play_track(
@@ -197,7 +242,9 @@ class PlaybackService:
             return self.snapshot()
 
         self._activate_index(next_index)
-        return self.play()
+        snapshot = self.play()
+        self._persist_playback_queue(position_ms=0)
+        return snapshot
 
     def previous(self) -> PlaybackSnapshot:
         if self._active_index is None:
@@ -215,16 +262,22 @@ class PlaybackService:
 
         previous_index = self._resolve_previous_index()
         self._activate_index(previous_index)
-        return self.play()
+        snapshot = self.play()
+        self._persist_playback_queue(position_ms=0)
+        return snapshot
 
     def seek(self, position_ms: int) -> PlaybackSnapshot:
         self._playback_engine.seek(position_ms)
+        self._persist_playback_queue(position_ms=self._current_position_ms())
         return self.snapshot()
 
     def refresh(self) -> PlaybackSnapshot:
         engine_state = self._playback_engine.get_state()
         if self._should_auto_advance(engine_state):
             return self.next()
+        if self._pending_restore_seek_ms > 0:
+            return self._try_apply_pending_restore_seek(engine_state)
+        self._persist_playback_position_if_due(engine_state)
         return self._build_snapshot(engine_state)
 
     def set_volume(self, volume: int) -> PlaybackSnapshot:
@@ -246,7 +299,9 @@ class PlaybackService:
         if index < 0 or index >= len(self._queue):
             raise PlaybackBackendError("Queue index is out of range")
         self._activate_index(index)
-        return self.play()
+        snapshot = self.play()
+        self._persist_playback_queue(position_ms=0)
+        return snapshot
 
     def _resolve_next_index(self) -> int | None:
         if not self._queue or self._active_index is None:
@@ -282,7 +337,7 @@ class PlaybackService:
         self._play_order_position = previous_position
         return self._play_order[previous_position]
 
-    def _activate_index(self, index: int) -> None:
+    def _activate_index(self, index: int, *, preserve_restored_position: bool = False) -> None:
         current_item = self._queue[index]
         prepared_item = self._prepare_queue_item(current_item)
         self._queue[index] = prepared_item
@@ -290,6 +345,9 @@ class PlaybackService:
         self._playback_engine.load(prepared_item.track, stream_ref=stream_ref)
         self._playback_engine.set_volume(self._volume)
         self._active_index = index
+        self._active_item_loaded = True
+        if not preserve_restored_position:
+            self._restored_position_ms = 0
         self._sync_play_order_position(index)
 
     def _prepare_queue_item(self, item: QueueItem) -> QueueItem:
@@ -347,13 +405,19 @@ class PlaybackService:
         current_item = self.current_item()
         if current_item is None:
             raise PlaybackBackendError("No current queue item")
-        self._activate_index(self._active_index if self._active_index is not None else 0)
+        self._activate_index(
+            self._active_index if self._active_index is not None else 0,
+            preserve_restored_position=True,
+        )
 
     def _compose_state(self, engine_state: PlaybackState) -> PlaybackState:
+        position_ms = engine_state.position_ms
+        if self.current_item() is not None and not self._active_item_loaded:
+            position_ms = self._restored_position_ms
         return PlaybackState(
             status=engine_state.status,
             active_index=self._active_index,
-            position_ms=engine_state.position_ms,
+            position_ms=position_ms,
             duration_ms=engine_state.duration_ms,
             volume=engine_state.volume,
             shuffle_enabled=self._shuffle_enabled,
@@ -420,4 +484,83 @@ class PlaybackService:
 
         if appended:
             self._logger.info("Appended %s station tracks for %s", appended, station_id)
+            self._trim_station_queue()
             self._rebuild_play_order(anchor_index=self._active_index)
+            self._persist_playback_queue(position_ms=self._current_position_ms())
+
+    def _trim_station_queue(self) -> None:
+        current_item = self.current_item()
+        if current_item is None or current_item.source_type != "station":
+            return
+        if self._active_index is None or len(self._queue) <= self._STATION_QUEUE_MAX_LENGTH:
+            return
+
+        drop_count = max(
+            len(self._queue) - self._STATION_QUEUE_MAX_LENGTH,
+            self._active_index - self._STATION_QUEUE_RETAIN_BEFORE_ACTIVE,
+        )
+        drop_count = max(0, min(drop_count, self._active_index))
+        if drop_count <= 0:
+            return
+
+        del self._queue[:drop_count]
+        self._active_index -= drop_count
+
+    def _persist_playback_position_if_due(self, engine_state: PlaybackState) -> None:
+        if self.current_item() is None:
+            return
+        now = monotonic()
+        if now - self._last_position_persisted_at < self._POSITION_PERSIST_INTERVAL_SECONDS:
+            return
+        self._persist_playback_queue(position_ms=engine_state.position_ms)
+
+    def _try_apply_pending_restore_seek(self, engine_state: PlaybackState) -> PlaybackSnapshot:
+        position_ms = self._pending_restore_seek_ms
+        try:
+            self._playback_engine.seek(position_ms)
+        except PlaybackBackendError as exc:
+            self._logger.debug("Restore seek is not ready yet: %s", exc)
+            return self._build_snapshot(engine_state)
+
+        self._pending_restore_seek_ms = 0
+        self._restored_position_ms = 0
+        self._persist_playback_queue(position_ms=position_ms)
+        return self._build_snapshot(self._playback_engine.get_state())
+
+    def _persist_playback_queue(self, *, position_ms: int | None = None) -> None:
+        if self._playback_state_repo is None:
+            return
+        queue, active_index = self._queue_for_persistence()
+        if position_ms is None:
+            position_ms = self._current_position_ms()
+        try:
+            self._playback_state_repo.save_playback_queue(
+                queue,
+                active_index=active_index,
+                position_ms=position_ms if queue else 0,
+            )
+            self._last_position_persisted_at = monotonic()
+        except Exception as exc:
+            self._logger.warning("Failed to save playback queue: %s", exc)
+
+    def _queue_for_persistence(self) -> tuple[tuple[QueueItem, ...], int | None]:
+        active_item = self.current_item()
+        if active_item is not None and active_item.source_type == "demo":
+            return (), None
+        if (
+            active_item is None
+            or active_item.source_type != "station"
+            or self._active_index is None
+        ):
+            return tuple(self._queue), self._active_index if self._queue else None
+
+        start_index = max(0, self._active_index - self._STATION_QUEUE_RETAIN_BEFORE_ACTIVE)
+        end_index = min(len(self._queue), start_index + self._STATION_QUEUE_PERSIST_LENGTH)
+        if end_index - start_index < self._STATION_QUEUE_PERSIST_LENGTH:
+            start_index = max(0, end_index - self._STATION_QUEUE_PERSIST_LENGTH)
+        return tuple(self._queue[start_index:end_index]), self._active_index - start_index
+
+    def _current_position_ms(self) -> int:
+        if self.current_item() is not None and not self._active_item_loaded:
+            return self._restored_position_ms
+        return self._playback_engine.get_state().position_ms
