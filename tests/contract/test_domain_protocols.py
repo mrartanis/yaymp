@@ -14,6 +14,7 @@ from app.domain import (
     CatalogSearchResults,
     Clock,
     LibraryCacheRepo,
+    LikedTrackIds,
     Logger,
     MusicService,
     PlaybackEngine,
@@ -60,6 +61,18 @@ class FakeMusicService:
 
     def get_liked_tracks(self, *, limit: int = 100) -> Sequence[Track]:
         return [Track(id=f"liked-{limit}", title="Liked", artists=("Artist",))]
+
+    def get_liked_track_ids(
+        self,
+        *,
+        if_modified_since_revision: int = 0,
+    ) -> LikedTrackIds | None:
+        del if_modified_since_revision
+        return LikedTrackIds(
+            user_id="user-1",
+            revision=1,
+            track_ids=frozenset({"liked-100"}),
+        )
 
     def get_liked_albums(self, *, limit: int = 100) -> Sequence[Album]:
         return [Album(id=f"liked-album-{limit}", title="Liked Album")]
@@ -172,6 +185,13 @@ class FakeSettingsRepo:
 
 
 class FakeLibraryCacheRepo:
+    def __init__(self) -> None:
+        self.liked_tracks = LikedTrackIds(
+            user_id="user-1",
+            revision=1,
+            track_ids=frozenset({"track-1"}),
+        )
+
     def load_recent_searches(self) -> Sequence[str]:
         return ["ambient", "jazz"]
 
@@ -183,6 +203,28 @@ class FakeLibraryCacheRepo:
 
     def save_track_metadata(self, track: Track) -> None:
         self.track = track
+
+    def load_liked_track_ids(self, user_id: str) -> LikedTrackIds | None:
+        if user_id != self.liked_tracks.user_id:
+            return None
+        return self.liked_tracks
+
+    def save_liked_track_ids(self, liked_tracks: LikedTrackIds) -> None:
+        self.liked_tracks = liked_tracks
+
+    def mark_track_liked(self, user_id: str, track_id: str) -> None:
+        self.liked_tracks = LikedTrackIds(
+            user_id=user_id,
+            revision=self.liked_tracks.revision,
+            track_ids=self.liked_tracks.track_ids | {track_id},
+        )
+
+    def mark_track_unliked(self, user_id: str, track_id: str) -> None:
+        self.liked_tracks = LikedTrackIds(
+            user_id=user_id,
+            revision=self.liked_tracks.revision,
+            track_ids=self.liked_tracks.track_ids - {track_id},
+        )
 
     def load_artwork_ref(self, item_id: str) -> str | None:
         return f"art:{item_id}"

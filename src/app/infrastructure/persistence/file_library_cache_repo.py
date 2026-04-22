@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from app.domain import LibraryCacheRepo, Track
+from app.domain import LibraryCacheRepo, LikedTrackIds, Track
 from app.domain.errors import StorageError
 
 
@@ -75,6 +75,63 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
         }
         self._save_payload(payload)
 
+    def load_liked_track_ids(self, user_id: str) -> LikedTrackIds | None:
+        payload = self._load_payload()
+        liked_tracks = payload.get("liked_tracks", {})
+        if not isinstance(liked_tracks, dict):
+            raise StorageError("Library cache liked tracks are invalid")
+        raw_state = liked_tracks.get(user_id)
+        if raw_state is None:
+            return None
+        if not isinstance(raw_state, dict):
+            raise StorageError("Library cache liked track entry is invalid")
+        raw_ids = raw_state.get("track_ids", ())
+        if not isinstance(raw_ids, list):
+            raise StorageError("Library cache liked track ids are invalid")
+        return LikedTrackIds(
+            user_id=user_id,
+            revision=int(raw_state.get("revision", 0) or 0),
+            track_ids=frozenset(self._normalize_track_id(str(track_id)) for track_id in raw_ids),
+        )
+
+    def save_liked_track_ids(self, liked_tracks: LikedTrackIds) -> None:
+        payload = self._load_payload()
+        raw_liked_tracks = payload.setdefault("liked_tracks", {})
+        if not isinstance(raw_liked_tracks, dict):
+            raise StorageError("Library cache liked tracks are invalid")
+        raw_liked_tracks[liked_tracks.user_id] = {
+            "revision": liked_tracks.revision,
+            "track_ids": sorted(liked_tracks.track_ids),
+            "synced_at": self._now_iso(),
+        }
+        self._save_payload(payload)
+
+    def mark_track_liked(self, user_id: str, track_id: str) -> None:
+        state = self.load_liked_track_ids(user_id)
+        track_ids = set(state.track_ids if state is not None else ())
+        track_ids.add(self._normalize_track_id(track_id))
+        self.save_liked_track_ids(
+            LikedTrackIds(
+                user_id=user_id,
+                revision=state.revision if state is not None else 0,
+                track_ids=frozenset(track_ids),
+            )
+        )
+
+    def mark_track_unliked(self, user_id: str, track_id: str) -> None:
+        state = self.load_liked_track_ids(user_id)
+        if state is None:
+            return
+        track_ids = set(state.track_ids)
+        track_ids.discard(self._normalize_track_id(track_id))
+        self.save_liked_track_ids(
+            LikedTrackIds(
+                user_id=user_id,
+                revision=state.revision,
+                track_ids=frozenset(track_ids),
+            )
+        )
+
     def load_artwork_ref(self, item_id: str) -> str | None:
         payload = self._load_payload()
         artwork = payload.get("artwork", {})
@@ -100,7 +157,7 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
 
     def _load_payload(self) -> dict[str, Any]:
         if not self._file_path.exists():
-            return {"recent_searches": [], "tracks": {}, "artwork": {}}
+            return {"recent_searches": [], "tracks": {}, "artwork": {}, "liked_tracks": {}}
         try:
             payload = json.loads(self._file_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
@@ -110,12 +167,13 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
             return {"recent_searches": payload, "tracks": {}, "artwork": {}}
         if not isinstance(payload, dict):
             raise StorageError("Library cache file is invalid")
-        known_keys = {"recent_searches", "tracks", "artwork"}
+        known_keys = {"recent_searches", "tracks", "artwork", "liked_tracks"}
         if not any(key in payload for key in known_keys):
             raise StorageError("Library cache file is invalid")
         payload.setdefault("recent_searches", [])
         payload.setdefault("tracks", {})
         payload.setdefault("artwork", {})
+        payload.setdefault("liked_tracks", {})
         return payload
 
     def _save_payload(self, payload: dict[str, Any]) -> None:
@@ -151,3 +209,10 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
         if cached_at.tzinfo is None:
             cached_at = cached_at.replace(tzinfo=UTC)
         return datetime.now(tz=UTC) - cached_at > self._CACHE_TTL
+
+    def _normalize_track_id(self, track_id: str) -> str:
+        raw_track_id = str(track_id)
+        base_id, separator, album_id = raw_track_id.partition(":")
+        if separator and base_id.isdigit() and album_id.isdigit():
+            return base_id
+        return raw_track_id

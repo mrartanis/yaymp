@@ -30,7 +30,7 @@ from app.domain.protocols import (
     SettingsRepo,
 )
 from app.domain.station import Station
-from app.domain.track import Track
+from app.domain.track import LikedTrackIds, Track
 
 __all__ = [
     "AuthError",
@@ -42,6 +42,7 @@ __all__ = [
     "CatalogSearchResults",
     "Clock",
     "LibraryCacheRepo",
+    "LikedTrackIds",
     "Logger",
     "MusicService",
     "NetworkError",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.application.track_metadata import merge_cached_liked_states
 from app.domain import (
     Album,
     Artist,
@@ -25,10 +26,30 @@ class LibraryService:
         self._logger = logger
 
     def load_liked_tracks(self, *, limit: int = 100) -> tuple[Track, ...]:
+        self.refresh_liked_track_index(force=True)
         tracks = tuple(self._music_service.get_liked_tracks(limit=limit))
         self._cache_tracks(tracks)
         self._logger.info("Loaded %s liked tracks", len(tracks))
         return tracks
+
+    def refresh_liked_track_index(self, *, force: bool = False) -> None:
+        user_id = self._current_user_id()
+        if user_id is None:
+            return
+        cached_likes = self._library_cache_repo.load_liked_track_ids(user_id)
+        revision = 0 if force or cached_likes is None else cached_likes.revision
+        liked_tracks = self._music_service.get_liked_track_ids(
+            if_modified_since_revision=revision
+        )
+        if liked_tracks is None:
+            self._logger.info("Liked track index is up to date at revision %s", revision)
+            return
+        self._library_cache_repo.save_liked_track_ids(liked_tracks)
+        self._logger.info(
+            "Refreshed liked track index: %s ids at revision %s",
+            len(liked_tracks.track_ids),
+            liked_tracks.revision,
+        )
 
     def load_liked_albums(self, *, limit: int = 100) -> tuple[Album, ...]:
         albums = tuple(self._music_service.get_liked_albums(limit=limit))
@@ -61,7 +82,11 @@ class LibraryService:
         *,
         owner_id: str | None = None,
     ) -> tuple[Track, ...]:
-        tracks = tuple(self._music_service.get_playlist_tracks(playlist_id, owner_id=owner_id))
+        tracks = merge_cached_liked_states(
+            tuple(self._music_service.get_playlist_tracks(playlist_id, owner_id=owner_id)),
+            self._library_cache_repo,
+            user_id=self._current_user_id(),
+        )
         self._cache_tracks(tracks)
         self._logger.info("Loaded %s tracks for playlist %s", len(tracks), playlist_id)
         return tracks
@@ -72,19 +97,31 @@ class LibraryService:
         return album
 
     def load_album_tracks(self, album_id: str) -> tuple[Track, ...]:
-        tracks = tuple(self._music_service.get_album_tracks(album_id))
+        tracks = merge_cached_liked_states(
+            tuple(self._music_service.get_album_tracks(album_id)),
+            self._library_cache_repo,
+            user_id=self._current_user_id(),
+        )
         self._cache_tracks(tracks)
         self._logger.info("Loaded %s tracks for album %s", len(tracks), album_id)
         return tracks
 
     def load_station_tracks(self, station_id: str, *, limit: int = 25) -> tuple[Track, ...]:
-        tracks = tuple(self._music_service.get_station_tracks(station_id, limit=limit))
+        tracks = merge_cached_liked_states(
+            tuple(self._music_service.get_station_tracks(station_id, limit=limit)),
+            self._library_cache_repo,
+            user_id=self._current_user_id(),
+        )
         self._cache_tracks(tracks)
         self._logger.info("Loaded %s station tracks for %s", len(tracks), station_id)
         return tracks
 
     def load_artist_tracks(self, artist_id: str, *, limit: int = 50) -> tuple[Track, ...]:
-        tracks = tuple(self._music_service.get_artist_tracks(artist_id, limit=limit))
+        tracks = merge_cached_liked_states(
+            tuple(self._music_service.get_artist_tracks(artist_id, limit=limit)),
+            self._library_cache_repo,
+            user_id=self._current_user_id(),
+        )
         self._cache_tracks(tracks)
         self._logger.info("Loaded %s artist tracks for %s", len(tracks), artist_id)
         return tracks
@@ -124,6 +161,9 @@ class LibraryService:
             is_liked=True,
         )
         self._cache_tracks((liked_track,))
+        user_id = self._current_user_id()
+        if user_id is not None:
+            self._library_cache_repo.mark_track_liked(user_id, track.id)
         self._logger.info("Liked track %s", track.id)
         return liked_track
 
@@ -142,6 +182,9 @@ class LibraryService:
             is_liked=False,
         )
         self._cache_tracks((unliked_track,))
+        user_id = self._current_user_id()
+        if user_id is not None:
+            self._library_cache_repo.mark_track_unliked(user_id, track.id)
         self._logger.info("Unliked track %s", track.id)
         return unliked_track
 
@@ -153,3 +196,7 @@ class LibraryService:
             self._library_cache_repo.save_track_metadata(track)
             if track.artwork_ref:
                 self._library_cache_repo.save_artwork_ref(track.id, track.artwork_ref)
+
+    def _current_user_id(self) -> str | None:
+        session = self._music_service.get_auth_session()
+        return session.user_id if session is not None else None

@@ -7,6 +7,7 @@ from app.domain import (
     Album,
     AudioQuality,
     CatalogSearchResults,
+    LikedTrackIds,
     PlaybackBackendError,
     PlaybackStatus,
     QueueItem,
@@ -45,7 +46,9 @@ class FakeMusicService:
         self.station_requests: list[str] = []
 
     def get_auth_session(self):
-        return None
+        from app.domain import AuthSession
+
+        return AuthSession(user_id="user-1", token="token")
 
     def build_auth_session(self, token: str, *, expires_at=None):
         from app.domain import AuthSession
@@ -74,6 +77,10 @@ class FakeMusicService:
     def get_liked_tracks(self, *, limit: int = 100):
         del limit
         return ()
+
+    def get_liked_track_ids(self, *, if_modified_since_revision: int = 0):
+        del if_modified_since_revision
+        return LikedTrackIds(user_id="user-1", revision=1, track_ids=frozenset())
 
     def get_liked_albums(self, *, limit: int = 100):
         del limit
@@ -200,6 +207,58 @@ class InMemoryPlaybackStateRepo:
 
     def clear_playback_queue(self) -> None:
         self.saved_queue = None
+
+
+class InMemoryLibraryCacheRepo:
+    def __init__(self) -> None:
+        self.tracks: dict[str, Track] = {}
+        self.liked_tracks: dict[str, LikedTrackIds] = {}
+
+    def load_recent_searches(self):
+        return ()
+
+    def save_recent_searches(self, searches):
+        del searches
+
+    def load_track_metadata(self, track_id: str):
+        return self.tracks.get(track_id)
+
+    def save_track_metadata(self, track: Track):
+        self.tracks[track.id] = track
+
+    def load_liked_track_ids(self, user_id: str):
+        return self.liked_tracks.get(user_id)
+
+    def save_liked_track_ids(self, liked_tracks: LikedTrackIds):
+        self.liked_tracks[liked_tracks.user_id] = liked_tracks
+
+    def mark_track_liked(self, user_id: str, track_id: str):
+        current = self.liked_tracks.get(
+            user_id,
+            LikedTrackIds(user_id=user_id, revision=0, track_ids=frozenset()),
+        )
+        self.liked_tracks[user_id] = LikedTrackIds(
+            user_id=user_id,
+            revision=current.revision,
+            track_ids=current.track_ids | {track_id},
+        )
+
+    def mark_track_unliked(self, user_id: str, track_id: str):
+        current = self.liked_tracks.get(user_id)
+        if current is None:
+            return
+        self.liked_tracks[user_id] = LikedTrackIds(
+            user_id=user_id,
+            revision=current.revision,
+            track_ids=current.track_ids - {track_id},
+        )
+
+    def load_artwork_ref(self, item_id: str):
+        del item_id
+        return None
+
+    def save_artwork_ref(self, item_id: str, artwork_ref: str):
+        del item_id, artwork_ref
 
 
 def build_tracks() -> tuple[Track, ...]:
@@ -602,6 +661,31 @@ def test_play_station_loads_initial_station_queue_and_starts_playback() -> None:
     assert snapshot.current_item is not None
     assert snapshot.current_item.track.id == "w1"
     assert music_service.station_requests[0] == "user:onyourwave"
+
+
+def test_play_station_preserves_cached_liked_state() -> None:
+    music_service = FakeMusicService(stream_ref="resolved://wave")
+    music_service.station_batches["user:onyourwave"] = [
+        (Track(id="w1", title="Wave 1", artists=("Artist",), duration_ms=1_000),)
+    ]
+    cache_repo = InMemoryLibraryCacheRepo()
+    cache_repo.save_track_metadata(
+        Track(id="w1", title="Liked Wave", artists=("Artist",), is_liked=True)
+    )
+    cache_repo.save_liked_track_ids(
+        LikedTrackIds(user_id="user-1", revision=1, track_ids=frozenset({"w1"}))
+    )
+    service = PlaybackService(
+        playback_engine=FakePlaybackEngine(),
+        logger=TestLogger(),
+        music_service=music_service,
+        library_cache_repo=cache_repo,
+    )
+
+    snapshot = service.play_station("user:onyourwave")
+
+    assert snapshot.current_item is not None
+    assert snapshot.current_item.track.is_liked is True
 
 
 def test_station_queue_refills_when_near_end() -> None:

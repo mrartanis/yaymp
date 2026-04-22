@@ -15,3 +15,10 @@ class Track:
     artwork_ref: str | None = None
     available: bool = True
     is_liked: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class LikedTrackIds:
+    user_id: str
+    revision: int
+    track_ids: frozenset[str]

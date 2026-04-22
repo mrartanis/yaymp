@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.application.track_metadata import merge_cached_liked_states
 from app.domain import CatalogSearchResults, LibraryCacheRepo, Logger, MusicService, Track
 
 
@@ -20,7 +21,11 @@ class SearchService:
         if not normalized_query:
             return ()
 
-        tracks = tuple(self._music_service.search_tracks(normalized_query, limit=limit))
+        tracks = merge_cached_liked_states(
+            tuple(self._music_service.search_tracks(normalized_query, limit=limit)),
+            self._library_cache_repo,
+            user_id=self._current_user_id(),
+        )
         self._cache_tracks(tracks)
         self._remember_recent_search(normalized_query)
         self._logger.info("Search returned %s tracks for query %s", len(tracks), normalized_query)
@@ -33,6 +38,18 @@ class SearchService:
 
         results = self._music_service.search_catalog(normalized_query, limit=limit)
         results = self._with_artist_albums(results, limit=limit)
+        results = CatalogSearchResults(
+            tracks=merge_cached_liked_states(
+                results.tracks,
+                self._library_cache_repo,
+                user_id=self._current_user_id(),
+            ),
+            albums=results.albums,
+            singles=results.singles,
+            compilations=results.compilations,
+            artists=results.artists,
+            playlists=results.playlists,
+        )
         self._cache_tracks(results.tracks)
         self._remember_recent_search(normalized_query)
         self._logger.info(
@@ -49,6 +66,10 @@ class SearchService:
             normalized_query,
         )
         return results
+
+    def _current_user_id(self) -> str | None:
+        session = self._music_service.get_auth_session()
+        return session.user_id if session is not None else None
 
     def _with_artist_albums(
         self,

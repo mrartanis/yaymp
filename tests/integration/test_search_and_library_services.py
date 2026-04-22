@@ -2,7 +2,16 @@ from __future__ import annotations
 
 from app.application.library_service import LibraryService
 from app.application.search_service import SearchService
-from app.domain import Album, Artist, AudioQuality, CatalogSearchResults, Playlist, Station, Track
+from app.domain import (
+    Album,
+    Artist,
+    AudioQuality,
+    CatalogSearchResults,
+    LikedTrackIds,
+    Playlist,
+    Station,
+    Track,
+)
 
 
 class TestLogger:
@@ -27,6 +36,7 @@ class InMemoryLibraryCacheRepo:
         self.searches: tuple[str, ...] = ()
         self.tracks: dict[str, Track] = {}
         self.artwork: dict[str, str] = {}
+        self.liked_tracks: dict[str, LikedTrackIds] = {}
 
     def load_recent_searches(self):
         return self.searches
@@ -40,6 +50,33 @@ class InMemoryLibraryCacheRepo:
     def save_track_metadata(self, track: Track):
         self.tracks[track.id] = track
 
+    def load_liked_track_ids(self, user_id: str):
+        return self.liked_tracks.get(user_id)
+
+    def save_liked_track_ids(self, liked_tracks: LikedTrackIds):
+        self.liked_tracks[liked_tracks.user_id] = liked_tracks
+
+    def mark_track_liked(self, user_id: str, track_id: str):
+        current = self.liked_tracks.get(
+            user_id,
+            LikedTrackIds(user_id=user_id, revision=0, track_ids=frozenset()),
+        )
+        self.liked_tracks[user_id] = LikedTrackIds(
+            user_id=user_id,
+            revision=current.revision,
+            track_ids=current.track_ids | {track_id},
+        )
+
+    def mark_track_unliked(self, user_id: str, track_id: str):
+        current = self.liked_tracks.get(user_id)
+        if current is None:
+            return
+        self.liked_tracks[user_id] = LikedTrackIds(
+            user_id=user_id,
+            revision=current.revision,
+            track_ids=current.track_ids - {track_id},
+        )
+
     def load_artwork_ref(self, item_id: str):
         return self.artwork.get(item_id)
 
@@ -49,7 +86,9 @@ class InMemoryLibraryCacheRepo:
 
 class FakeMusicService:
     def get_auth_session(self):
-        return None
+        from app.domain import AuthSession
+
+        return AuthSession(user_id="user-1", token="token")
 
     def set_auth_session(self, session):
         self.session = session
@@ -90,6 +129,15 @@ class FakeMusicService:
                 artwork_ref="liked-cover",
                 is_liked=True,
             ),
+        )
+
+    def get_liked_track_ids(self, *, if_modified_since_revision: int = 0):
+        if if_modified_since_revision == 7:
+            return None
+        return LikedTrackIds(
+            user_id="user-1",
+            revision=7,
+            track_ids=frozenset({"liked-100"}),
         )
 
     def get_liked_albums(self, *, limit: int = 100):
@@ -195,6 +243,28 @@ def test_search_service_updates_recent_searches() -> None:
     assert cache_repo.load_track_metadata("ambient-25") == tracks[0]
 
 
+def test_search_service_preserves_cached_liked_state() -> None:
+    cache_repo = InMemoryLibraryCacheRepo()
+    cache_repo.save_track_metadata(
+        Track(id="ambient-25", title="Liked Ambient", artists=("Artist",), is_liked=True)
+    )
+    cache_repo.save_liked_track_ids(
+        LikedTrackIds(user_id="user-1", revision=7, track_ids=frozenset({"ambient-25"}))
+    )
+    service = SearchService(
+        music_service=FakeMusicService(),
+        library_cache_repo=cache_repo,
+        logger=TestLogger(),
+    )
+
+    tracks = service.search_tracks("ambient")
+    catalog = service.search_catalog("ambient")
+
+    assert tracks[0].is_liked is True
+    assert catalog.tracks[0].is_liked is True
+    assert cache_repo.load_track_metadata("ambient-25").is_liked is True
+
+
 def test_search_service_returns_grouped_catalog_results() -> None:
     cache_repo = InMemoryLibraryCacheRepo()
     service = SearchService(
@@ -242,6 +312,30 @@ def test_library_service_exposes_playlists_and_stations() -> None:
     assert cache_repo.load_artwork_ref("liked-100") == "liked-cover"
 
 
+def test_library_service_preserves_cached_liked_state_for_loaded_tracks() -> None:
+    cache_repo = InMemoryLibraryCacheRepo()
+    cache_repo.save_track_metadata(
+        Track(id="user:onyourwave-25", title="Liked Wave", artists=("Artist",), is_liked=True)
+    )
+    cache_repo.save_liked_track_ids(
+        LikedTrackIds(
+            user_id="user-1",
+            revision=7,
+            track_ids=frozenset({"user:onyourwave-25"}),
+        )
+    )
+    service = LibraryService(
+        music_service=FakeMusicService(),
+        library_cache_repo=cache_repo,
+        logger=TestLogger(),
+    )
+
+    tracks = service.load_station_tracks("user:onyourwave")
+
+    assert tracks[0].is_liked is True
+    assert cache_repo.load_track_metadata("user:onyourwave-25").is_liked is True
+
+
 def test_library_service_likes_and_unlikes_tracks() -> None:
     music_service = FakeMusicService()
     cache_repo = InMemoryLibraryCacheRepo()
@@ -260,3 +354,22 @@ def test_library_service_likes_and_unlikes_tracks() -> None:
     assert liked.is_liked is True
     assert unliked.is_liked is False
     assert cache_repo.load_track_metadata("track-1") == unliked
+    assert cache_repo.load_liked_track_ids("user-1").track_ids == frozenset()
+
+
+def test_library_service_refreshes_liked_track_index() -> None:
+    cache_repo = InMemoryLibraryCacheRepo()
+    service = LibraryService(
+        music_service=FakeMusicService(),
+        library_cache_repo=cache_repo,
+        logger=TestLogger(),
+    )
+
+    service.refresh_liked_track_index()
+    service.refresh_liked_track_index()
+
+    assert cache_repo.load_liked_track_ids("user-1") == LikedTrackIds(
+        user_id="user-1",
+        revision=7,
+        track_ids=frozenset({"liked-100"}),
+    )

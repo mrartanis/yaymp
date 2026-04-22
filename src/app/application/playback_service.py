@@ -5,7 +5,9 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from time import monotonic
 
+from app.application.track_metadata import merge_cached_liked_state, merge_cached_liked_states
 from app.domain import (
+    LibraryCacheRepo,
     Logger,
     PlaybackEngine,
     PlaybackState,
@@ -40,12 +42,14 @@ class PlaybackService:
         playback_engine: PlaybackEngine,
         logger: Logger,
         music_service: MusicService | None = None,
+        library_cache_repo: LibraryCacheRepo | None = None,
         playback_state_repo: PlaybackStateRepo | None = None,
         randomizer: random.Random | None = None,
     ) -> None:
         self._playback_engine = playback_engine
         self._logger = logger
         self._music_service = music_service
+        self._library_cache_repo = library_cache_repo
         self._playback_state_repo = playback_state_repo
         self._randomizer = randomizer or random.Random()
         self._queue: list[QueueItem] = []
@@ -81,6 +85,11 @@ class PlaybackService:
         previous_order = self._play_order
         previous_order_position = self._play_order_position
 
+        tracks = merge_cached_liked_states(
+            tuple(tracks),
+            self._library_cache_repo,
+            user_id=self._current_user_id(),
+        )
         self._queue = [
             QueueItem(
                 track=track,
@@ -117,6 +126,11 @@ class PlaybackService:
             for item in self._queue
             if item.source_type == source_type and item.source_id == source_id
         )
+        tracks = merge_cached_liked_states(
+            tuple(tracks),
+            self._library_cache_repo,
+            user_id=self._current_user_id(),
+        )
         for offset, track in enumerate(tracks):
             self._queue.append(
                 QueueItem(
@@ -144,7 +158,19 @@ class PlaybackService:
         if saved_queue is None or not saved_queue.queue:
             return self.snapshot()
 
-        self._queue = list(saved_queue.queue)
+        self._queue = [
+            QueueItem(
+                track=merge_cached_liked_state(
+                    item.track,
+                    self._library_cache_repo,
+                    user_id=self._current_user_id(),
+                ),
+                source_type=item.source_type,
+                source_id=item.source_id,
+                source_index=item.source_index,
+            )
+            for item in saved_queue.queue
+        ]
         if saved_queue.active_index is None:
             self._active_index = 0
         else:
@@ -225,15 +251,25 @@ class PlaybackService:
     def play_track_by_id(self, track_id: str) -> PlaybackSnapshot:
         if self._music_service is None:
             raise PlaybackBackendError("Music service is not configured")
-        track = self._music_service.get_track(track_id)
+        track = merge_cached_liked_state(
+            self._music_service.get_track(track_id),
+            self._library_cache_repo,
+            user_id=self._current_user_id(),
+        )
         return self.play_track(track, source_type="track", source_id=track_id)
 
     def play_station(self, station_id: str) -> PlaybackSnapshot:
         if self._music_service is None:
             raise PlaybackBackendError("Music service is not configured")
-        tracks = self._music_service.get_station_tracks(
-            station_id,
-            limit=self._STATION_QUEUE_BATCH_SIZE,
+        tracks = merge_cached_liked_states(
+            tuple(
+                self._music_service.get_station_tracks(
+                    station_id,
+                    limit=self._STATION_QUEUE_BATCH_SIZE,
+                )
+            ),
+            self._library_cache_repo,
+            user_id=self._current_user_id(),
         )
         if not tracks:
             raise PlaybackBackendError(f"Station {station_id} returned no tracks")
@@ -471,9 +507,15 @@ class PlaybackService:
         if not station_id:
             return
 
-        fetched_tracks = self._music_service.get_station_tracks(
-            station_id,
-            limit=self._STATION_QUEUE_BATCH_SIZE,
+        fetched_tracks = merge_cached_liked_states(
+            tuple(
+                self._music_service.get_station_tracks(
+                    station_id,
+                    limit=self._STATION_QUEUE_BATCH_SIZE,
+                )
+            ),
+            self._library_cache_repo,
+            user_id=self._current_user_id(),
         )
         if not fetched_tracks:
             return
@@ -589,3 +631,9 @@ class PlaybackService:
         if self.current_item() is not None and not self._active_item_loaded:
             return self._restored_position_ms
         return self._playback_engine.get_state().position_ms
+
+    def _current_user_id(self) -> str | None:
+        if self._music_service is None:
+            return None
+        session = self._music_service.get_auth_session()
+        return session.user_id if session is not None else None

@@ -10,7 +10,7 @@ from app.domain.catalog import Album, Artist, CatalogSearchResults
 from app.domain.playback import PlaybackState, QueueItem, SavedPlaybackQueue
 from app.domain.playlist import Playlist
 from app.domain.station import Station
-from app.domain.track import Track
+from app.domain.track import LikedTrackIds, Track
 
 
 @runtime_checkable
@@ -31,6 +31,12 @@ class MusicService(Protocol):
     def search_catalog(self, query: str, *, limit: int = 25) -> CatalogSearchResults: ...
 
     def get_liked_tracks(self, *, limit: int = 100) -> Sequence[Track]: ...
+
+    def get_liked_track_ids(
+        self,
+        *,
+        if_modified_since_revision: int = 0,
+    ) -> LikedTrackIds | None: ...
 
     def get_liked_albums(self, *, limit: int = 100) -> Sequence[Album]: ...
 
@@ -129,6 +135,14 @@ class LibraryCacheRepo(Protocol):
     def load_track_metadata(self, track_id: str) -> Track | None: ...
 
     def save_track_metadata(self, track: Track) -> None: ...
+
+    def load_liked_track_ids(self, user_id: str) -> LikedTrackIds | None: ...
+
+    def save_liked_track_ids(self, liked_tracks: LikedTrackIds) -> None: ...
+
+    def mark_track_liked(self, user_id: str, track_id: str) -> None: ...
+
+    def mark_track_unliked(self, user_id: str, track_id: str) -> None: ...
 
     def load_artwork_ref(self, item_id: str) -> str | None: ...
 

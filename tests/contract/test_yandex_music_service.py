@@ -136,8 +136,22 @@ class DownloadInfoStub:
 
 
 class LikesStub:
-    def __init__(self, tracks: list[TrackStub]) -> None:
+    def __init__(self, tracks: list[TrackStub], *, revision: int = 3) -> None:
         self._tracks = tracks
+        self.revision = revision
+        self.tracks = [
+            type(
+                "TrackShortStub",
+                (),
+                {
+                    "id": track.id,
+                    "album_id": getattr(track.albums[0], "id", None) if track.albums else None,
+                    "track_id": f"{track.id}:{track.albums[0].id}" if track.albums else track.id,
+                    "timestamp": "2026-04-22T00:00:00+00:00",
+                },
+            )()
+            for track in tracks
+        ]
 
     def fetch_tracks(self):
         return self._tracks
@@ -194,7 +208,9 @@ class FakeYandexClient:
         del query, type_
         return self.search_result
 
-    def users_likes_tracks(self):
+    def users_likes_tracks(self, if_modified_since_revision: int = 0):
+        if if_modified_since_revision == self.likes.revision:
+            return None
         return self.likes
 
     def users_likes_albums(self, user_id=None, rich: bool = True):
@@ -316,6 +332,10 @@ def test_yandex_music_service_maps_track_and_playlist_data() -> None:
     search_tracks = service.search_tracks("remote")
     search_results = service.search_catalog("remote")
     liked_tracks = service.get_liked_tracks()
+    liked_track_ids = service.get_liked_track_ids()
+    unchanged_liked_track_ids = service.get_liked_track_ids(
+        if_modified_since_revision=client.likes.revision
+    )
     liked_albums = service.get_liked_albums()
     liked_artists = service.get_liked_artists()
     user_playlists = service.get_user_playlists()
@@ -361,6 +381,10 @@ def test_yandex_music_service_maps_track_and_playlist_data() -> None:
     assert [item.id for item in search_results.playlists] == ["playlist-1"]
     assert [item.id for item in liked_tracks] == ["track-1"]
     assert liked_tracks[0].is_liked is True
+    assert liked_track_ids is not None
+    assert liked_track_ids.revision == 3
+    assert liked_track_ids.track_ids == frozenset({"track-1"})
+    assert unchanged_liked_track_ids is None
     assert [item.id for item in liked_albums] == ["album-1"]
     assert [item.id for item in liked_artists] == ["artist-1"]
     assert [item.id for item in user_playlists] == ["playlist-1"]

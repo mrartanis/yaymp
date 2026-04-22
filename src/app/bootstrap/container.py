@@ -19,7 +19,7 @@ from app.domain import (
     SettingsRepo,
     Track,
 )
-from app.domain.errors import AuthError, PlaybackBackendError, StorageError
+from app.domain.errors import AuthError, DomainError, PlaybackBackendError, StorageError
 from app.infrastructure.persistence import (
     FileArtworkCache,
     FileAuthRepo,
@@ -94,12 +94,17 @@ def build_container(config: AppConfig, logger: logging.Logger) -> AppContainer:
         library_cache_repo=library_cache_repo,
         logger=logger,
     )
+    try:
+        library_service.refresh_liked_track_index()
+    except DomainError as exc:
+        logger.warning("Failed to refresh liked track index: %s", exc)
 
     playback_engine = _build_playback_engine(logger)
     playback_service = PlaybackService(
         playback_engine=playback_engine,
         logger=logger,
         music_service=music_service,
+        library_cache_repo=library_cache_repo,
         playback_state_repo=playback_state_repo,
     )
     demo_tracks = build_demo_tracks()

@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from app.domain import LibraryCacheRepo, Track
+from app.domain import LibraryCacheRepo, LikedTrackIds, Track
 from app.domain.errors import StorageError
 
 
@@ -116,6 +116,84 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
         except sqlite3.Error as exc:
             raise StorageError("Failed to save cached track metadata") from exc
 
+    def load_liked_track_ids(self, user_id: str) -> LikedTrackIds | None:
+        try:
+            with self._connect() as connection:
+                row = connection.execute(
+                    "select revision from liked_track_sync where user_id = ?",
+                    (user_id,),
+                ).fetchone()
+                if row is None:
+                    return None
+                rows = connection.execute(
+                    "select track_id from liked_tracks where user_id = ?",
+                    (user_id,),
+                ).fetchall()
+        except sqlite3.Error as exc:
+            raise StorageError("Failed to load liked track ids") from exc
+        return LikedTrackIds(
+            user_id=user_id,
+            revision=int(row["revision"]),
+            track_ids=frozenset(str(item["track_id"]) for item in rows),
+        )
+
+    def save_liked_track_ids(self, liked_tracks: LikedTrackIds) -> None:
+        try:
+            with self._connect() as connection:
+                now = self._now_iso()
+                connection.execute("begin")
+                connection.execute(
+                    "delete from liked_tracks where user_id = ?",
+                    (liked_tracks.user_id,),
+                )
+                connection.executemany(
+                    (
+                        "insert into liked_tracks(user_id, track_id, updated_at) "
+                        "values (?, ?, ?)"
+                    ),
+                    [
+                        (liked_tracks.user_id, track_id, now)
+                        for track_id in sorted(liked_tracks.track_ids)
+                    ],
+                )
+                connection.execute(
+                    (
+                        "insert into liked_track_sync(user_id, revision, synced_at) "
+                        "values (?, ?, ?) "
+                        "on conflict(user_id) do update set "
+                        "revision = excluded.revision, "
+                        "synced_at = excluded.synced_at"
+                    ),
+                    (liked_tracks.user_id, liked_tracks.revision, now),
+                )
+        except sqlite3.Error as exc:
+            raise StorageError("Failed to save liked track ids") from exc
+
+    def mark_track_liked(self, user_id: str, track_id: str) -> None:
+        try:
+            with self._connect() as connection:
+                connection.execute(
+                    (
+                        "insert into liked_tracks(user_id, track_id, updated_at) "
+                        "values (?, ?, ?) "
+                        "on conflict(user_id, track_id) do update set "
+                        "updated_at = excluded.updated_at"
+                    ),
+                    (user_id, self._normalize_track_id(track_id), self._now_iso()),
+                )
+        except sqlite3.Error as exc:
+            raise StorageError("Failed to mark track liked") from exc
+
+    def mark_track_unliked(self, user_id: str, track_id: str) -> None:
+        try:
+            with self._connect() as connection:
+                connection.execute(
+                    "delete from liked_tracks where user_id = ? and track_id = ?",
+                    (user_id, self._normalize_track_id(track_id)),
+                )
+        except sqlite3.Error as exc:
+            raise StorageError("Failed to mark track unliked") from exc
+
     def load_artwork_ref(self, item_id: str) -> str | None:
         try:
             with self._connect() as connection:
@@ -177,6 +255,19 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                         artwork_ref text not null,
                         cached_at text not null
                     );
+
+                    create table if not exists liked_track_sync (
+                        user_id text primary key,
+                        revision integer not null,
+                        synced_at text not null
+                    );
+
+                    create table if not exists liked_tracks (
+                        user_id text not null,
+                        track_id text not null,
+                        updated_at text not null,
+                        primary key (user_id, track_id)
+                    );
                     """
                 )
         except (OSError, sqlite3.Error) as exc:
@@ -200,3 +291,10 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
         if cached_at.tzinfo is None:
             cached_at = cached_at.replace(tzinfo=UTC)
         return datetime.now(tz=UTC) - cached_at > self._CACHE_TTL
+
+    def _normalize_track_id(self, track_id: str) -> str:
+        raw_track_id = str(track_id)
+        base_id, separator, album_id = raw_track_id.partition(":")
+        if separator and base_id.isdigit() and album_id.isdigit():
+            return base_id
+        return raw_track_id

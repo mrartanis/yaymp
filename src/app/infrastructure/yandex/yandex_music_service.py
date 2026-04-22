@@ -10,6 +10,7 @@ from app.domain import (
     AudioQuality,
     AuthSession,
     CatalogSearchResults,
+    LikedTrackIds,
     MusicService,
     Playlist,
     Station,
@@ -144,6 +145,36 @@ class YandexMusicService(MusicService):
         except Exception as exc:
             raise self._map_client_error(exc, "Failed to load liked tracks") from exc
         return tuple(self._map_track(track, is_liked=True) for track in raw_tracks[:limit])
+
+    def get_liked_track_ids(
+        self,
+        *,
+        if_modified_since_revision: int = 0,
+    ) -> LikedTrackIds | None:
+        client = self._require_client()
+        session = self.get_auth_session()
+        user_id = (
+            session.user_id
+            if session is not None
+            else str(getattr(client, "account_uid", ""))
+        )
+        try:
+            likes = client.users_likes_tracks(
+                if_modified_since_revision=if_modified_since_revision
+            )
+        except Exception as exc:
+            raise self._map_client_error(exc, "Failed to load liked track ids") from exc
+        if likes is None:
+            return None
+        track_ids = frozenset(
+            self._normalize_track_id(getattr(track, "id", getattr(track, "track_id", track)))
+            for track in getattr(likes, "tracks", ())
+        )
+        return LikedTrackIds(
+            user_id=user_id,
+            revision=int(getattr(likes, "revision", 0) or 0),
+            track_ids=track_ids,
+        )
 
     def get_liked_albums(self, *, limit: int = 100) -> Sequence[Album]:
         client = self._require_client()
@@ -450,6 +481,13 @@ class YandexMusicService(MusicService):
             available=available,
             is_liked=is_liked,
         )
+
+    def _normalize_track_id(self, track_id: Any) -> str:
+        raw_track_id = str(track_id)
+        base_id, separator, album_id = raw_track_id.partition(":")
+        if separator and base_id.isdigit() and album_id.isdigit():
+            return base_id
+        return raw_track_id
 
     def _map_playlist(self, raw_playlist: Any, *, is_generated: bool = False) -> Playlist:
         owner = getattr(raw_playlist, "owner", None)
