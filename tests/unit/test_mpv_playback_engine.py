@@ -23,12 +23,29 @@ class PlayerStub:
     ) -> None:
         self.fail_time_pos = fail_time_pos
         self.string_command_calls = []
+        self.event_callbacks = {}
+        self.property_observers = {}
         self.volume = 100
 
     def string_command(self, name, *args):
         self.string_command_calls.append((name, *args))
         if name == "set" and self.fail_time_pos:
             raise RuntimeError("time-pos rejected")
+
+    def event_callback(self, *event_types):
+        def decorator(callback):
+            for event_type in event_types:
+                self.event_callbacks[event_type] = callback
+            return callback
+
+        return decorator
+
+    def property_observer(self, name):
+        def decorator(callback):
+            self.property_observers[name] = callback
+            return callback
+
+        return decorator
 
 
 def build_engine(monkeypatch: pytest.MonkeyPatch, player: PlayerStub) -> MpvPlaybackEngine:
@@ -55,3 +72,17 @@ def test_mpv_seek_reports_time_pos_error(monkeypatch: pytest.MonkeyPatch) -> Non
 
     with pytest.raises(PlaybackBackendError, match="time-pos rejected"):
         engine.seek(12_000)
+
+
+def test_mpv_ready_events_notify_seek_callback(monkeypatch: pytest.MonkeyPatch) -> None:
+    player = PlayerStub()
+    engine = build_engine(monkeypatch, player)
+    calls = []
+    engine.on_ready_for_seek(lambda: calls.append("ready"))
+
+    player.event_callbacks["file-loaded"]({})
+    player.event_callbacks["playback-restart"]({})
+    player.property_observers["seekable"]("seekable", False)
+    player.property_observers["seekable"]("seekable", True)
+
+    assert calls == ["ready", "ready", "ready"]

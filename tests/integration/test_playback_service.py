@@ -286,8 +286,9 @@ def test_playback_service_restores_saved_queue_without_autoplay() -> None:
         )
     )
     music_service = FakeMusicService(stream_ref="resolved://one")
+    engine = FakePlaybackEngine()
     service = PlaybackService(
-        playback_engine=FakePlaybackEngine(),
+        playback_engine=engine,
         logger=TestLogger(),
         music_service=music_service,
         playback_state_repo=state_repo,
@@ -295,6 +296,7 @@ def test_playback_service_restores_saved_queue_without_autoplay() -> None:
 
     restored = service.restore_saved_queue()
     played = service.play()
+    engine.emit_ready_for_seek()
     refreshed = service.refresh()
 
     assert restored.state.status is PlaybackStatus.STOPPED
@@ -307,7 +309,35 @@ def test_playback_service_restores_saved_queue_without_autoplay() -> None:
     assert refreshed.state.position_ms == 45_000
 
 
-def test_playback_service_retries_restore_seek_until_backend_accepts_it() -> None:
+def test_playback_service_applies_restore_seek_on_backend_ready_event() -> None:
+    state_repo = InMemoryPlaybackStateRepo(
+        SavedPlaybackQueue(
+            queue=(QueueItem(track=Track(id="one", title="One", artists=("Artist",))),),
+            active_index=0,
+            position_ms=45_000,
+        )
+    )
+    engine = FakePlaybackEngine()
+    service = PlaybackService(
+        playback_engine=engine,
+        logger=TestLogger(),
+        music_service=FakeMusicService(stream_ref="resolved://one"),
+        playback_state_repo=state_repo,
+    )
+    restored = service.restore_saved_queue()
+    played = service.play()
+    before_ready = service.refresh()
+    engine.emit_ready_for_seek()
+    after_ready = service.refresh()
+
+    assert restored.state.position_ms == 45_000
+    assert played.state.status is PlaybackStatus.PLAYING
+    assert before_ready.state.status is PlaybackStatus.PLAYING
+    assert before_ready.state.position_ms == 0
+    assert after_ready.state.position_ms == 45_000
+
+
+def test_playback_service_does_not_retry_restore_seek_after_ready_event_failure() -> None:
     state_repo = InMemoryPlaybackStateRepo(
         SavedPlaybackQueue(
             queue=(QueueItem(track=Track(id="one", title="One", artists=("Artist",))),),
@@ -323,15 +353,12 @@ def test_playback_service_retries_restore_seek_until_backend_accepts_it() -> Non
         playback_state_repo=state_repo,
     )
     service.restore_saved_queue()
-    played = service.play()
-    first_refresh = service.refresh()
+    service.play()
+    engine.emit_ready_for_seek()
     engine.fail_on_seek = False
-    second_refresh = service.refresh()
+    engine.emit_ready_for_seek()
 
-    assert played.state.status is PlaybackStatus.PLAYING
-    assert first_refresh.state.status is PlaybackStatus.PLAYING
-    assert first_refresh.state.position_ms == 0
-    assert second_refresh.state.position_ms == 45_000
+    assert service.refresh().state.position_ms == 0
 
 
 def test_play_single_track_replaces_queue_and_starts_playback() -> None:

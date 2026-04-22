@@ -126,6 +126,37 @@ Definition of Done:
 - transitions between tracks are stable
 - queue behavior is predictable
 
+Current additions:
+
+- Library navigation includes My Tracks, My Albums, My Artists, Playlists, and My Wave.
+- Search and artist pages use dynamic tabs; plain library lists hide tabs.
+- Artist pages expose Top Tracks, Albums, Singles, Compilations, and Radio.
+- Current playback queue and position survive restarts, including bounded My Wave/station queues.
+
+## Milestone 4.5: Persistence and Resume
+
+Status: done
+
+Goal:
+
+- preserve daily listening context across restarts
+
+Deliverables:
+
+- SQLite playback queue state
+- saved active index and source context
+- saved playback position
+- restore without autoplay or startup stream resolution
+- event-driven mpv restore seek
+- bounded My Wave/station queue persistence
+
+Definition of Done:
+
+- restarting the player restores the previous queue
+- pressing Play resumes from the saved track and position
+- My Wave can resume without unbounded queue growth
+- restore seek waits for backend readiness instead of polling retries
+
 ## Milestone 5: Packaging and Distributables
 
 Goal:

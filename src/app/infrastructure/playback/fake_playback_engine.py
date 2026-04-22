@@ -7,6 +7,7 @@ class FakePlaybackEngine(PlaybackEngine):
     def __init__(self) -> None:
         self._current_track: Track | None = None
         self._state = PlaybackState()
+        self._ready_for_seek_callback = None
 
     def load(self, track: Track, *, stream_ref: str) -> None:
         del stream_ref
@@ -74,3 +75,10 @@ class FakePlaybackEngine(PlaybackEngine):
 
     def get_state(self) -> PlaybackState:
         return self._state
+
+    def on_ready_for_seek(self, callback) -> None:
+        self._ready_for_seek_callback = callback
+
+    def emit_ready_for_seek(self) -> None:
+        if self._ready_for_seek_callback is not None:
+            self._ready_for_seek_callback()

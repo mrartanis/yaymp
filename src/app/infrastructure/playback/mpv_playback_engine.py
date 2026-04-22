@@ -11,6 +11,8 @@ class MpvPlaybackEngine(PlaybackEngine):
         del library_path
         self._player = mpv_module.MPV()
         self._state = PlaybackState()
+        self._ready_for_seek_callback = None
+        self._register_ready_for_seek_events()
 
     def load(self, track: Track, *, stream_ref: str) -> None:
         if not stream_ref:
@@ -130,6 +132,23 @@ class MpvPlaybackEngine(PlaybackEngine):
             audio_bitrate=int(audio_bitrate) if audio_bitrate else self._state.audio_bitrate,
         )
         return self._state
+
+    def on_ready_for_seek(self, callback) -> None:
+        self._ready_for_seek_callback = callback
+
+    def _register_ready_for_seek_events(self) -> None:
+        @self._player.event_callback("file-loaded", "playback-restart")
+        def handle_ready_event(_event) -> None:
+            self._emit_ready_for_seek()
+
+        @self._player.property_observer("seekable")
+        def handle_seekable_change(_name, value) -> None:
+            if value:
+                self._emit_ready_for_seek()
+
+    def _emit_ready_for_seek(self) -> None:
+        if self._ready_for_seek_callback is not None:
+            self._ready_for_seek_callback()
 
     def _read_mpv_property(self, *names: str) -> object | None:
         for name in names:

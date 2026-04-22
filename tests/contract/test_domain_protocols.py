@@ -159,6 +159,9 @@ class FakePlaybackEngine:
     def get_state(self) -> PlaybackState:
         return self._state
 
+    def on_ready_for_seek(self, callback: Any) -> None:
+        self.ready_for_seek_callback = callback
+
 
 class FakeSettingsRepo:
     def load_settings(self) -> Mapping[str, Any]:

@@ -191,6 +191,16 @@ Result:
 
 - state is durable, inspectable, and recoverable
 
+Current notes:
+
+- Settings and auth/session are still JSON-backed in platform config/data directories.
+- Library cache uses SQLite for recent searches, track metadata, and artwork refs.
+- Playback queue state is persisted in SQLite with queue items, active index, source context, and saved position.
+- Restored playback does not autoplay or resolve streams at startup; the stream is resolved on first Play.
+- Saved restore seek is applied from playback backend readiness events, not refresh polling.
+- My Wave/station queue persistence is bounded around the active item to avoid unbounded queue growth.
+- If auth/settings are consolidated later, use a durable data-dir SQLite database rather than the current cache SQLite.
+
 ## Step 9: Add Packaging
 
 Make the app runnable outside the development machine.

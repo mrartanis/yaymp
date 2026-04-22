@@ -60,6 +60,7 @@ class PlaybackService:
         self._play_order_position: int | None = None
         self._last_observed_status = PlaybackStatus.STOPPED
         self._last_position_persisted_at = 0.0
+        self._playback_engine.on_ready_for_seek(self._apply_pending_restore_seek)
 
     def replace_queue(
         self,
@@ -275,8 +276,6 @@ class PlaybackService:
         engine_state = self._playback_engine.get_state()
         if self._should_auto_advance(engine_state):
             return self.next()
-        if self._pending_restore_seek_ms > 0:
-            return self._try_apply_pending_restore_seek(engine_state)
         self._persist_playback_position_if_due(engine_state)
         return self._build_snapshot(engine_state)
 
@@ -514,18 +513,21 @@ class PlaybackService:
             return
         self._persist_playback_queue(position_ms=engine_state.position_ms)
 
-    def _try_apply_pending_restore_seek(self, engine_state: PlaybackState) -> PlaybackSnapshot:
+    def _apply_pending_restore_seek(self) -> None:
+        if self._pending_restore_seek_ms <= 0:
+            return
         position_ms = self._pending_restore_seek_ms
         try:
             self._playback_engine.seek(position_ms)
         except PlaybackBackendError as exc:
-            self._logger.debug("Restore seek is not ready yet: %s", exc)
-            return self._build_snapshot(engine_state)
+            self._pending_restore_seek_ms = 0
+            self._restored_position_ms = 0
+            self._logger.warning("Failed to restore playback position: %s", exc)
+            return
 
         self._pending_restore_seek_ms = 0
         self._restored_position_ms = 0
         self._persist_playback_queue(position_ms=position_ms)
-        return self._build_snapshot(self._playback_engine.get_state())
 
     def _persist_playback_queue(self, *, position_ms: int | None = None) -> None:
         if self._playback_state_repo is None:

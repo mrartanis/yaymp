@@ -95,6 +95,8 @@ class PlaybackEngine(Protocol):
 
     def get_state(self) -> PlaybackState: ...
 
+    def on_ready_for_seek(self, callback: Any) -> None: ...
+
 
 @runtime_checkable
 class PlaybackStateRepo(Protocol):
