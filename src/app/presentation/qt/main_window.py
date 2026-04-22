@@ -26,9 +26,10 @@ from PySide6.QtWidgets import (
 
 from app.application.error_presenter import user_facing_error_message
 from app.bootstrap.container import AppContainer
-from app.domain import Album, Artist, AudioQuality, Playlist, Station, Track
+from app.domain import Album, Artist, AudioQuality, PlaybackStatus, Playlist, Station, Track
 from app.domain.errors import DomainError
 from app.presentation.qt.auth_dialog import AuthDialog
+from app.presentation.qt.icon_utils import create_icon
 from app.presentation.qt.library_controller import (
     BrowserContent,
     BrowserItem,
@@ -105,14 +106,12 @@ class MainWindow(QMainWindow):
     def _build_transport_bar(self) -> QHBoxLayout:
         layout = QHBoxLayout()
         layout.setSpacing(8)
-        self._previous_button = QPushButton("Prev")
-        self._play_button = QPushButton("Play")
-        self._pause_button = QPushButton("Pause")
-        self._next_button = QPushButton("Next")
+        self._previous_button = self._icon_button("previous.svg", "Previous")
+        self._play_pause_button = self._icon_button("play.svg", "Play")
+        self._next_button = self._icon_button("next.svg", "Next")
         for button in (
             self._previous_button,
-            self._play_button,
-            self._pause_button,
+            self._play_pause_button,
             self._next_button,
         ):
             layout.addWidget(button)
@@ -198,9 +197,13 @@ class MainWindow(QMainWindow):
         self._track_id_input.setPlaceholderText("Enter Yandex track id")
         self._play_track_button = QPushButton("Play Track ID")
         self._like_track_button = QPushButton("Like")
+        self._like_track_button.setIcon(create_icon("heart.svg"))
         self._unlike_track_button = QPushButton("Unlike")
+        self._unlike_track_button.setIcon(create_icon("heart_outline.svg"))
         self._play_all_button = QPushButton("Play all")
+        self._play_all_button.setIcon(create_icon("play.svg"))
         self._append_all_button = QPushButton("Append all")
+        self._append_all_button.setIcon(create_icon("add_to_playlist.svg"))
         search_row = QHBoxLayout()
         search_row.setSpacing(8)
         search_row.addWidget(self._search_input, 1)
@@ -240,6 +243,7 @@ class MainWindow(QMainWindow):
         assert layout is not None
         self._queue_list = QListWidget()
         self._clear_queue_button = QPushButton("Clear queue")
+        self._clear_queue_button.setIcon(create_icon("clear_playlist.svg"))
         layout.addWidget(self._queue_list)
         layout.addWidget(self._clear_queue_button)
         layout.addStretch(1)
@@ -264,8 +268,7 @@ class MainWindow(QMainWindow):
         self._library_controller.track_liked.connect(self._render_track_liked)
         self._library_controller.track_unliked.connect(self._render_track_unliked)
         self._previous_button.clicked.connect(self._controller.previous)
-        self._play_button.clicked.connect(self._controller.play)
-        self._pause_button.clicked.connect(self._controller.pause)
+        self._play_pause_button.clicked.connect(self._toggle_play_pause)
         self._next_button.clicked.connect(self._controller.next)
         self._seek_slider.sliderReleased.connect(self._apply_seek)
         self._volume_slider.valueChanged.connect(self._apply_volume)
@@ -296,6 +299,12 @@ class MainWindow(QMainWindow):
 
     def _apply_seek(self) -> None:
         self._controller.seek(self._seek_slider.value())
+
+    def _toggle_play_pause(self) -> None:
+        if self._play_pause_button.property("playback_status") == PlaybackStatus.PLAYING.value:
+            self._controller.pause()
+            return
+        self._controller.play()
 
     def _apply_audio_quality(self) -> None:
         raw_quality = self._quality_combo.currentData()
@@ -423,6 +432,7 @@ class MainWindow(QMainWindow):
         self._playback_state_label.setText(
             f"Playback status: {state.status.value} | repeat={state.repeat_mode.value}"
         )
+        self._render_play_pause_button(state.status)
         self._seek_slider.blockSignals(True)
         self._seek_slider.setMaximum(state.duration_ms or 300_000)
         self._seek_slider.setValue(state.position_ms)
@@ -441,6 +451,17 @@ class MainWindow(QMainWindow):
         )
         self._render_queue(snapshot)
         self._render_auth_state()
+
+    def _render_play_pause_button(self, status: PlaybackStatus) -> None:
+        self._play_pause_button.setProperty("playback_status", status.value)
+        if status is PlaybackStatus.PLAYING:
+            self._play_pause_button.setIcon(create_icon("pause.svg"))
+            self._play_pause_button.setToolTip("Pause")
+            self._play_pause_button.setAccessibleName("Pause")
+            return
+        self._play_pause_button.setIcon(create_icon("play.svg"))
+        self._play_pause_button.setToolTip("Play")
+        self._play_pause_button.setAccessibleName("Play")
 
     def _render_queue(self, snapshot) -> None:
         scroll_bar = self._queue_list.verticalScrollBar()
@@ -756,6 +777,14 @@ class MainWindow(QMainWindow):
             Qt.AlignmentFlag.AlignRight if align_right else Qt.AlignmentFlag.AlignLeft
         )
         return label
+
+    def _icon_button(self, icon_name: str, tooltip: str) -> QPushButton:
+        button = QPushButton()
+        button.setIcon(create_icon(icon_name))
+        button.setToolTip(tooltip)
+        button.setAccessibleName(tooltip)
+        button.setFixedSize(34, 30)
+        return button
 
     def _format_ms(self, value: int | None) -> str:
         if value is None:
