@@ -178,8 +178,11 @@ class FailingPlaybackEngine(FakePlaybackEngine):
 class InMemoryPlaybackStateRepo:
     def __init__(self, saved_queue: SavedPlaybackQueue | None = None) -> None:
         self.saved_queue = saved_queue
+        self.load_error: Exception | None = None
 
     def load_playback_queue(self) -> SavedPlaybackQueue | None:
+        if self.load_error is not None:
+            raise self.load_error
         return self.saved_queue
 
     def save_playback_queue(
@@ -194,6 +197,9 @@ class InMemoryPlaybackStateRepo:
             active_index=active_index,
             position_ms=position_ms,
         )
+
+    def clear_playback_queue(self) -> None:
+        self.saved_queue = None
 
 
 def build_tracks() -> tuple[Track, ...]:
@@ -253,6 +259,44 @@ def test_playback_service_persists_queue_after_replace_and_append() -> None:
     assert [item.track.id for item in state_repo.saved_queue.queue] == ["one", "two", "three"]
     assert state_repo.saved_queue.active_index == 0
     assert state_repo.saved_queue.position_ms == 0
+
+
+def test_playback_service_clears_queue_and_saved_state() -> None:
+    state_repo = InMemoryPlaybackStateRepo()
+    service = PlaybackService(
+        playback_engine=FakePlaybackEngine(),
+        logger=TestLogger(),
+        playback_state_repo=state_repo,
+    )
+    service.replace_queue(build_tracks(), start_index=1, source_type="album", source_id="album-1")
+
+    snapshot = service.clear_queue()
+
+    assert snapshot.queue == ()
+    assert snapshot.current_item is None
+    assert snapshot.state.active_index is None
+    assert snapshot.state.status is PlaybackStatus.STOPPED
+    assert state_repo.saved_queue is None
+
+
+def test_playback_service_drops_saved_queue_when_restore_fails() -> None:
+    state_repo = InMemoryPlaybackStateRepo(
+        SavedPlaybackQueue(
+            queue=(QueueItem(track=Track(id="one", title="One", artists=("Artist",))),),
+            active_index=0,
+        )
+    )
+    state_repo.load_error = RuntimeError("bad state")
+    service = PlaybackService(
+        playback_engine=FakePlaybackEngine(),
+        logger=TestLogger(),
+        playback_state_repo=state_repo,
+    )
+
+    snapshot = service.restore_saved_queue()
+
+    assert snapshot.queue == ()
+    assert state_repo.saved_queue is None
 
 
 def test_playback_service_persists_seek_position() -> None:

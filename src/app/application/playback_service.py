@@ -138,6 +138,7 @@ class PlaybackService:
             saved_queue = self._playback_state_repo.load_playback_queue()
         except Exception as exc:
             self._logger.warning("Failed to restore playback queue: %s", exc)
+            self._clear_persisted_playback_queue()
             return self.snapshot()
 
         if saved_queue is None or not saved_queue.queue:
@@ -191,6 +192,20 @@ class PlaybackService:
         self._playback_engine.stop()
         self._logger.info("Playback stopped")
         self._persist_playback_queue(position_ms=0)
+        return self.snapshot()
+
+    def clear_queue(self) -> PlaybackSnapshot:
+        self._playback_engine.stop()
+        self._queue = []
+        self._active_index = None
+        self._active_item_loaded = False
+        self._restored_position_ms = 0
+        self._pending_restore_seek_ms = 0
+        self._play_order = []
+        self._play_order_position = None
+        self._last_observed_status = PlaybackStatus.STOPPED
+        self._clear_persisted_playback_queue()
+        self._logger.info("Playback queue cleared")
         return self.snapshot()
 
     def play_track(
@@ -544,6 +559,14 @@ class PlaybackService:
             self._last_position_persisted_at = monotonic()
         except Exception as exc:
             self._logger.warning("Failed to save playback queue: %s", exc)
+
+    def _clear_persisted_playback_queue(self) -> None:
+        if self._playback_state_repo is None:
+            return
+        try:
+            self._playback_state_repo.clear_playback_queue()
+        except Exception as exc:
+            self._logger.warning("Failed to clear saved playback queue: %s", exc)
 
     def _queue_for_persistence(self) -> tuple[tuple[QueueItem, ...], int | None]:
         active_item = self.current_item()

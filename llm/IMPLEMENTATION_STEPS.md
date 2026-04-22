@@ -199,6 +199,8 @@ Current notes:
 - Restored playback does not autoplay or resolve streams at startup; the stream is resolved on first Play.
 - Saved restore seek is applied from playback backend readiness events, not refresh polling.
 - My Wave/station queue persistence is bounded around the active item to avoid unbounded queue growth.
+- Invalid saved playback queue state is dropped and startup continues from a clean queue.
+- The Queue panel has a Clear queue action that clears both in-memory and saved playback queue state.
 - If auth/settings are consolidated later, use a durable data-dir SQLite database rather than the current cache SQLite.
 
 ## Step 9: Add Packaging

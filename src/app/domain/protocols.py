@@ -110,6 +110,8 @@ class PlaybackStateRepo(Protocol):
         position_ms: int = 0,
     ) -> None: ...
 
+    def clear_playback_queue(self) -> None: ...
+
 
 @runtime_checkable
 class SettingsRepo(Protocol):

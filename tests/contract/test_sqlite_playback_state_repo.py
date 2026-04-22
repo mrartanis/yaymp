@@ -61,6 +61,18 @@ def test_sqlite_playback_state_repo_returns_none_when_missing(tmp_path) -> None:
     assert repo.load_playback_queue() is None
 
 
+def test_sqlite_playback_state_repo_clears_queue(tmp_path) -> None:
+    repo = SQLitePlaybackStateRepo(db_path=tmp_path / "library.sqlite3")
+    repo.save_playback_queue(
+        (QueueItem(track=Track(id="track-1", title="Signal", artists=("Artist",))),),
+        active_index=0,
+    )
+
+    repo.clear_playback_queue()
+
+    assert repo.load_playback_queue() is None
+
+
 def test_sqlite_playback_state_repo_rejects_invalid_payload(tmp_path) -> None:
     path = tmp_path / "library.sqlite3"
     repo = SQLitePlaybackStateRepo(db_path=path)

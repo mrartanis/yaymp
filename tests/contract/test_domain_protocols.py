@@ -211,6 +211,9 @@ class FakePlaybackStateRepo:
             position_ms=position_ms,
         )
 
+    def clear_playback_queue(self) -> None:
+        self.saved_queue = None
+
 
 class FakeAuthRepo:
     def load_session(self) -> AuthSession | None:

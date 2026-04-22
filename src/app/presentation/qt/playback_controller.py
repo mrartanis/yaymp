@@ -82,6 +82,9 @@ class PlaybackController(QObject):
     def play_station(self, station_id: str) -> None:
         self._execute(lambda: self._playback_service.play_station(station_id))
 
+    def clear_queue(self) -> None:
+        self._execute(self._playback_service.clear_queue)
+
     def refresh(self) -> None:
         self._execute(self._playback_service.refresh)
 

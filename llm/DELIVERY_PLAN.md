@@ -149,6 +149,8 @@ Deliverables:
 - restore without autoplay or startup stream resolution
 - event-driven mpv restore seek
 - bounded My Wave/station queue persistence
+- corrupted saved queue reset
+- clear queue action
 
 Definition of Done:
 
@@ -156,6 +158,7 @@ Definition of Done:
 - pressing Play resumes from the saved track and position
 - My Wave can resume without unbounded queue growth
 - restore seek waits for backend readiness instead of polling retries
+- broken saved queue state is dropped instead of blocking startup
 
 ## Milestone 5: Packaging and Distributables
 

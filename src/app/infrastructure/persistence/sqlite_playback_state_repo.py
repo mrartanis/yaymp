@@ -79,6 +79,13 @@ class SQLitePlaybackStateRepo(PlaybackStateRepo):
         except (sqlite3.Error, TypeError) as exc:
             raise StorageError("Failed to save playback queue") from exc
 
+    def clear_playback_queue(self) -> None:
+        try:
+            with self._connect() as connection:
+                connection.execute("delete from playback_queue where id = 1")
+        except sqlite3.Error as exc:
+            raise StorageError("Failed to clear playback queue") from exc
+
     def _initialize(self) -> None:
         try:
             self._db_path.parent.mkdir(parents=True, exist_ok=True)

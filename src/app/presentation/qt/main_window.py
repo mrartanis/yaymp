@@ -239,7 +239,9 @@ class MainWindow(QMainWindow):
         layout = frame.layout()
         assert layout is not None
         self._queue_list = QListWidget()
+        self._clear_queue_button = QPushButton("Clear queue")
         layout.addWidget(self._queue_list)
+        layout.addWidget(self._clear_queue_button)
         layout.addStretch(1)
         return frame
 
@@ -268,6 +270,7 @@ class MainWindow(QMainWindow):
         self._seek_slider.sliderReleased.connect(self._apply_seek)
         self._volume_slider.valueChanged.connect(self._apply_volume)
         self._queue_list.itemDoubleClicked.connect(self._select_queue_item)
+        self._clear_queue_button.clicked.connect(self._controller.clear_queue)
         self._content_list.itemDoubleClicked.connect(self._open_content_item)
         self._search_button.clicked.connect(self._run_search)
         self._search_input.returnPressed.connect(self._run_search)
