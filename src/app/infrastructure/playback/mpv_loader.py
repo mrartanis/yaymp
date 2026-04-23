@@ -15,6 +15,12 @@ def _candidate_runtime_roots() -> list[Path]:
     executable = Path(sys.executable).resolve()
     roots.append(executable.parent)
 
+    if sys.platform.startswith("linux"):
+        # AppImage/AppDir layouts typically place the binary in usr/bin and
+        # shared libraries in usr/lib.
+        usr_dir = executable.parent.parent
+        roots.append(usr_dir)
+
     if sys.platform == "darwin":
         # Nuitka app bundles place the executable in Contents/MacOS.
         contents_dir = executable.parent.parent

@@ -3,9 +3,11 @@ from __future__ import annotations
 import ctypes.util
 import os
 import sys
+from pathlib import Path
 
 import pytest
 
+from app.infrastructure.playback import mpv_loader
 from app.infrastructure.playback.mpv_loader import ensure_mpv_available, load_mpv_module
 
 
@@ -44,3 +46,22 @@ def test_mpv_loader_patches_find_library_for_explicit_path(monkeypatch: pytest.M
 
     assert module is not None
     assert ctypes.util.find_library is fake_find_library
+
+
+def test_linux_loader_checks_usr_lib_next_to_appimage_binary(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    executable_dir = tmp_path / "usr" / "bin"
+    executable_dir.mkdir(parents=True)
+    executable = executable_dir / "yaymp"
+    executable.touch()
+
+    bundled_library = tmp_path / "usr" / "lib" / "libmpv.so.1"
+    bundled_library.parent.mkdir(parents=True)
+    bundled_library.touch()
+
+    monkeypatch.setattr(mpv_loader.sys, "platform", "linux")
+    monkeypatch.setattr(mpv_loader.sys, "executable", str(executable))
+
+    assert mpv_loader.resolve_mpv_library_path() == str(bundled_library)
