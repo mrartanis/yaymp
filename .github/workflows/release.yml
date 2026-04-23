@@ -145,6 +145,7 @@ jobs:
           rm -rf build/verify-appimage
           mkdir -p build/verify-appimage/{config,data,cache,logs}
           set +e
+          APPIMAGE_EXTRACT_AND_RUN=1 \
           QT_QPA_PLATFORM=offscreen \
           YAYMP_CONFIG_DIR="$PWD/build/verify-appimage/config" \
           YAYMP_DATA_DIR="$PWD/build/verify-appimage/data" \
