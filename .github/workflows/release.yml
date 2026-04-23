@@ -67,7 +67,7 @@ jobs:
             cat build/verify/stderr.log
             exit "$status"
           fi
-          grep -q "Using MPV playback backend" build/verify/logs/yaymp.log
+          grep -q "Using MPV playback backend: .*build/nuitka/nuitka_entry.app/Contents/MacOS/lib/libmpv" build/verify/logs/yaymp.log
           ! grep -q "Falling back to fake playback backend" build/verify/logs/yaymp.log
 
       - name: Package app bundle
@@ -123,7 +123,7 @@ jobs:
             cat build/verify/stderr.log
             exit "$status"
           fi
-          grep -q "Using MPV playback backend" build/verify/logs/yaymp.log
+          grep -q "Using MPV playback backend: .*build/nuitka/YAYMP.AppDir/usr/bin/lib/libmpv" build/verify/logs/yaymp.log
           ! grep -q "Falling back to fake playback backend" build/verify/logs/yaymp.log
 
       - name: Download appimagetool
@@ -138,6 +138,26 @@ jobs:
           mkdir -p dist
           ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 \
             build/tools/appimagetool build/nuitka/YAYMP.AppDir "dist/YAYMP-${RELEASE_TAG}-linux-x86_64.AppImage"
+
+      - name: Verify AppImage MPV backend
+        run: |
+          rm -rf build/verify-appimage
+          mkdir -p build/verify-appimage/{config,data,cache,logs}
+          set +e
+          QT_QPA_PLATFORM=offscreen \
+          YAYMP_CONFIG_DIR="$PWD/build/verify-appimage/config" \
+          YAYMP_DATA_DIR="$PWD/build/verify-appimage/data" \
+          YAYMP_CACHE_DIR="$PWD/build/verify-appimage/cache" \
+          YAYMP_LOG_DIR="$PWD/build/verify-appimage/logs" \
+            timeout 15s "dist/YAYMP-${RELEASE_TAG}-linux-x86_64.AppImage" >build/verify-appimage/stdout.log 2>build/verify-appimage/stderr.log
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ] && [ "$status" -ne 124 ]; then
+            cat build/verify-appimage/stderr.log
+            exit "$status"
+          fi
+          grep -q "Using MPV playback backend: .*libmpv" build/verify-appimage/logs/yaymp.log
+          ! grep -q "Falling back to fake playback backend" build/verify-appimage/logs/yaymp.log
 
       - name: Upload artifact
         uses: actions/upload-artifact@v5

@@ -4,8 +4,7 @@ import ctypes.util
 import os
 import sys
 from ctypes.util import find_library
-from importlib import invalidate_caches
-from importlib import import_module
+from importlib import import_module, invalidate_caches
 from pathlib import Path
 
 from app.domain.errors import PlaybackBackendError

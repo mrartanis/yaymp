@@ -136,6 +136,10 @@ class MpvPlaybackEngine(PlaybackEngine):
     def on_ready_for_seek(self, callback) -> None:
         self._ready_for_seek_callback = callback
 
+    @property
+    def library_path(self) -> str:
+        return self._library_path
+
     def _register_ready_for_seek_events(self) -> None:
         @self._player.event_callback("file-loaded", "playback-restart")
         def handle_ready_event(_event) -> None:

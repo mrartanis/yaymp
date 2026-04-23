@@ -34,7 +34,10 @@ def test_mpv_loader_patches_find_library_for_explicit_path(monkeypatch: pytest.M
 
     monkeypatch.setattr("app.infrastructure.playback.mpv_loader.import_module", fake_import_module)
     monkeypatch.setattr("app.infrastructure.playback.mpv_loader.invalidate_caches", lambda: None)
-    monkeypatch.setattr("app.infrastructure.playback.mpv_loader.ctypes.util.find_library", fake_find_library)
+    monkeypatch.setattr(
+        "app.infrastructure.playback.mpv_loader.ctypes.util.find_library",
+        fake_find_library,
+    )
     monkeypatch.delitem(sys.modules, "mpv", raising=False)
 
     module = load_mpv_module(bundled_path)
