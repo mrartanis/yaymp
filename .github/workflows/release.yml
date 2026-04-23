@@ -84,6 +84,25 @@ jobs:
       - name: Build AppDir
         run: ./scripts/build_nuitka_linux.sh
 
+      - name: Verify packaged MPV backend
+        run: |
+          mkdir -p build/verify/{config,data,cache,logs}
+          set +e
+          QT_QPA_PLATFORM=offscreen \
+          YAYMP_CONFIG_DIR="$PWD/build/verify/config" \
+          YAYMP_DATA_DIR="$PWD/build/verify/data" \
+          YAYMP_CACHE_DIR="$PWD/build/verify/cache" \
+          YAYMP_LOG_DIR="$PWD/build/verify/logs" \
+            timeout 15s build/nuitka/YAYMP.AppDir/AppRun >build/verify/stdout.log 2>build/verify/stderr.log
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ] && [ "$status" -ne 124 ]; then
+            cat build/verify/stderr.log
+            exit "$status"
+          fi
+          grep -q "Using MPV playback backend" build/verify/logs/yaymp.log
+          ! grep -q "Falling back to fake playback backend" build/verify/logs/yaymp.log
+
       - name: Download appimagetool
         run: |
           mkdir -p build/tools
