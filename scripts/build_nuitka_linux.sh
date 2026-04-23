@@ -75,10 +75,12 @@ cat >"${APPDIR}/yaymp.desktop" <<'EOF'
 Type=Application
 Name=YAYMP
 Exec=yaymp
-Categories=Audio;Music;Player;
+Icon=yaymp
+Categories=AudioVideo;Audio;Player;
 Terminal=false
 EOF
 cp "${APPDIR}/yaymp.desktop" "${APPDIR}/usr/share/applications/yaymp.desktop"
+cp "${PROJECT_ROOT}/src/app/presentation/qt/icons_svg/play.svg" "${APPDIR}/yaymp.svg"
 
 echo "Built: ${OUTPUT_DIR}/nuitka_entry.dist"
 echo "Built AppDir: ${APPDIR}"
