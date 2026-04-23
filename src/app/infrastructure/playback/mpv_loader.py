@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import ctypes.util
 import os
 import sys
 from ctypes.util import find_library
+from importlib import invalidate_caches
 from importlib import import_module
 from pathlib import Path
 
@@ -61,16 +63,36 @@ def resolve_mpv_library_path() -> str | None:
     return find_library("mpv")
 
 
-def load_mpv_module():
+def _import_mpv_with_explicit_library(library_path: str):
+    original_find_library = ctypes.util.find_library
+
+    def patched_find_library(name: str) -> str | None:
+        if name == "mpv":
+            return library_path
+        return original_find_library(name)
+
+    ctypes.util.find_library = patched_find_library
     try:
+        if "mpv" in sys.modules:
+            del sys.modules["mpv"]
+        invalidate_caches()
         return import_module("mpv")
+    finally:
+        ctypes.util.find_library = original_find_library
+
+
+def load_mpv_module(library_path: str):
+    try:
+        return _import_mpv_with_explicit_library(library_path)
     except ModuleNotFoundError as exc:
         raise PlaybackBackendError("python-mpv is not installed") from exc
+    except OSError as exc:
+        raise PlaybackBackendError(f"Failed to load libmpv from {library_path}") from exc
 
 
 def ensure_mpv_available() -> tuple[object, str]:
     library_path = resolve_mpv_library_path()
     if library_path is None:
         raise PlaybackBackendError("libmpv could not be resolved")
-    module = load_mpv_module()
+    module = load_mpv_module(library_path)
     return module, library_path

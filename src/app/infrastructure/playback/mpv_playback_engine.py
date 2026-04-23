@@ -8,7 +8,7 @@ from app.infrastructure.playback.mpv_loader import ensure_mpv_available
 class MpvPlaybackEngine(PlaybackEngine):
     def __init__(self) -> None:
         mpv_module, library_path = ensure_mpv_available()
-        del library_path
+        self._library_path = library_path
         self._player = mpv_module.MPV()
         self._state = PlaybackState()
         self._ready_for_seek_callback = None
