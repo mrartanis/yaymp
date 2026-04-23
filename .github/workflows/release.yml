@@ -123,7 +123,8 @@ jobs:
             cat build/verify/stderr.log
             exit "$status"
           fi
-          grep -q "Using MPV playback backend: .*build/nuitka/YAYMP.AppDir/usr/bin/lib/libmpv" build/verify/logs/yaymp.log
+          rg "Using MPV playback backend" build/verify/logs/yaymp.log
+          grep -Eq "Using MPV playback backend: .*build/nuitka/YAYMP.AppDir/usr/(bin/)?lib/libmpv" build/verify/logs/yaymp.log
           ! grep -q "Falling back to fake playback backend" build/verify/logs/yaymp.log
 
       - name: Download appimagetool
@@ -156,7 +157,8 @@ jobs:
             cat build/verify-appimage/stderr.log
             exit "$status"
           fi
-          grep -q "Using MPV playback backend: .*libmpv" build/verify-appimage/logs/yaymp.log
+          rg "Using MPV playback backend" build/verify-appimage/logs/yaymp.log
+          grep -Eq "Using MPV playback backend: .*libmpv" build/verify-appimage/logs/yaymp.log
           ! grep -q "Falling back to fake playback backend" build/verify-appimage/logs/yaymp.log
 
       - name: Upload artifact
