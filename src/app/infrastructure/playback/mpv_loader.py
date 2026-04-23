@@ -29,7 +29,7 @@ def _candidate_library_names() -> tuple[str, ...]:
     if sys.platform == "darwin":
         return ("libmpv.2.dylib", "libmpv.dylib")
     if sys.platform.startswith("linux"):
-        return ("libmpv.so.2", "libmpv.so")
+        return ("libmpv.so.2", "libmpv.so.1", "libmpv.so")
     if sys.platform == "win32":
         return ("mpv-2.dll", "mpv-1.dll", "libmpv-2.dll", "libmpv.dll")
     return ("libmpv",)
