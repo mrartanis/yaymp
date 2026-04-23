@@ -4,9 +4,23 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Tag/release label to use for artifact names"
+        required: false
+        type: string
+      publish_release:
+        description: "Create/update GitHub Release and upload assets"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
+
+env:
+  RELEASE_TAG: ${{ inputs.release_tag != '' && inputs.release_tag || github.ref_name }}
 
 jobs:
   macos:
@@ -36,13 +50,13 @@ jobs:
       - name: Package app bundle
         run: |
           mkdir -p dist
-          ditto -c -k --keepParent build/nuitka/nuitka_entry.app "dist/YAYMP-${GITHUB_REF_NAME}-macos-arm64.zip"
+          ditto -c -k --keepParent build/nuitka/nuitka_entry.app "dist/YAYMP-${RELEASE_TAG}-macos-arm64.zip"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v5
         with:
           name: YAYMP-macos-arm64
-          path: dist/YAYMP-${{ github.ref_name }}-macos-arm64.zip
+          path: dist/YAYMP-${{ env.RELEASE_TAG }}-macos-arm64.zip
 
   linux:
     name: Linux AppImage
@@ -81,13 +95,13 @@ jobs:
         run: |
           mkdir -p dist
           ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 \
-            build/tools/appimagetool build/nuitka/YAYMP.AppDir "dist/YAYMP-${GITHUB_REF_NAME}-linux-x86_64.AppImage"
+            build/tools/appimagetool build/nuitka/YAYMP.AppDir "dist/YAYMP-${RELEASE_TAG}-linux-x86_64.AppImage"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v5
         with:
           name: YAYMP-linux-x86_64
-          path: dist/YAYMP-${{ github.ref_name }}-linux-x86_64.AppImage
+          path: dist/YAYMP-${{ env.RELEASE_TAG }}-linux-x86_64.AppImage
 
   publish:
     name: Publish GitHub Release
@@ -95,6 +109,7 @@ jobs:
     needs:
       - macos
       - linux
+    if: startsWith(github.ref, 'refs/tags/') || inputs.publish_release == true
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v6
@@ -106,6 +121,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 \
-            || gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" --notes "YAYMP ${GITHUB_REF_NAME}"
-          gh release upload "${GITHUB_REF_NAME}" dist/* --clobber
+          gh release view "${RELEASE_TAG}" >/dev/null 2>&1 \
+            || gh release create "${RELEASE_TAG}" --target "${GITHUB_SHA}" --title "${RELEASE_TAG}" --notes "YAYMP ${RELEASE_TAG}"
+          gh release upload "${RELEASE_TAG}" dist/* --clobber
