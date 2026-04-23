@@ -6,6 +6,7 @@ def test_main_window_can_be_constructed(qtbot, qapp, tmp_path, monkeypatch) -> N
     monkeypatch.setenv("YAYMP_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("YAYMP_CACHE_DIR", str(tmp_path / "cache"))
     monkeypatch.setenv("YAYMP_LOG_DIR", str(tmp_path / "logs"))
+    monkeypatch.setenv("YAYMP_PLAYBACK_BACKEND", "fake")
 
     context = build_startup_context(argv=["yaymp-test"], existing_qt_app=qapp)
 

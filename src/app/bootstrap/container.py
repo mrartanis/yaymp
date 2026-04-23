@@ -200,7 +200,7 @@ def _build_playback_state_repo(
 
 
 def _build_playback_engine(logger: logging.Logger) -> FakePlaybackEngine | MpvPlaybackEngine:
-    backend_name = os.getenv("YAYMP_PLAYBACK_BACKEND", "fake").lower()
+    backend_name = os.getenv("YAYMP_PLAYBACK_BACKEND", "mpv").lower()
     if backend_name != "mpv":
         logger.info("Using fake playback backend")
         return FakePlaybackEngine()
