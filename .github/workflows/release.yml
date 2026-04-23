@@ -59,7 +59,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y fuse libfuse2 libmpv2 patchelf wget
+          sudo apt-get install -y libmpv2 patchelf wget
 
       - name: Create virtualenv
         run: python -m venv .venv
