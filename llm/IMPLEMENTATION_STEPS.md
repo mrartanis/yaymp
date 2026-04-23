@@ -209,7 +209,8 @@ Make the app runnable outside the development machine.
 
 Implement:
 
-- PyInstaller build scripts first
+- Nuitka build scripts first
+- PyInstaller fallback only if Nuitka hits blocker-level packaging issues
 - `libmpv` bundling
 - runtime library resolution for packaged builds
 - macOS app bundle

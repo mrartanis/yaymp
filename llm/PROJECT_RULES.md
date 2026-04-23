@@ -170,8 +170,9 @@ Rules:
 Practical recommendation:
 
 - Start with local development without bundling.
-- Use `PyInstaller` for the first distributable builds.
-- Revisit `Nuitka` later only if packaging quality or runtime issues justify it.
+- Use `Nuitka` as the primary distributable build path.
+- Keep `PyInstaller` as a fallback only if Nuitka exposes blocker-level packaging issues.
+- Prefer a debuggable standalone/app-bundle build before attempting one-file packaging.
 
 Bundle contents must include:
 
@@ -304,7 +305,7 @@ Explicitly avoid these unless a later milestone proves they are needed:
 Main risks:
 
 1. Unofficial Yandex Music API instability.
-2. `libmpv` packaging complexity on macOS and Windows.
+2. `libmpv` packaging complexity on macOS and Windows, especially with Nuitka binary dependency handling.
 3. Threading bugs between Qt and playback callbacks.
 4. Overengineering caused by LLM-generated code.
 5. UI leaking into infrastructure or vice versa.

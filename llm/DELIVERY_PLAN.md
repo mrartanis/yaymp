@@ -168,7 +168,8 @@ Goal:
 
 Deliverables:
 
-- PyInstaller or later Nuitka build scripts
+- Nuitka build scripts
+- PyInstaller fallback notes if Nuitka blocks release packaging
 - bundled `libmpv`
 - macOS bundle
 - Linux bundle
@@ -291,7 +292,8 @@ Testing:
 Build:
 
 - dev bootstrap script
-- PyInstaller spec
+- Nuitka build script
+- PyInstaller fallback path
 - bundled `libmpv`
 - CI pipeline
 - release checklist
