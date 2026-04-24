@@ -587,12 +587,6 @@ class YandexMusicService(MusicService):
         playlist_id = str(
             getattr(raw_playlist, "kind", getattr(raw_playlist, "playlist_uuid", "unknown"))
         )
-        artwork_ref = getattr(raw_playlist, "cover_uri", None)
-        if artwork_ref is None and hasattr(raw_playlist, "get_og_image_url"):
-            try:
-                artwork_ref = raw_playlist.get_og_image_url()
-            except AssertionError:
-                artwork_ref = None
         return Playlist(
             id=playlist_id,
             title=getattr(raw_playlist, "title", playlist_id),
@@ -600,7 +594,7 @@ class YandexMusicService(MusicService):
             owner_name=owner_name,
             description=getattr(raw_playlist, "description", None),
             track_count=getattr(raw_playlist, "track_count", None),
-            artwork_ref=artwork_ref,
+            artwork_ref=self._extract_artwork_ref(raw_playlist),
             is_generated=is_generated,
             is_liked=is_liked,
         )
@@ -624,7 +618,7 @@ class YandexMusicService(MusicService):
             release_type=getattr(raw_album, "type", None),
             year=int(year) if year else None,
             track_count=getattr(raw_album, "track_count", None),
-            artwork_ref=getattr(raw_album, "cover_uri", None),
+            artwork_ref=self._extract_artwork_ref(raw_album),
         )
 
     def _bucket_albums(
@@ -645,15 +639,40 @@ class YandexMusicService(MusicService):
 
     def _map_artist(self, raw_artist: Any, *, is_liked: bool = False) -> Artist:
         artist_id = str(getattr(raw_artist, "id", "unknown"))
-        artwork_ref = getattr(raw_artist, "cover_uri", None)
-        if artwork_ref is None and hasattr(raw_artist, "get_cover_url"):
-            artwork_ref = raw_artist.get_cover_url()
         return Artist(
             id=artist_id,
             name=getattr(raw_artist, "name", artist_id),
-            artwork_ref=artwork_ref,
+            artwork_ref=self._extract_artwork_ref(raw_artist),
             is_liked=is_liked,
         )
+
+    def _extract_artwork_ref(self, item: Any) -> str | None:
+        artwork_ref = getattr(item, "cover_uri", None)
+        if isinstance(artwork_ref, str) and artwork_ref:
+            return artwork_ref
+
+        cover = getattr(item, "cover", None)
+        cover_uri = getattr(cover, "uri", None)
+        if isinstance(cover_uri, str) and cover_uri:
+            return cover_uri
+
+        if hasattr(item, "get_cover_url"):
+            try:
+                artwork_ref = item.get_cover_url()
+            except (AssertionError, TypeError):
+                artwork_ref = None
+            if isinstance(artwork_ref, str) and artwork_ref:
+                return artwork_ref
+
+        if hasattr(item, "get_og_image_url"):
+            try:
+                artwork_ref = item.get_og_image_url()
+            except (AssertionError, TypeError):
+                artwork_ref = None
+            if isinstance(artwork_ref, str) and artwork_ref:
+                return artwork_ref
+
+        return None
 
     def _map_station(self, raw_result: Any) -> Station:
         station = raw_result.station

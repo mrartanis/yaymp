@@ -5,7 +5,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from app.domain import StorageError
+from app.domain import Album, Artist, CatalogSearchResults, StorageError
+from app.domain.playlist import Playlist
 from app.domain.track import LikedTrackIds, LikedTrackSnapshot, Track
 from app.infrastructure.persistence.file_library_cache_repo import FileLibraryCacheRepo
 
@@ -36,6 +37,20 @@ def test_file_library_cache_repo_round_trips_track_metadata_and_artwork(tmp_path
 
     assert repo.load_track_metadata("track-1") == track
     assert repo.load_artwork_ref("track-1") == "covers/track.jpg"
+
+
+def test_file_library_cache_repo_round_trips_catalog_search(tmp_path) -> None:
+    repo = FileLibraryCacheRepo(file_path=tmp_path / "library.json")
+    results = CatalogSearchResults(
+        tracks=(Track(id="track-1", title="Signal", artists=("Artist",)),),
+        albums=(Album(id="album-1", title="Album", artists=("Artist",)),),
+        artists=(Artist(id="artist-1", name="Artist", artwork_ref="covers/artist.jpg"),),
+        playlists=(Playlist(id="playlist-1", title="Playlist"),),
+    )
+
+    repo.save_catalog_search("Ambient", results)
+
+    assert repo.load_catalog_search("ambient") == results
 
 
 def test_file_library_cache_repo_round_trips_liked_track_ids(tmp_path) -> None:
@@ -123,6 +138,7 @@ def test_file_library_cache_repo_returns_empty_when_missing(tmp_path) -> None:
     repo = FileLibraryCacheRepo(file_path=tmp_path / "missing.json")
 
     assert repo.load_recent_searches() == ()
+    assert repo.load_catalog_search("ambient") is None
     assert repo.load_liked_track_ids("user-1") is None
     assert repo.load_liked_track_snapshot("user-1") is None
 
@@ -142,3 +158,30 @@ def test_file_library_cache_repo_migrates_legacy_recent_searches_list(tmp_path) 
     repo = FileLibraryCacheRepo(file_path=path)
 
     assert repo.load_recent_searches() == ("ambient", "jazz")
+
+
+def test_file_library_cache_repo_expires_catalog_search_after_hour(tmp_path) -> None:
+    path = tmp_path / "library.json"
+    expired_at = (datetime.now(tz=UTC) - timedelta(hours=2)).isoformat()
+    payload = {
+        "recent_searches": [],
+        "tracks": {},
+        "artwork": {},
+        "catalog_search": {
+            "ambient": {
+                "results": {
+                    "tracks": [{"id": "track-1", "title": "Signal", "artists": ["Artist"]}],
+                    "albums": [],
+                    "singles": [],
+                    "compilations": [],
+                    "artists": [],
+                    "playlists": [],
+                },
+                "cached_at": expired_at,
+            }
+        },
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    repo = FileLibraryCacheRepo(file_path=path)
+
+    assert repo.load_catalog_search("ambient") is None

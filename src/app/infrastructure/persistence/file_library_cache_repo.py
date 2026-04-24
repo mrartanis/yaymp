@@ -8,6 +8,7 @@ from typing import Any
 from app.domain import (
     Album,
     Artist,
+    CatalogSearchResults,
     LibraryCacheRepo,
     LikedTrackIds,
     LikedTrackSnapshot,
@@ -21,6 +22,7 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
     _CACHE_TTL = timedelta(days=7)
     _ARTWORK_TTL = timedelta(days=30)
     _LIST_CACHE_TTL = timedelta(days=1)
+    _SEARCH_CACHE_TTL = timedelta(hours=1)
 
     def __init__(self, *, file_path: Path) -> None:
         self._file_path = file_path
@@ -35,6 +37,31 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
     def save_recent_searches(self, searches: tuple[str, ...] | list[str]) -> None:
         payload = self._load_payload()
         payload["recent_searches"] = list(searches)
+        self._save_payload(payload)
+
+    def load_catalog_search(self, query: str) -> CatalogSearchResults | None:
+        payload = self._load_payload()
+        raw_searches = payload.get("catalog_search", {})
+        if not isinstance(raw_searches, dict):
+            raise StorageError("Library cache catalog search map is invalid")
+        raw_entry = raw_searches.get(self._normalize_search_query(query))
+        if raw_entry is None:
+            return None
+        if not isinstance(raw_entry, dict):
+            raise StorageError("Library cache catalog search entry is invalid")
+        if self._is_expired(raw_entry.get("cached_at"), ttl=self._SEARCH_CACHE_TTL):
+            return None
+        return self._deserialize_catalog_search(raw_entry.get("results"))
+
+    def save_catalog_search(self, query: str, results: CatalogSearchResults) -> None:
+        payload = self._load_payload()
+        raw_searches = payload.setdefault("catalog_search", {})
+        if not isinstance(raw_searches, dict):
+            raise StorageError("Library cache catalog search map is invalid")
+        raw_searches[self._normalize_search_query(query)] = {
+            "results": self._serialize_catalog_search(results),
+            "cached_at": self._now_iso(),
+        }
         self._save_payload(payload)
 
     def load_track_metadata(self, track_id: str) -> Track | None:
@@ -311,6 +338,7 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
                 "liked_playlist_snapshots": {},
                 "user_playlist_snapshots": {},
                 "generated_playlist_snapshots": {},
+                "catalog_search": {},
             }
         try:
             payload = json.loads(self._file_path.read_text(encoding="utf-8"))
@@ -318,7 +346,12 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
             raise StorageError("Failed to load library cache") from exc
 
         if isinstance(payload, list) and all(isinstance(item, str) for item in payload):
-            return {"recent_searches": payload, "tracks": {}, "artwork": {}}
+            return {
+                "recent_searches": payload,
+                "tracks": {},
+                "artwork": {},
+                "catalog_search": {},
+            }
         if not isinstance(payload, dict):
             raise StorageError("Library cache file is invalid")
         known_keys = {
@@ -332,6 +365,7 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
             "liked_playlist_snapshots",
             "user_playlist_snapshots",
             "generated_playlist_snapshots",
+            "catalog_search",
         }
         if not any(key in payload for key in known_keys):
             raise StorageError("Library cache file is invalid")
@@ -345,6 +379,7 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
         payload.setdefault("liked_playlist_snapshots", {})
         payload.setdefault("user_playlist_snapshots", {})
         payload.setdefault("generated_playlist_snapshots", {})
+        payload.setdefault("catalog_search", {})
         return payload
 
     def _save_payload(self, payload: dict[str, Any]) -> None:
@@ -480,6 +515,46 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
             is_liked=bool(raw_playlist.get("is_liked", False)),
         )
 
+    def _serialize_catalog_search(self, results: CatalogSearchResults) -> dict[str, object]:
+        return {
+            "tracks": [self._serialize_track(track) for track in results.tracks],
+            "albums": [self._serialize_album(album) for album in results.albums],
+            "singles": [self._serialize_album(album) for album in results.singles],
+            "compilations": [self._serialize_album(album) for album in results.compilations],
+            "artists": [self._serialize_artist(artist) for artist in results.artists],
+            "playlists": [self._serialize_playlist(playlist) for playlist in results.playlists],
+        }
+
+    def _deserialize_catalog_search(self, raw_results: object) -> CatalogSearchResults:
+        if not isinstance(raw_results, dict):
+            raise StorageError("Library cache catalog search entry is invalid")
+        return CatalogSearchResults(
+            tracks=tuple(
+                self._deserialize_track(raw_track)
+                for raw_track in self._require_list(raw_results.get("tracks"))
+            ),
+            albums=tuple(
+                self._deserialize_album(raw_album)
+                for raw_album in self._require_list(raw_results.get("albums"))
+            ),
+            singles=tuple(
+                self._deserialize_album(raw_album)
+                for raw_album in self._require_list(raw_results.get("singles"))
+            ),
+            compilations=tuple(
+                self._deserialize_album(raw_album)
+                for raw_album in self._require_list(raw_results.get("compilations"))
+            ),
+            artists=tuple(
+                self._deserialize_artist(raw_artist)
+                for raw_artist in self._require_list(raw_results.get("artists"))
+            ),
+            playlists=tuple(
+                self._deserialize_playlist(raw_playlist)
+                for raw_playlist in self._require_list(raw_results.get("playlists"))
+            ),
+        )
+
     def _load_entity_snapshot(self, user_id: str, *, snapshot_key: str, mapper):
         payload = self._load_payload()
         raw_snapshots = payload.get(snapshot_key, {})
@@ -525,6 +600,16 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
         if cached_at.tzinfo is None:
             cached_at = cached_at.replace(tzinfo=UTC)
         return datetime.now(tz=UTC) - cached_at > self._LIST_CACHE_TTL
+
+    def _normalize_search_query(self, query: str) -> str:
+        return query.strip().casefold()
+
+    def _require_list(self, value: object) -> list[object]:
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise StorageError("Library cache catalog search entry is invalid")
+        return value
 
     def _now_iso(self) -> str:
         return datetime.now(tz=UTC).isoformat()

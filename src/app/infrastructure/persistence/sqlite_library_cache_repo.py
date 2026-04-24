@@ -10,6 +10,7 @@ from typing import Any
 from app.domain import (
     Album,
     Artist,
+    CatalogSearchResults,
     LibraryCacheRepo,
     LikedTrackIds,
     LikedTrackSnapshot,
@@ -23,6 +24,7 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
     _CACHE_TTL = timedelta(days=7)
     _ARTWORK_TTL = timedelta(days=30)
     _LIST_CACHE_TTL = timedelta(days=1)
+    _SEARCH_CACHE_TTL = timedelta(hours=1)
 
     def __init__(self, *, db_path: Path) -> None:
         self._db_path = db_path
@@ -54,6 +56,49 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                 )
         except sqlite3.Error as exc:
             raise StorageError("Failed to save recent searches") from exc
+
+    def load_catalog_search(self, query: str) -> CatalogSearchResults | None:
+        try:
+            with self._connect() as connection:
+                row = connection.execute(
+                    (
+                        "select data_json, cached_at from catalog_search_cache "
+                        "where query = ?"
+                    ),
+                    (self._normalize_search_query(query),),
+                ).fetchone()
+        except sqlite3.Error as exc:
+            raise StorageError("Failed to load cached catalog search") from exc
+        if row is None or self._is_expired(row["cached_at"], ttl=self._SEARCH_CACHE_TTL):
+            return None
+        try:
+            payload = json.loads(row["data_json"])
+        except json.JSONDecodeError as exc:
+            raise StorageError("Cached catalog search is invalid") from exc
+        return self._decode_catalog_search(payload)
+
+    def save_catalog_search(self, query: str, results: CatalogSearchResults) -> None:
+        try:
+            with self._connect() as connection:
+                connection.execute(
+                    (
+                        "insert into catalog_search_cache(query, data_json, cached_at) "
+                        "values (?, ?, ?) "
+                        "on conflict(query) do update set "
+                        "data_json = excluded.data_json, "
+                        "cached_at = excluded.cached_at"
+                    ),
+                    (
+                        self._normalize_search_query(query),
+                        json.dumps(
+                            self._encode_catalog_search(results),
+                            ensure_ascii=True,
+                        ),
+                        self._now_iso(),
+                    ),
+                )
+        except sqlite3.Error as exc:
+            raise StorageError("Failed to save cached catalog search") from exc
 
     def load_track_metadata(self, track_id: str) -> Track | None:
         try:
@@ -389,6 +434,12 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                         cached_at text not null
                     );
 
+                    create table if not exists catalog_search_cache (
+                        query text primary key,
+                        data_json text not null,
+                        cached_at text not null
+                    );
+
                     create table if not exists liked_track_sync (
                         user_id text primary key,
                         revision integer not null,
@@ -675,6 +726,46 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
             is_liked=bool(raw_playlist.get("is_liked", False)),
         )
 
+    def _encode_catalog_search(self, results: CatalogSearchResults) -> dict[str, object]:
+        return {
+            "tracks": [self._encode_track(track) for track in results.tracks],
+            "albums": [self._encode_album(album) for album in results.albums],
+            "singles": [self._encode_album(album) for album in results.singles],
+            "compilations": [self._encode_album(album) for album in results.compilations],
+            "artists": [self._encode_artist(artist) for artist in results.artists],
+            "playlists": [self._encode_playlist(playlist) for playlist in results.playlists],
+        }
+
+    def _decode_catalog_search(self, raw_results: object) -> CatalogSearchResults:
+        if not isinstance(raw_results, dict):
+            raise StorageError("Cached catalog search is invalid")
+        return CatalogSearchResults(
+            tracks=tuple(
+                self._decode_track(raw_track)
+                for raw_track in self._require_list(raw_results.get("tracks"))
+            ),
+            albums=tuple(
+                self._decode_album(raw_album)
+                for raw_album in self._require_list(raw_results.get("albums"))
+            ),
+            singles=tuple(
+                self._decode_album(raw_album)
+                for raw_album in self._require_list(raw_results.get("singles"))
+            ),
+            compilations=tuple(
+                self._decode_album(raw_album)
+                for raw_album in self._require_list(raw_results.get("compilations"))
+            ),
+            artists=tuple(
+                self._decode_artist(raw_artist)
+                for raw_artist in self._require_list(raw_results.get("artists"))
+            ),
+            playlists=tuple(
+                self._decode_playlist(raw_playlist)
+                for raw_playlist in self._require_list(raw_results.get("playlists"))
+            ),
+        )
+
     def _is_list_snapshot_expired(self, raw_value: Any) -> bool:
         if not isinstance(raw_value, str):
             return True
@@ -685,3 +776,62 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
         if cached_at.tzinfo is None:
             cached_at = cached_at.replace(tzinfo=UTC)
         return datetime.now(tz=UTC) - cached_at > self._LIST_CACHE_TTL
+
+    def _encode_track(self, track: Track) -> dict[str, object]:
+        return {
+            "id": track.id,
+            "title": track.title,
+            "artists": list(track.artists),
+            "artist_ids": list(track.artist_ids),
+            "album_id": track.album_id,
+            "album_title": track.album_title,
+            "album_year": track.album_year,
+            "duration_ms": track.duration_ms,
+            "stream_ref": track.stream_ref,
+            "artwork_ref": track.artwork_ref,
+            "available": track.available,
+            "is_liked": track.is_liked,
+        }
+
+    def _decode_track(self, raw_track: object) -> Track:
+        if not isinstance(raw_track, dict):
+            raise StorageError("Cached track metadata is invalid")
+        try:
+            return Track(
+                id=str(raw_track["id"]),
+                title=str(raw_track["title"]),
+                artists=tuple(str(artist) for artist in raw_track.get("artists", ())),
+                artist_ids=tuple(
+                    str(artist_id) for artist_id in raw_track.get("artist_ids", ())
+                ),
+                album_id=self._optional_str(raw_track.get("album_id")),
+                album_title=self._optional_str(raw_track.get("album_title")),
+                album_year=self._optional_int(raw_track.get("album_year")),
+                duration_ms=self._optional_int(raw_track.get("duration_ms")),
+                stream_ref=self._optional_str(raw_track.get("stream_ref")),
+                artwork_ref=self._optional_str(raw_track.get("artwork_ref")),
+                available=bool(raw_track.get("available", True)),
+                is_liked=bool(raw_track.get("is_liked", False)),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise StorageError("Cached track metadata is invalid") from exc
+
+    def _optional_str(self, value: object) -> str | None:
+        if value is None:
+            return None
+        return str(value)
+
+    def _optional_int(self, value: object) -> int | None:
+        if value is None:
+            return None
+        return int(value)
+
+    def _normalize_search_query(self, query: str) -> str:
+        return query.strip().casefold()
+
+    def _require_list(self, value: object) -> list[object]:
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise StorageError("Cached catalog search is invalid")
+        return value

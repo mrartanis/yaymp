@@ -238,6 +238,7 @@ class InMemoryPlaybackStateRepo:
 
 class InMemoryLibraryCacheRepo:
     def __init__(self) -> None:
+        self.catalog_search = {}
         self.tracks: dict[str, Track] = {}
         self.liked_tracks: dict[str, LikedTrackIds] = {}
         self.liked_track_snapshots: dict[str, LikedTrackSnapshot] = {}
@@ -252,6 +253,12 @@ class InMemoryLibraryCacheRepo:
 
     def save_recent_searches(self, searches):
         del searches
+
+    def load_catalog_search(self, query: str):
+        return self.catalog_search.get(query.strip().casefold())
+
+    def save_catalog_search(self, query: str, results):
+        self.catalog_search[query.strip().casefold()] = results
 
     def load_track_metadata(self, track_id: str):
         return self.tracks.get(track_id)

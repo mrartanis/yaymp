@@ -7,7 +7,7 @@ from pathlib import Path
 
 import shiboken6
 from PySide6.QtCore import QEvent, QPoint, Qt, QTimer, QUrl
-from PySide6.QtGui import QAction, QColor, QCursor, QPixmap, QShowEvent
+from PySide6.QtGui import QAction, QColor, QCursor, QFont, QPixmap, QResizeEvent, QShowEvent
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 from PySide6.QtWidgets import (
     QApplication,
@@ -82,11 +82,12 @@ class MainWindow(QMainWindow):
         self._rendered_active_index: int | None = None
         self._queue_selected_index: int | None = None
         self._track_like_overrides: dict[str, bool] = {}
+        self._track_label_base_sizes: dict[QLabel, int] = {}
         self._playback_poll_timer = QTimer(self)
         self._playback_poll_timer.setInterval(1000)
         self.setWindowTitle("YAYMP")
         self._build_ui()
-        self.setMinimumWidth(540)
+        self.setMinimumWidth(560)
         self.resize(self.minimumWidth(), 720)
         self._apply_saved_settings_to_ui()
         self._wire_controller()
@@ -99,10 +100,15 @@ class MainWindow(QMainWindow):
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
+        self._fit_track_text_labels()
         if self._auth_flow_checked:
             return
         self._auth_flow_checked = True
         QTimer.singleShot(0, self._maybe_start_auth_flow)
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self._fit_track_text_labels()
 
     def eventFilter(self, watched: object, event: QEvent) -> bool:
         if watched is self._auth_label:
@@ -197,6 +203,7 @@ class MainWindow(QMainWindow):
         self._seek_slider.setSingleStep(1_000)
         self._seek_slider.setPageStep(10_000)
         self._seek_slider.setObjectName("seek-slider")
+        self._seek_slider.setFixedWidth(302)
         self._seek_label = self._panel_label("0:00 / 0:00")
         self._seek_label.setObjectName("seek-label")
         self._seek_label.setFixedHeight(28)
@@ -229,7 +236,7 @@ class MainWindow(QMainWindow):
             QSizePolicy.Policy.Ignored,
             QSizePolicy.Policy.Preferred,
         )
-        self._track_title_label.setMaximumHeight(76)
+        self._track_title_label.setMaximumHeight(108)
         self._track_meta_label = self._panel_label("Artist metadata will appear here")
         self._track_meta_label.setObjectName("track-artist")
         self._track_meta_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -237,7 +244,8 @@ class MainWindow(QMainWindow):
             QSizePolicy.Policy.Ignored,
             QSizePolicy.Policy.Preferred,
         )
-        self._track_meta_label.setMaximumHeight(24)
+        self._track_meta_label.setMaximumHeight(72)
+        self._track_meta_label.setWordWrap(True)
         self._track_album_label = self._panel_label("Album")
         self._track_album_label.setObjectName("track-album")
         self._track_album_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -246,7 +254,7 @@ class MainWindow(QMainWindow):
             QSizePolicy.Policy.Ignored,
             QSizePolicy.Policy.Preferred,
         )
-        self._track_album_label.setMaximumHeight(46)
+        self._track_album_label.setMaximumHeight(72)
         self._audio_info_label = self._panel_label("")
         self._audio_info_label.setObjectName("queue-audio-info")
         self._audio_info_label.setAlignment(
@@ -319,14 +327,22 @@ class MainWindow(QMainWindow):
         info_layout.setSpacing(5)
         info_layout.setContentsMargins(0, 0, 0, 0)
         text_block = QWidget()
+        text_block.setObjectName("track-metadata-zone")
         text_block.setMinimumWidth(0)
+        text_block.setFixedHeight(176)
+        text_block.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Fixed,
+        )
         text_block_layout = QVBoxLayout(text_block)
         text_block_layout.setContentsMargins(0, 0, 0, 0)
         text_block_layout.setSpacing(5)
-        text_block_layout.addSpacing(2)
+        text_block_layout.addStretch(1)
         text_block_layout.addWidget(self._track_title_label)
         text_block_layout.addWidget(self._track_meta_label)
         text_block_layout.addWidget(self._track_album_label)
+        text_block_layout.addStretch(1)
+        info_layout.addStretch(1)
         info_layout.addWidget(text_block)
         info_layout.addStretch(1)
         info_layout.addLayout(self._build_transport_bar())
@@ -336,10 +352,11 @@ class MainWindow(QMainWindow):
         progress_row = QHBoxLayout()
         progress_row.setSpacing(8)
         progress_row.setContentsMargins(0, 0, 0, 0)
-        progress_row.addWidget(self._seek_slider, 1)
+        progress_row.addWidget(self._seek_slider, 0)
         progress_row.addWidget(self._seek_label)
         progress_row.addWidget(self._volume_button)
         progress_row.addWidget(self._like_track_button)
+        progress_row.addStretch(1)
 
         secondary_row = QHBoxLayout()
         secondary_row.setSpacing(8)
@@ -351,6 +368,11 @@ class MainWindow(QMainWindow):
         layout.addLayout(secondary_row)
         self._build_settings_popup()
         self._build_volume_popup()
+        self._track_label_base_sizes = {
+            self._track_title_label: 28,
+            self._track_meta_label: 16,
+            self._track_album_label: 13,
+        }
         return frame
 
     def _build_nav_panel(self) -> QFrame:
@@ -438,6 +460,11 @@ class MainWindow(QMainWindow):
         self._recent_searches_combo.addItem("Recent searches")
         self._browser_title_label = self._panel_label("Search")
         self._browser_title_label.setObjectName("browser-title")
+        self._browser_back_button = QPushButton("‹")
+        self._browser_back_button.setObjectName("panel-back-button")
+        self._browser_back_button.setToolTip("Back")
+        self._browser_back_button.setFixedSize(32, 30)
+        self._browser_back_button.setEnabled(False)
         self._browser_close_button = QPushButton("×")
         self._browser_close_button.setObjectName("panel-close-button")
         self._browser_close_button.setToolTip("Close")
@@ -453,6 +480,7 @@ class MainWindow(QMainWindow):
         self._play_all_button.setIcon(create_icon("play.svg"))
         self._append_all_button = QPushButton("Append all")
         self._append_all_button.setIcon(create_icon("add_to_playlist.svg"))
+        header_row.addWidget(self._browser_back_button)
         header_row.addWidget(self._browser_title_label, 1)
         header_row.addWidget(self._browser_close_button)
         search_row = QHBoxLayout()
@@ -548,6 +576,7 @@ class MainWindow(QMainWindow):
         self._queue_list.currentRowChanged.connect(self._select_queue_highlight_row)
         self._clear_queue_button.clicked.connect(self._controller.clear_queue)
         self._queue_shuffle_button.toggled.connect(self._controller.set_shuffle_enabled)
+        self._browser_back_button.clicked.connect(self._library_controller.go_back)
         self._browser_close_button.clicked.connect(self._hide_browser_panel)
         self._content_list.itemDoubleClicked.connect(self._open_content_item)
         self._content_list.customContextMenuRequested.connect(self._show_content_context_menu)
@@ -779,6 +808,7 @@ class MainWindow(QMainWindow):
                 album_text
             )
             self._track_album_label.setToolTip(album_text)
+            self._fit_track_text_labels()
             self._render_current_track_like_button(current_track.is_liked)
             self._render_artwork(current_track)
         else:
@@ -786,6 +816,7 @@ class MainWindow(QMainWindow):
             self._track_title_label.setText("No track selected")
             self._track_meta_label.setText("Choose music from My Wave, library, or search")
             self._track_album_label.setText("")
+            self._fit_track_text_labels()
             self._render_current_track_like_button(False)
             self._clear_artwork()
             self._set_accent_color("#526ee8")
@@ -997,6 +1028,7 @@ class MainWindow(QMainWindow):
         self._current_browser_content = content
         self._loading_more_content = False
         self._browser_title_label.setText(content.title)
+        self._browser_back_button.setEnabled(self._library_controller.can_go_back())
         self._render_browser_tabs(content.tabs, active_tab=content.active_tab)
         self._recent_searches_combo.blockSignals(True)
         self._recent_searches_combo.clear()
@@ -2042,6 +2074,9 @@ class MainWindow(QMainWindow):
                 border-radius: 7px;
                 padding: 5px;
             }}
+            QListWidget#queue-list::item {{
+                padding: 0px;
+            }}
             QListWidget::item:selected {{
                 background: {accent};
                 color: {accent_text};
@@ -2160,3 +2195,43 @@ class MainWindow(QMainWindow):
             return "0:00"
         minutes, remainder = divmod(value // 1000, 60)
         return f"{minutes}:{remainder:02d}"
+
+    def _fit_track_text_labels(self) -> None:
+        self._fit_track_text_label(self._track_title_label, min_point_size=20, max_lines=3)
+        self._fit_track_text_label(self._track_meta_label, min_point_size=12, max_lines=3)
+        self._fit_track_text_label(self._track_album_label, min_point_size=11, max_lines=3)
+
+    def _fit_track_text_label(
+        self,
+        label: QLabel,
+        *,
+        min_point_size: int,
+        max_lines: int,
+    ) -> None:
+        base_size = self._track_label_base_sizes.get(label)
+        if base_size is None:
+            return
+        text = label.text().strip()
+        font = QFont(label.font())
+        font.setPointSize(base_size)
+        label.setFont(font)
+        if not text:
+            return
+
+        available_width = max(80, label.contentsRect().width() or label.width())
+        available_height = max(1, label.maximumHeight())
+        flags = int(Qt.AlignmentFlag.AlignCenter) | int(Qt.TextFlag.TextWordWrap)
+
+        for point_size in range(base_size, min_point_size - 1, -1):
+            font.setPointSize(point_size)
+            metrics = label.fontMetrics() if point_size == font.pointSize() else None
+            label.setFont(font)
+            metrics = label.fontMetrics() if metrics is None else metrics
+            rect = metrics.boundingRect(0, 0, available_width, 4096, flags, text)
+            fits_height = rect.height() <= available_height
+            fits_lines = rect.height() <= metrics.lineSpacing() * max_lines
+            if fits_height and fits_lines:
+                return
+
+        font.setPointSize(min_point_size)
+        label.setFont(font)

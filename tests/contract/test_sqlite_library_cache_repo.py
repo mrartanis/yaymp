@@ -3,6 +3,8 @@ from __future__ import annotations
 import sqlite3
 from datetime import UTC, datetime, timedelta
 
+from app.domain import Album, Artist, CatalogSearchResults
+from app.domain.playlist import Playlist
 from app.domain.track import LikedTrackIds, LikedTrackSnapshot, Track
 from app.infrastructure.persistence.sqlite_library_cache_repo import SQLiteLibraryCacheRepo
 
@@ -34,6 +36,20 @@ def test_sqlite_library_cache_repo_round_trips_track_metadata_and_artwork(tmp_pa
 
     assert repo.load_track_metadata("track-1") == track
     assert repo.load_artwork_ref("track-1") == "covers/track.jpg"
+
+
+def test_sqlite_library_cache_repo_round_trips_catalog_search(tmp_path) -> None:
+    repo = SQLiteLibraryCacheRepo(db_path=tmp_path / "library.sqlite3")
+    results = CatalogSearchResults(
+        tracks=(Track(id="track-1", title="Signal", artists=("Artist",)),),
+        albums=(Album(id="album-1", title="Album", artists=("Artist",)),),
+        artists=(Artist(id="artist-1", name="Artist", artwork_ref="covers/artist.jpg"),),
+        playlists=(Playlist(id="playlist-1", title="Playlist"),),
+    )
+
+    repo.save_catalog_search("Ambient", results)
+
+    assert repo.load_catalog_search("ambient") == results
 
 
 def test_sqlite_library_cache_repo_round_trips_liked_track_ids(tmp_path) -> None:
@@ -76,6 +92,7 @@ def test_sqlite_library_cache_repo_returns_empty_when_missing(tmp_path) -> None:
     repo = SQLiteLibraryCacheRepo(db_path=tmp_path / "library.sqlite3")
 
     assert repo.load_recent_searches() == ()
+    assert repo.load_catalog_search("ambient") is None
     assert repo.load_track_metadata("missing") is None
     assert repo.load_liked_track_ids("user-1") is None
     assert repo.load_liked_track_snapshot("user-1") is None
@@ -115,3 +132,26 @@ def test_sqlite_library_cache_repo_expires_artwork_refs_after_month(tmp_path) ->
         )
 
     assert repo.load_artwork_ref("track-1") is None
+
+
+def test_sqlite_library_cache_repo_expires_catalog_search_after_hour(tmp_path) -> None:
+    path = tmp_path / "library.sqlite3"
+    repo = SQLiteLibraryCacheRepo(db_path=path)
+    expired_at = (datetime.now(tz=UTC) - timedelta(hours=2)).isoformat()
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            (
+                "insert into catalog_search_cache(query, data_json, cached_at) "
+                "values (?, ?, ?)"
+            ),
+            (
+                "ambient",
+                (
+                    '{"tracks":[{"id":"track-1","title":"Signal","artists":["Artist"]}],'
+                    '"albums":[],"singles":[],"compilations":[],"artists":[],"playlists":[]}'
+                ),
+                expired_at,
+            ),
+        )
+
+    assert repo.load_catalog_search("ambient") is None

@@ -459,6 +459,34 @@ def test_yandex_music_service_maps_track_and_playlist_data() -> None:
     assert [item.id for item in artist_tracks] == ["track-1"]
 
 
+def test_yandex_music_service_maps_artist_cover_from_nested_cover_uri() -> None:
+    client = FakeYandexClient()
+    client.search_result = SearchResultStub(
+        [],
+        artists=[
+            type(
+                "ArtistCoverStub",
+                (),
+                {
+                    "id": "artist-2",
+                    "name": "Covered Artist",
+                    "cover": type("CoverStub", (), {"uri": "covers/artist-nested.jpg"})(),
+                },
+            )()
+        ]
+    )
+    service = YandexMusicService(
+        session=AuthSession(user_id="user-1", token="token"),
+        client=client,
+    )
+
+    search_results = service.search_catalog("covered")
+
+    assert search_results.artists == (
+        Artist(id="artist-2", name="Covered Artist", artwork_ref="covers/artist-nested.jpg"),
+    )
+
+
 def test_yandex_music_service_loads_playlist_tracks_with_owner_context() -> None:
     client = FakeYandexClient()
     service = YandexMusicService(

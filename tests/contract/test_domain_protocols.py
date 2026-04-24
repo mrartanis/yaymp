@@ -212,6 +212,9 @@ class FakeSettingsRepo:
 
 class FakeLibraryCacheRepo:
     def __init__(self) -> None:
+        self.catalog_search = CatalogSearchResults(
+            tracks=(Track(id="catalog-track-1", title="Cached Track", artists=("Artist",)),),
+        )
         self.liked_tracks = LikedTrackIds(
             user_id="user-1",
             revision=1,
@@ -233,6 +236,14 @@ class FakeLibraryCacheRepo:
 
     def save_recent_searches(self, searches: Sequence[str]) -> None:
         self.searches = list(searches)
+
+    def load_catalog_search(self, query: str) -> CatalogSearchResults | None:
+        del query
+        return self.catalog_search
+
+    def save_catalog_search(self, query: str, results: CatalogSearchResults) -> None:
+        del query
+        self.catalog_search = results
 
     def load_track_metadata(self, track_id: str) -> Track | None:
         return Track(id=track_id, title="Cached", artists=("Artist",))

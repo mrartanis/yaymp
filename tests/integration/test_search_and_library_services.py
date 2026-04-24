@@ -35,6 +35,7 @@ class TestLogger:
 class InMemoryLibraryCacheRepo:
     def __init__(self) -> None:
         self.searches: tuple[str, ...] = ()
+        self.catalog_search: dict[str, CatalogSearchResults] = {}
         self.tracks: dict[str, Track] = {}
         self.artwork: dict[str, str] = {}
         self.liked_tracks: dict[str, LikedTrackIds] = {}
@@ -50,6 +51,12 @@ class InMemoryLibraryCacheRepo:
 
     def save_recent_searches(self, searches):
         self.searches = tuple(searches)
+
+    def load_catalog_search(self, query: str):
+        return self.catalog_search.get(query.strip().casefold())
+
+    def save_catalog_search(self, query: str, results: CatalogSearchResults):
+        self.catalog_search[query.strip().casefold()] = results
 
     def load_track_metadata(self, track_id: str):
         return self.tracks.get(track_id)
@@ -131,6 +138,7 @@ class FakeMusicService:
     def __init__(self) -> None:
         self.liked_tracks_calls = 0
         self.liked_track_ids_revision = 7
+        self.catalog_search_calls = 0
 
     def get_auth_session(self):
         from app.domain import AuthSession
@@ -152,6 +160,7 @@ class FakeMusicService:
         return (Track(id=f"{query}-{limit}", title=query, artists=("Artist",)),)
 
     def search_catalog(self, query: str, *, limit: int = 25):
+        self.catalog_search_calls += 1
         return CatalogSearchResults(
             tracks=(Track(id=f"{query}-{limit}", title=query, artists=("Artist",)),),
             albums=(Album(id=f"album-{query}", title=f"Album {query}", artists=("Artist",)),),
@@ -345,8 +354,9 @@ def test_search_service_preserves_cached_liked_state() -> None:
 
 def test_search_service_returns_grouped_catalog_results() -> None:
     cache_repo = InMemoryLibraryCacheRepo()
+    music_service = FakeMusicService()
     service = SearchService(
-        music_service=FakeMusicService(),
+        music_service=music_service,
         library_cache_repo=cache_repo,
         logger=TestLogger(),
     )
@@ -366,6 +376,23 @@ def test_search_service_returns_grouped_catalog_results() -> None:
     assert [artist.id for artist in results.artists] == ["artist-ambient"]
     assert [playlist.id for playlist in results.playlists] == ["playlist-ambient"]
     assert cache_repo.load_track_metadata("ambient-25") == results.tracks[0]
+    assert music_service.catalog_search_calls == 1
+
+
+def test_search_service_uses_cached_catalog_results() -> None:
+    cache_repo = InMemoryLibraryCacheRepo()
+    music_service = FakeMusicService()
+    service = SearchService(
+        music_service=music_service,
+        library_cache_repo=cache_repo,
+        logger=TestLogger(),
+    )
+
+    first = service.search_catalog("ambient")
+    second = service.search_catalog("Ambient")
+
+    assert first == second
+    assert music_service.catalog_search_calls == 1
 
 
 def test_library_service_exposes_playlists_and_stations() -> None:

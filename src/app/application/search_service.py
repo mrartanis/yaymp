@@ -36,8 +36,13 @@ class SearchService:
         if not normalized_query:
             return CatalogSearchResults()
 
-        results = self._music_service.search_catalog(normalized_query, limit=limit)
-        results = self._with_artist_albums(results, limit=limit)
+        cached_results = self._library_cache_repo.load_catalog_search(normalized_query)
+        cache_hit = cached_results is not None
+        results = cached_results
+        if results is None:
+            results = self._music_service.search_catalog(normalized_query, limit=limit)
+            results = self._with_artist_albums(results, limit=limit)
+            self._library_cache_repo.save_catalog_search(normalized_query, results)
         results = CatalogSearchResults(
             tracks=merge_cached_liked_states(
                 results.tracks,
@@ -54,9 +59,10 @@ class SearchService:
         self._remember_recent_search(normalized_query)
         self._logger.info(
             (
-                "Search returned %s tracks, %s albums, %s singles, %s compilations, "
+                "Search (%s) returned %s tracks, %s albums, %s singles, %s compilations, "
                 "%s artists, %s playlists for query %s"
             ),
+            "cache" if cache_hit else "remote",
             len(results.tracks),
             len(results.albums),
             len(results.singles),

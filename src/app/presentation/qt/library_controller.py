@@ -43,6 +43,16 @@ class BrowserContent:
     has_more: bool = False
 
 
+@dataclass(frozen=True, slots=True)
+class BrowserHistoryEntry:
+    page: str
+    payload: object | None = None
+    active_tab: str | None = None
+    search_query: str | None = None
+    liked_tracks_limit: int | None = None
+    list_kind: str | None = None
+
+
 class LibraryController(QObject):
     content_changed = Signal(object)
     content_failed = Signal(str)
@@ -69,8 +79,11 @@ class LibraryController(QObject):
         self._last_search_query: str | None = None
         self._last_search_results: CatalogSearchResults | None = None
         self._active_search_tab = "tracks"
+        self._active_artist_tab = "top_tracks"
         self._active_page: tuple[str, object | None] = ("search", None)
+        self._active_list_kind: str | None = None
         self._liked_tracks_limit = 100
+        self._history: list[BrowserHistoryEntry] = []
 
     def initialize(self) -> None:
         self._emit_content(self._empty_search_content(self._active_search_tab))
@@ -79,7 +92,10 @@ class LibraryController(QObject):
         return self._search_service.load_recent_searches()
 
     def show_search_page(self) -> None:
+        if self._active_page != ("search", None):
+            self._push_history()
         self._active_page = ("search", None)
+        self._active_list_kind = None
         if self._last_search_results is None or self._last_search_query is None:
             self._emit_content(self._empty_search_content(self._active_search_tab))
             return
@@ -92,7 +108,10 @@ class LibraryController(QObject):
         )
 
     def search_tracks(self, query: str) -> None:
+        if self._active_page != ("search", None):
+            self._push_history()
         self._active_page = ("search", None)
+        self._active_list_kind = None
         self._execute(
             lambda: self._search_content(query, tab=self._active_search_tab, refresh=True)
         )
@@ -100,6 +119,7 @@ class LibraryController(QObject):
     def show_browser_tab(self, tab: str) -> None:
         page, payload = self._active_page
         if page == "artist" and isinstance(payload, Artist):
+            self._active_artist_tab = tab
             self._execute(lambda: self._artist_content(payload, tab=tab))
             return
         if page == "search":
@@ -116,7 +136,9 @@ class LibraryController(QObject):
             )
 
     def load_liked_tracks(self) -> None:
+        self._push_history()
         self._active_page = ("list", None)
+        self._active_list_kind = "liked_tracks"
         self._liked_tracks_limit = 100
         self._execute(lambda: self._liked_tracks_content(limit=self._liked_tracks_limit))
 
@@ -128,7 +150,9 @@ class LibraryController(QObject):
         self._execute(lambda: self._liked_tracks_content(limit=self._liked_tracks_limit))
 
     def load_liked_albums(self) -> None:
+        self._push_history()
         self._active_page = ("list", None)
+        self._active_list_kind = "liked_albums"
         self._execute(
             lambda: BrowserContent(
                 title="My Albums",
@@ -138,7 +162,9 @@ class LibraryController(QObject):
         )
 
     def load_liked_artists(self) -> None:
+        self._push_history()
         self._active_page = ("list", None)
+        self._active_list_kind = "liked_artists"
         self._execute(
             lambda: BrowserContent(
                 title="My Artists",
@@ -148,7 +174,9 @@ class LibraryController(QObject):
         )
 
     def load_playlists(self) -> None:
+        self._push_history()
         self._active_page = ("list", None)
+        self._active_list_kind = "playlists"
         self._execute(
             lambda: BrowserContent(
                 title="Playlists",
@@ -173,7 +201,9 @@ class LibraryController(QObject):
         self.open_station(Station(id="user:onyourwave", title="My Wave"))
 
     def open_playlist(self, playlist: Playlist) -> None:
+        self._push_history()
         self._active_page = ("source", playlist)
+        self._active_list_kind = None
         self._execute(
             lambda: self._source_content(
                 title=playlist.title,
@@ -187,7 +217,9 @@ class LibraryController(QObject):
         )
 
     def open_album(self, album: Album) -> None:
+        self._push_history()
         self._active_page = ("source", album)
+        self._active_list_kind = None
         self._execute(
             lambda: self._source_content(
                 title=album.title,
@@ -207,7 +239,9 @@ class LibraryController(QObject):
         self.open_album(album)
 
     def open_station(self, station: Station) -> None:
+        self._push_history()
         self._active_page = ("source", station)
+        self._active_list_kind = None
         self._execute(
             lambda: self._source_content(
                 title=station.title,
@@ -218,8 +252,20 @@ class LibraryController(QObject):
         )
 
     def open_artist(self, artist: Artist) -> None:
+        self._push_history()
         self._active_page = ("artist", artist)
+        self._active_artist_tab = "top_tracks"
+        self._active_list_kind = None
         self._execute(lambda: self._artist_content(artist, tab="top_tracks"))
+
+    def can_go_back(self) -> bool:
+        return bool(self._history)
+
+    def go_back(self) -> None:
+        if not self._history:
+            return
+        entry = self._history.pop()
+        self._restore_history_entry(entry)
 
     def like_track(self, track: Track) -> None:
         self._execute_mutation(
@@ -277,6 +323,145 @@ class LibraryController(QObject):
 
     def _emit_content(self, content: BrowserContent) -> None:
         self.content_changed.emit(content)
+
+    def _push_history(self) -> None:
+        entry = self._current_history_entry()
+        if entry is None:
+            return
+        self._history.append(entry)
+
+    def _current_history_entry(self) -> BrowserHistoryEntry | None:
+        page, payload = self._active_page
+        if page == "search":
+            return BrowserHistoryEntry(
+                page="search",
+                active_tab=self._active_search_tab,
+                search_query=self._last_search_query,
+            )
+        if page == "artist" and isinstance(payload, Artist):
+            return BrowserHistoryEntry(
+                page="artist",
+                payload=payload,
+                active_tab=self._active_artist_tab,
+            )
+        if page == "source" and isinstance(payload, (Album, Playlist, Station)):
+            return BrowserHistoryEntry(page="source", payload=payload)
+        if page == "list":
+            return BrowserHistoryEntry(
+                page="list",
+                list_kind=self._active_list_kind,
+                liked_tracks_limit=self._liked_tracks_limit,
+            )
+        return None
+
+    def _restore_history_entry(self, entry: BrowserHistoryEntry) -> None:
+        if entry.page == "search":
+            self._active_page = ("search", None)
+            self._active_list_kind = None
+            self._active_search_tab = entry.active_tab or "tracks"
+            if entry.search_query:
+                self._execute(
+                    lambda: self._search_content(
+                        entry.search_query or "",
+                        tab=self._active_search_tab,
+                        refresh=True,
+                    )
+                )
+                return
+            self._emit_content(self._empty_search_content(self._active_search_tab))
+            return
+        if entry.page == "artist" and isinstance(entry.payload, Artist):
+            self._active_page = ("artist", entry.payload)
+            self._active_list_kind = None
+            self._active_artist_tab = entry.active_tab or "top_tracks"
+            self._execute(
+                lambda: self._artist_content(entry.payload, tab=self._active_artist_tab)
+            )
+            return
+        if entry.page == "source" and isinstance(entry.payload, Playlist):
+            self._active_list_kind = None
+            self._active_page = ("source", entry.payload)
+            self._execute(
+                lambda: self._source_content(
+                    title=entry.payload.title,
+                    source_type="playlist",
+                    source_id=entry.payload.id,
+                    tracks=self._library_service.load_playlist_tracks(
+                        entry.payload.id,
+                        owner_id=entry.payload.owner_id,
+                    ),
+                )
+            )
+            return
+        if entry.page == "source" and isinstance(entry.payload, Album):
+            self._active_list_kind = None
+            self._active_page = ("source", entry.payload)
+            self._execute(
+                lambda: self._source_content(
+                    title=entry.payload.title,
+                    source_type="album",
+                    source_id=entry.payload.id,
+                    tracks=self._library_service.load_album_tracks(entry.payload.id),
+                )
+            )
+            return
+        if entry.page == "source" and isinstance(entry.payload, Station):
+            self._active_list_kind = None
+            self._active_page = ("source", entry.payload)
+            self._execute(
+                lambda: self._source_content(
+                    title=entry.payload.title,
+                    source_type="station",
+                    source_id=entry.payload.id,
+                    tracks=self._library_service.load_station_tracks(entry.payload.id),
+                )
+            )
+            return
+        if entry.page == "list":
+            self._active_page = ("list", None)
+            self._active_list_kind = entry.list_kind
+            if entry.list_kind == "liked_tracks":
+                self._liked_tracks_limit = entry.liked_tracks_limit or 100
+                self._execute(lambda: self._liked_tracks_content(limit=self._liked_tracks_limit))
+                return
+            if entry.list_kind == "liked_albums":
+                self._execute(
+                    lambda: BrowserContent(
+                        title="My Albums",
+                        items=self._album_items(self._library_service.load_liked_albums()),
+                        recent_searches=self.recent_searches(),
+                    )
+                )
+                return
+            if entry.list_kind == "liked_artists":
+                self._execute(
+                    lambda: BrowserContent(
+                        title="My Artists",
+                        items=self._artist_items(self._library_service.load_liked_artists()),
+                        recent_searches=self.recent_searches(),
+                    )
+                )
+                return
+            if entry.list_kind == "playlists":
+                self._execute(
+                    lambda: BrowserContent(
+                        title="Playlists",
+                        items=(
+                            *self._playlist_items(
+                                self._library_service.load_generated_playlists(),
+                                kind="generated_playlist",
+                            ),
+                            *self._playlist_items(
+                                self._unique_playlists(
+                                    self._library_service.load_liked_playlists(),
+                                    self._library_service.load_user_playlists(),
+                                ),
+                                kind="playlist",
+                            ),
+                        ),
+                        recent_searches=self.recent_searches(),
+                    )
+                )
 
     def _search_content(self, query: str, *, tab: str, refresh: bool) -> BrowserContent:
         normalized_query = query.strip()
@@ -403,7 +588,7 @@ class LibraryController(QObject):
         return tuple(
             BrowserItem(
                 kind="track",
-                title=f"{'❤️ ' if track.is_liked else ''}{track.title}",
+                title=track.title,
                 subtitle=self._track_subtitle(track, source_type=source_type),
                 payload=track,
                 source_type=source_type,
