@@ -19,6 +19,7 @@ from app.domain.errors import StorageError
 
 class FileLibraryCacheRepo(LibraryCacheRepo):
     _CACHE_TTL = timedelta(days=7)
+    _ARTWORK_TTL = timedelta(days=30)
     _LIST_CACHE_TTL = timedelta(days=1)
 
     def __init__(self, *, file_path: Path) -> None:
@@ -280,7 +281,7 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
             return value
         if not isinstance(value, dict):
             return None
-        if self._is_expired(value.get("cached_at")):
+        if self._is_expired(value.get("cached_at"), ttl=self._ARTWORK_TTL):
             return None
         artwork_ref = value.get("ref")
         return artwork_ref if isinstance(artwork_ref, str) else None
@@ -524,7 +525,7 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
     def _now_iso(self) -> str:
         return datetime.now(tz=UTC).isoformat()
 
-    def _is_expired(self, raw_value: object) -> bool:
+    def _is_expired(self, raw_value: object, *, ttl: timedelta | None = None) -> bool:
         if not isinstance(raw_value, str):
             return False
         try:
@@ -533,7 +534,7 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
             return True
         if cached_at.tzinfo is None:
             cached_at = cached_at.replace(tzinfo=UTC)
-        return datetime.now(tz=UTC) - cached_at > self._CACHE_TTL
+        return datetime.now(tz=UTC) - cached_at > (ttl or self._CACHE_TTL)
 
     def _normalize_track_id(self, track_id: str) -> str:
         raw_track_id = str(track_id)

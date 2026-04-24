@@ -38,6 +38,9 @@ class PlaybackController(QObject):
     def set_volume(self, volume: int) -> None:
         self._execute(lambda: self._playback_service.set_volume(volume))
 
+    def set_shuffle_enabled(self, enabled: bool) -> None:
+        self._execute(lambda: self._playback_service.set_shuffle_enabled(enabled))
+
     def select_index(self, index: int) -> None:
         self._execute(lambda: self._playback_service.select_index(index))
 

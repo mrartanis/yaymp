@@ -73,7 +73,7 @@ def test_file_library_cache_repo_round_trips_liked_track_snapshot(tmp_path) -> N
     assert repo.load_liked_track_snapshot("user-1") == snapshot
 
 
-def test_file_library_cache_repo_expires_track_metadata_and_artwork_refs(tmp_path) -> None:
+def test_file_library_cache_repo_expires_track_metadata_before_artwork_refs(tmp_path) -> None:
     path = tmp_path / "library.json"
     expired_at = (datetime.now(tz=UTC) - timedelta(days=8)).isoformat()
     payload = {
@@ -97,6 +97,25 @@ def test_file_library_cache_repo_expires_track_metadata_and_artwork_refs(tmp_pat
     repo = FileLibraryCacheRepo(file_path=path)
 
     assert repo.load_track_metadata("track-1") is None
+    assert repo.load_artwork_ref("track-1") == "covers/track.jpg"
+
+
+def test_file_library_cache_repo_expires_artwork_refs_after_month(tmp_path) -> None:
+    path = tmp_path / "library.json"
+    expired_at = (datetime.now(tz=UTC) - timedelta(days=31)).isoformat()
+    payload = {
+        "recent_searches": [],
+        "tracks": {},
+        "artwork": {
+            "track-1": {
+                "ref": "covers/track.jpg",
+                "cached_at": expired_at,
+            }
+        },
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    repo = FileLibraryCacheRepo(file_path=path)
+
     assert repo.load_artwork_ref("track-1") is None
 
 

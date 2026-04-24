@@ -21,6 +21,7 @@ from app.domain.errors import StorageError
 
 class SQLiteLibraryCacheRepo(LibraryCacheRepo):
     _CACHE_TTL = timedelta(days=7)
+    _ARTWORK_TTL = timedelta(days=30)
     _LIST_CACHE_TTL = timedelta(days=1)
 
     def __init__(self, *, db_path: Path) -> None:
@@ -332,7 +333,7 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
         except sqlite3.Error as exc:
             raise StorageError("Failed to load cached artwork reference") from exc
 
-        if row is None or self._is_expired(row["cached_at"]):
+        if row is None or self._is_expired(row["cached_at"], ttl=self._ARTWORK_TTL):
             return None
         return str(row["artwork_ref"])
 
@@ -445,7 +446,7 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
     def _now_iso(self) -> str:
         return datetime.now(tz=UTC).isoformat()
 
-    def _is_expired(self, raw_value: Any) -> bool:
+    def _is_expired(self, raw_value: Any, *, ttl: timedelta | None = None) -> bool:
         if not isinstance(raw_value, str):
             return True
         try:
@@ -454,7 +455,7 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
             return True
         if cached_at.tzinfo is None:
             cached_at = cached_at.replace(tzinfo=UTC)
-        return datetime.now(tz=UTC) - cached_at > self._CACHE_TTL
+        return datetime.now(tz=UTC) - cached_at > (ttl or self._CACHE_TTL)
 
     def _normalize_track_id(self, track_id: str) -> str:
         raw_track_id = str(track_id)
