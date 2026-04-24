@@ -205,6 +205,8 @@ Current notes:
 
 ## Step 9: Add Packaging
 
+Status: done
+
 Make the app runnable outside the development machine.
 
 Implement:
@@ -221,6 +223,17 @@ Implement:
 Result:
 
 - the app runs on a clean machine without manual playback backend setup
+
+Current notes:
+
+- Packaging uses `Nuitka` as the primary path.
+- macOS packaging is a standalone `.app` bundle built by `scripts/build_nuitka_macos.sh`.
+- Linux packaging is a standalone `AppDir` plus `AppImage` built by `scripts/build_nuitka_linux.sh`.
+- `libmpv` is bundled for packaged builds and runtime lookup checks packaged locations before any system fallback.
+- Linux packaged lookup must check both `usr/bin/lib` and `usr/lib`; AppImage/AppDir layouts are not always identical.
+- Release CI now verifies packaged playback backend usage on both platforms.
+- Linux AppImage smoke uses `APPIMAGE_EXTRACT_AND_RUN=1` so CI does not depend on host FUSE availability.
+- Tag-driven GitHub releases now publish macOS and Linux artifacts from the workflow.
 
 ## Step 10: Improve UX After Core Stability
 

@@ -162,6 +162,8 @@ Definition of Done:
 
 ## Milestone 5: Packaging and Distributables
 
+Status: done
+
 Goal:
 
 - remove “works on my machine” assumptions
@@ -183,6 +185,15 @@ Definition of Done:
 - no manual playback-backend install is required
 - build and release steps are documented
 - release smoke checklist exists
+
+Current notes:
+
+- macOS release artifact is `YAYMP-<tag>-macos-arm64.zip`.
+- Linux release artifact is `YAYMP-<tag>-linux-x86_64.AppImage`.
+- `Release` workflow supports both tag push (`v*`) and `workflow_dispatch`.
+- Manual debug loop can skip release publication; tag push or `publish_release=true` publishes the GitHub Release.
+- Publish job now checks out the repository before `gh release ...` commands.
+- Release creation should rely on the existing tag name, not `GITHUB_SHA`, when re-running publish for an already-pushed tag.
 
 ## Milestone 6: Classic UX
 

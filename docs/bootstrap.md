@@ -32,6 +32,25 @@ The app starts through the bootstrap path:
 ./scripts/run_tests.sh
 ```
 
+## Packaging
+
+Local distributable builds use Nuitka:
+
+```bash
+./scripts/build_nuitka_macos.sh
+./scripts/build_nuitka_linux.sh
+```
+
+GitHub release builds are driven by the `Release` workflow:
+
+- push a tag `vX.Y.Z` for a published release
+- or use `workflow_dispatch` for a manual packaging/debug run
+
+The workflow produces:
+
+- `YAYMP-<tag>-macos-arm64.zip`
+- `YAYMP-<tag>-linux-x86_64.AppImage`
+
 ## Notes
 
 - Platform-specific directories are resolved with `platformdirs`.

@@ -173,6 +173,8 @@ Practical recommendation:
 - Use `Nuitka` as the primary distributable build path.
 - Keep `PyInstaller` as a fallback only if Nuitka exposes blocker-level packaging issues.
 - Prefer a debuggable standalone/app-bundle build before attempting one-file packaging.
+- For Linux AppImage verification in CI, prefer `APPIMAGE_EXTRACT_AND_RUN=1` over assuming FUSE is available on the runner.
+- Release publication should be tag-driven and reproducible from workflow inputs; do not depend on interactive local release creation.
 
 Bundle contents must include:
 
@@ -182,6 +184,12 @@ Bundle contents must include:
 - `libmpv` and required binary dependencies
 - required fonts if used
 - third-party licenses if needed
+
+Operational packaging notes:
+
+- macOS packaged runtime lookup should resolve bundled `libmpv` from inside `.app/Contents/MacOS/lib`.
+- Linux packaged runtime lookup should resolve bundled `libmpv` from both `usr/bin/lib` and `usr/lib`.
+- Packaging smoke checks should verify not only that `mpv` is used, but also that the resolved library path points into the packaged bundle/AppDir/AppImage environment.
 
 ## Persistence Rules
 
