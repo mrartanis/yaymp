@@ -165,6 +165,10 @@ class FakeMusicService:
         del artist_id, limit
         return ()
 
+    def get_artist_playlists(self, artist_id: str, *, limit: int = 50):
+        del artist_id, limit
+        return ()
+
     def get_artist_tracks(self, artist_id: str, *, limit: int = 50):
         del artist_id, limit
         return ()

@@ -440,6 +440,18 @@ class YandexMusicService(MusicService):
         albums = getattr(raw_albums, "albums", None) or raw_albums or ()
         return tuple(self._map_album(album) for album in albums[:limit])
 
+    def get_artist_playlists(self, artist_id: str, *, limit: int = 50) -> Sequence[Playlist]:
+        client = self._require_client()
+        try:
+            brief_info = client.artists_brief_info(artist_id)
+        except Exception as exc:
+            raise self._map_client_error(
+                exc,
+                f"Failed to load artist playlists for {artist_id}",
+            ) from exc
+        raw_playlists = getattr(brief_info, "playlists", None) or ()
+        return tuple(self._map_playlist(playlist) for playlist in raw_playlists[:limit])
+
     def get_artist_tracks(self, artist_id: str, *, limit: int = 50) -> Sequence[Track]:
         client = self._require_client()
         try:
@@ -577,7 +589,10 @@ class YandexMusicService(MusicService):
         )
         artwork_ref = getattr(raw_playlist, "cover_uri", None)
         if artwork_ref is None and hasattr(raw_playlist, "get_og_image_url"):
-            artwork_ref = raw_playlist.get_og_image_url()
+            try:
+                artwork_ref = raw_playlist.get_og_image_url()
+            except AssertionError:
+                artwork_ref = None
         return Playlist(
             id=playlist_id,
             title=getattr(raw_playlist, "title", playlist_id),

@@ -158,6 +158,10 @@ class FakeMusicService:
         del limit
         return [Album(id=f"{artist_id}-compilation", title="Artist Compilation")]
 
+    def get_artist_playlists(self, artist_id: str, *, limit: int = 50) -> Sequence[Playlist]:
+        del limit
+        return [Playlist(id=f"{artist_id}-playlist", title="Artist Playlist")]
+
     def get_artist_tracks(self, artist_id: str, *, limit: int = 50) -> Sequence[Track]:
         return [Track(id=f"{artist_id}-track-{limit}", title="Artist Track", artists=("Artist",))]
 

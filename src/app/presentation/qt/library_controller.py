@@ -304,6 +304,19 @@ class LibraryController(QObject):
         )
 
     def _artist_content(self, artist: Artist, *, tab: str) -> BrowserContent:
+        if tab == "playlists":
+            artist_radio = self._artist_radio_items((artist,))
+            return BrowserContent(
+                title=f"Artist: {artist.name} | Playlists",
+                items=artist_radio
+                + self._playlist_items(
+                    self._library_service.load_artist_playlists(artist.id),
+                    kind="playlist",
+                ),
+                recent_searches=self.recent_searches(),
+                tabs=self._artist_tabs(),
+                active_tab=tab,
+            )
         if tab == "albums":
             return BrowserContent(
                 title=f"Artist: {artist.name} | Albums",
@@ -330,15 +343,6 @@ class LibraryController(QObject):
                 tabs=self._artist_tabs(),
                 active_tab=tab,
             )
-        if tab == "radio":
-            return BrowserContent(
-                title=f"Artist: {artist.name} | Radio",
-                items=self._artist_radio_items((artist,)),
-                recent_searches=self.recent_searches(),
-                tabs=self._artist_tabs(),
-                active_tab=tab,
-            )
-
         tracks = self._library_service.load_artist_tracks(artist.id)
         return BrowserContent(
             title=f"Artist: {artist.name} | Top Tracks",
@@ -456,10 +460,10 @@ class LibraryController(QObject):
     def _artist_tabs(self) -> tuple[BrowserTab, ...]:
         return (
             BrowserTab("top_tracks", "Top Tracks"),
+            BrowserTab("playlists", "Playlists"),
             BrowserTab("albums", "Albums"),
             BrowserTab("singles", "Singles"),
             BrowserTab("compilations", "Compilations"),
-            BrowserTab("radio", "Radio"),
         )
 
     def _artist_albums(self, artist_id: str, *, release_type: str | None) -> tuple[Album, ...]:

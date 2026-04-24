@@ -287,6 +287,10 @@ class FakeMusicService:
             ),
         )
 
+    def get_artist_playlists(self, artist_id: str, *, limit: int = 50):
+        del limit
+        return (Playlist(id=f"{artist_id}-playlist", title="Artist Playlist"),)
+
     def get_artist_tracks(self, artist_id: str, *, limit: int = 50):
         return (
             Track(
@@ -383,6 +387,7 @@ def test_library_service_exposes_playlists_and_stations() -> None:
         "user:onyourwave-25"
     ]
     assert [item.id for item in service.load_album_tracks("album-1")] == ["album-1-track"]
+    assert [item.id for item in service.load_artist_playlists("artist-1")] == ["artist-1-playlist"]
     assert [item.id for item in service.load_artist_tracks("artist-1")] == ["artist-1-top-50"]
     assert cache_repo.load_artwork_ref("liked-100") == "liked-cover"
 

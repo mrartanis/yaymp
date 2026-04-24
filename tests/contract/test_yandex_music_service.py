@@ -86,6 +86,9 @@ class PlaylistStub:
         self.track_count = len(tracks)
         self.owner = type("Owner", (), {"uid": owner_uid, "name": "listener"})()
 
+    def get_og_image_url(self):
+        raise AssertionError
+
 
 class GeneratedPlaylistStub:
     def __init__(self, playlist: PlaylistStub) -> None:
@@ -188,6 +191,11 @@ class FakeYandexClient:
             "ArtistAlbumsStub",
             (),
             {"albums": [self.compilation]},
+        )()
+        self.artist_brief_info_result = type(
+            "ArtistBriefInfoStub",
+            (),
+            {"playlists": [self.playlist]},
         )()
         self.artist_tracks = type("ArtistTracksStub", (), {"tracks": [self.track]})()
         self.likes = LikesStub([self.track])
@@ -310,6 +318,10 @@ class FakeYandexClient:
         del artist_id, page, page_size
         return self.artist_tracks
 
+    def artists_brief_info(self, artist_id: str):
+        del artist_id
+        return self.artist_brief_info_result
+
     def feed(self):
         return FeedStub([GeneratedPlaylistStub(self.generated_playlist)])
 
@@ -377,6 +389,7 @@ def test_yandex_music_service_maps_track_and_playlist_data() -> None:
     album_tracks = service.get_album_tracks("album-1")
     artist_albums = service.get_artist_direct_albums("artist-1")
     artist_compilations = service.get_artist_compilation_albums("artist-1")
+    artist_playlists = service.get_artist_playlists("artist-1")
     artist_tracks = service.get_artist_tracks("artist-1")
 
     assert track.id == "track-1"
@@ -435,6 +448,7 @@ def test_yandex_music_service_maps_track_and_playlist_data() -> None:
     assert [item.id for item in album_tracks] == ["track-1"]
     assert [item.id for item in artist_albums] == ["album-1", "single-1"]
     assert [item.id for item in artist_compilations] == ["compilation-1"]
+    assert [item.id for item in artist_playlists] == ["playlist-1"]
     assert [item.id for item in artist_tracks] == ["track-1"]
 
 

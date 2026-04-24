@@ -243,6 +243,16 @@ class LibraryService:
         self._logger.info("Loaded %s artist compilation albums for %s", len(albums), artist_id)
         return albums
 
+    def load_artist_playlists(
+        self,
+        artist_id: str,
+        *,
+        limit: int = 50,
+    ) -> tuple[Playlist, ...]:
+        playlists = tuple(self._music_service.get_artist_playlists(artist_id, limit=limit))
+        self._logger.info("Loaded %s artist playlists for %s", len(playlists), artist_id)
+        return playlists
+
     def like_track(self, track: Track) -> Track:
         self._music_service.like_track(track.id)
         liked_track = Track(
