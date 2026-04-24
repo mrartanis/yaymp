@@ -80,11 +80,32 @@ class FakeMusicService:
     def get_liked_artists(self, *, limit: int = 100) -> Sequence[Artist]:
         return [Artist(id=f"liked-artist-{limit}", name="Liked Artist")]
 
+    def get_liked_playlists(self, *, limit: int = 100) -> Sequence[Playlist]:
+        return [Playlist(id=f"liked-playlist-{limit}", title="Liked Playlist", is_liked=True)]
+
     def like_track(self, track_id: str) -> None:
         self.liked_track_id = track_id
 
     def unlike_track(self, track_id: str) -> None:
         self.unliked_track_id = track_id
+
+    def like_album(self, album_id: str) -> None:
+        self.liked_album_id = album_id
+
+    def unlike_album(self, album_id: str) -> None:
+        self.unliked_album_id = album_id
+
+    def like_artist(self, artist_id: str) -> None:
+        self.liked_artist_id = artist_id
+
+    def unlike_artist(self, artist_id: str) -> None:
+        self.unliked_artist_id = artist_id
+
+    def like_playlist(self, playlist_id: str, *, owner_id: str | None = None) -> None:
+        self.liked_playlist = (playlist_id, owner_id)
+
+    def unlike_playlist(self, playlist_id: str, *, owner_id: str | None = None) -> None:
+        self.unliked_playlist = (playlist_id, owner_id)
 
     def set_audio_quality(self, quality: AudioQuality) -> None:
         self.quality = quality

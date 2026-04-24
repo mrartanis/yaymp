@@ -79,11 +79,47 @@ class PlaybackController(QObject):
             )
         )
 
+    def play_tracks_next(
+        self,
+        tracks: tuple[Track, ...],
+        *,
+        source_type: str,
+        source_id: str,
+    ) -> None:
+        self._execute(
+            lambda: self._playback_service.insert_queue_next(
+                tracks,
+                source_type=source_type,
+                source_id=source_id,
+            )
+        )
+
+    def play_track_next(
+        self,
+        track: Track,
+        *,
+        source_type: str | None = "track",
+        source_id: str | None = None,
+    ) -> None:
+        self._execute(
+            lambda: self._playback_service.insert_queue_next(
+                (track,),
+                source_type=source_type,
+                source_id=source_id or track.id,
+            )
+        )
+
     def play_station(self, station_id: str) -> None:
         self._execute(lambda: self._playback_service.play_station(station_id))
 
     def clear_queue(self) -> None:
         self._execute(self._playback_service.clear_queue)
+
+    def move_queue_item_next(self, index: int) -> None:
+        self._execute(lambda: self._playback_service.move_queue_item_next(index))
+
+    def remove_queue_index(self, index: int) -> None:
+        self._execute(lambda: self._playback_service.remove_queue_index(index))
 
     def refresh(self) -> None:
         self._execute(self._playback_service.refresh)

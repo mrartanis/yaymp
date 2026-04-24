@@ -136,6 +136,8 @@ class SQLitePlaybackStateRepo(PlaybackStateRepo):
                 "id": item.track.id,
                 "title": item.track.title,
                 "artists": list(item.track.artists),
+                "artist_ids": list(item.track.artist_ids),
+                "album_id": item.track.album_id,
                 "album_title": item.track.album_title,
                 "album_year": item.track.album_year,
                 "duration_ms": item.track.duration_ms,
@@ -162,6 +164,12 @@ class SQLitePlaybackStateRepo(PlaybackStateRepo):
                 id=str(raw_track["id"]),
                 title=str(raw_track["title"]),
                 artists=tuple(str(artist) for artist in raw_artists),
+                artist_ids=tuple(
+                    str(artist_id) for artist_id in raw_track.get("artist_ids", ())
+                ),
+                album_id=(
+                    str(raw_track["album_id"]) if raw_track.get("album_id") is not None else None
+                ),
                 album_title=raw_track.get("album_title"),
                 album_year=raw_track.get("album_year"),
                 duration_ms=raw_track.get("duration_ms"),

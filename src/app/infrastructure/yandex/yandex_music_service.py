@@ -187,7 +187,7 @@ class YandexMusicService(MusicService):
             )
         except Exception as exc:
             raise self._map_client_error(exc, "Failed to load liked albums") from exc
-        return tuple(self._map_album(album) for album in raw_albums[:limit])
+        return tuple(self._map_album(album, is_liked=True) for album in raw_albums[:limit])
 
     def get_liked_artists(self, *, limit: int = 100) -> Sequence[Artist]:
         client = self._require_client()
@@ -200,7 +200,25 @@ class YandexMusicService(MusicService):
             )
         except Exception as exc:
             raise self._map_client_error(exc, "Failed to load liked artists") from exc
-        return tuple(self._map_artist(artist) for artist in raw_artists[:limit])
+        return tuple(self._map_artist(artist, is_liked=True) for artist in raw_artists[:limit])
+
+    def get_liked_playlists(self, *, limit: int = 100) -> Sequence[Playlist]:
+        client = self._require_client()
+        try:
+            likes = client.users_likes_playlists()
+            raw_playlists = self._liked_entities(
+                likes,
+                entity_attr="playlist",
+                fetch_missing=lambda playlist_ids: self._fetch_liked_playlists(
+                    client,
+                    playlist_ids,
+                ),
+            )
+        except Exception as exc:
+            raise self._map_client_error(exc, "Failed to load liked playlists") from exc
+        return tuple(
+            self._map_playlist(playlist, is_liked=True) for playlist in raw_playlists[:limit]
+        )
 
     def like_track(self, track_id: str) -> None:
         client = self._require_client()
@@ -215,6 +233,52 @@ class YandexMusicService(MusicService):
             self._call_track_mutation(client.users_likes_tracks_remove, track_id)
         except Exception as exc:
             raise self._map_client_error(exc, f"Failed to unlike track {track_id}") from exc
+
+    def like_album(self, album_id: str) -> None:
+        client = self._require_client()
+        try:
+            self._call_entity_mutation(client.users_likes_albums_add, album_id)
+        except Exception as exc:
+            raise self._map_client_error(exc, f"Failed to like album {album_id}") from exc
+
+    def unlike_album(self, album_id: str) -> None:
+        client = self._require_client()
+        try:
+            self._call_entity_mutation(client.users_likes_albums_remove, album_id)
+        except Exception as exc:
+            raise self._map_client_error(exc, f"Failed to unlike album {album_id}") from exc
+
+    def like_artist(self, artist_id: str) -> None:
+        client = self._require_client()
+        try:
+            self._call_entity_mutation(client.users_likes_artists_add, artist_id)
+        except Exception as exc:
+            raise self._map_client_error(exc, f"Failed to like artist {artist_id}") from exc
+
+    def unlike_artist(self, artist_id: str) -> None:
+        client = self._require_client()
+        try:
+            self._call_entity_mutation(client.users_likes_artists_remove, artist_id)
+        except Exception as exc:
+            raise self._map_client_error(exc, f"Failed to unlike artist {artist_id}") from exc
+
+    def like_playlist(self, playlist_id: str, *, owner_id: str | None = None) -> None:
+        client = self._require_client()
+        try:
+            self._call_playlist_mutation(client.users_likes_playlists_add, playlist_id, owner_id)
+        except Exception as exc:
+            raise self._map_client_error(exc, f"Failed to like playlist {playlist_id}") from exc
+
+    def unlike_playlist(self, playlist_id: str, *, owner_id: str | None = None) -> None:
+        client = self._require_client()
+        try:
+            self._call_playlist_mutation(
+                client.users_likes_playlists_remove,
+                playlist_id,
+                owner_id,
+            )
+        except Exception as exc:
+            raise self._map_client_error(exc, f"Failed to unlike playlist {playlist_id}") from exc
 
     def set_audio_quality(self, quality: AudioQuality) -> None:
         self._audio_quality = quality
@@ -459,9 +523,12 @@ class YandexMusicService(MusicService):
         return self._client
 
     def _map_track(self, raw_track: Any, *, is_liked: bool = False) -> Track:
-        artists = tuple(
-            getattr(artist, "name", str(artist))
-            for artist in (getattr(raw_track, "artists", None) or ())
+        raw_artists = getattr(raw_track, "artists", None) or ()
+        artists = tuple(getattr(artist, "name", str(artist)) for artist in raw_artists)
+        artist_ids = tuple(
+            str(artist_id)
+            for artist_id in (getattr(artist, "id", None) for artist in raw_artists)
+            if artist_id is not None
         )
         albums = getattr(raw_track, "albums", None) or ()
         album = albums[0] if albums else None
@@ -474,6 +541,8 @@ class YandexMusicService(MusicService):
             id=track_id,
             title=title,
             artists=artists or ("Unknown Artist",),
+            artist_ids=artist_ids,
+            album_id=str(getattr(album, "id", "")) or None,
             album_title=getattr(album, "title", None),
             album_year=int(album_year) if album_year else None,
             duration_ms=duration_ms,
@@ -489,7 +558,13 @@ class YandexMusicService(MusicService):
             return base_id
         return raw_track_id
 
-    def _map_playlist(self, raw_playlist: Any, *, is_generated: bool = False) -> Playlist:
+    def _map_playlist(
+        self,
+        raw_playlist: Any,
+        *,
+        is_generated: bool = False,
+        is_liked: bool = False,
+    ) -> Playlist:
         owner = getattr(raw_playlist, "owner", None)
         owner_id = (
             getattr(raw_playlist, "uid", None)
@@ -512,19 +587,25 @@ class YandexMusicService(MusicService):
             track_count=getattr(raw_playlist, "track_count", None),
             artwork_ref=artwork_ref,
             is_generated=is_generated,
+            is_liked=is_liked,
         )
 
-    def _map_album(self, raw_album: Any) -> Album:
+    def _map_album(self, raw_album: Any, *, is_liked: bool = False) -> Album:
         album_id = str(getattr(raw_album, "id", "unknown"))
-        artists = tuple(
-            getattr(artist, "name", str(artist))
-            for artist in (getattr(raw_album, "artists", None) or ())
+        raw_artists = getattr(raw_album, "artists", None) or ()
+        artists = tuple(getattr(artist, "name", str(artist)) for artist in raw_artists)
+        artist_ids = tuple(
+            str(artist_id)
+            for artist_id in (getattr(artist, "id", None) for artist in raw_artists)
+            if artist_id is not None
         )
         year = getattr(raw_album, "year", None)
         return Album(
             id=album_id,
             title=getattr(raw_album, "title", album_id),
             artists=artists,
+            artist_ids=artist_ids,
+            is_liked=is_liked,
             release_type=getattr(raw_album, "type", None),
             year=int(year) if year else None,
             track_count=getattr(raw_album, "track_count", None),
@@ -547,7 +628,7 @@ class YandexMusicService(MusicService):
                 regular.append(album)
         return tuple(regular), tuple(singles), tuple(compilations)
 
-    def _map_artist(self, raw_artist: Any) -> Artist:
+    def _map_artist(self, raw_artist: Any, *, is_liked: bool = False) -> Artist:
         artist_id = str(getattr(raw_artist, "id", "unknown"))
         artwork_ref = getattr(raw_artist, "cover_uri", None)
         if artwork_ref is None and hasattr(raw_artist, "get_cover_url"):
@@ -556,6 +637,7 @@ class YandexMusicService(MusicService):
             id=artist_id,
             name=getattr(raw_artist, "name", artist_id),
             artwork_ref=artwork_ref,
+            is_liked=is_liked,
         )
 
     def _map_station(self, raw_result: Any) -> Station:
@@ -579,6 +661,24 @@ class YandexMusicService(MusicService):
             operation(track_id)
         except TypeError:
             operation([track_id])
+
+    def _call_entity_mutation(self, operation: Any, entity_id: str) -> None:
+        try:
+            operation(entity_id)
+        except TypeError:
+            operation([entity_id])
+
+    def _call_playlist_mutation(
+        self,
+        operation: Any,
+        playlist_id: str,
+        owner_id: str | None,
+    ) -> None:
+        composite_id = f"{owner_id}:{playlist_id}" if owner_id else playlist_id
+        try:
+            operation(composite_id)
+        except TypeError:
+            operation([composite_id])
 
     def _liked_entities(
         self,
@@ -605,6 +705,16 @@ class YandexMusicService(MusicService):
             elif fetched is not None:
                 entities.append(fetched)
         return tuple(entities)
+
+    def _fetch_liked_playlists(self, client: Any, playlist_ids: Sequence[str]) -> tuple[Any, ...]:
+        playlists: list[Any] = []
+        for raw_id in playlist_ids:
+            owner_id, separator, playlist_id = str(raw_id).partition(":")
+            if separator:
+                playlists.append(client.users_playlists(playlist_id, user_id=owner_id))
+            else:
+                playlists.append(client.users_playlists(raw_id))
+        return tuple(playlists)
 
     def _rank_download_infos(self, download_infos: Sequence[Any]) -> tuple[Any, ...]:
         sorted_infos = sorted(

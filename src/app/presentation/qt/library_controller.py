@@ -46,6 +46,12 @@ class LibraryController(QObject):
     content_failed = Signal(str)
     track_liked = Signal(object)
     track_unliked = Signal(object)
+    album_liked = Signal(object)
+    album_unliked = Signal(object)
+    artist_liked = Signal(object)
+    artist_unliked = Signal(object)
+    playlist_liked = Signal(object)
+    playlist_unliked = Signal(object)
 
     def __init__(
         self,
@@ -147,7 +153,10 @@ class LibraryController(QObject):
                         kind="generated_playlist",
                     ),
                     *self._playlist_items(
-                        self._library_service.load_user_playlists(),
+                        self._unique_playlists(
+                            self._library_service.load_liked_playlists(),
+                            self._library_service.load_user_playlists(),
+                        ),
                         kind="playlist",
                     ),
                 ),
@@ -183,6 +192,15 @@ class LibraryController(QObject):
             )
         )
 
+    def open_album_by_id(self, album_id: str) -> None:
+        try:
+            album = self._library_service.load_album(album_id)
+        except DomainError as exc:
+            self._logger.warning("Library operation failed: %s", exc)
+            self.content_failed.emit(user_facing_error_message(exc))
+            return
+        self.open_album(album)
+
     def open_station(self, station: Station) -> None:
         self._active_page = ("source", station)
         self._execute(
@@ -206,6 +224,36 @@ class LibraryController(QObject):
     def unlike_track(self, track: Track) -> None:
         self._execute_mutation(
             lambda: self.track_unliked.emit(self._library_service.unlike_track(track))
+        )
+
+    def like_album(self, album: Album) -> None:
+        self._execute_mutation(
+            lambda: self.album_liked.emit(self._library_service.like_album(album))
+        )
+
+    def unlike_album(self, album: Album) -> None:
+        self._execute_mutation(
+            lambda: self.album_unliked.emit(self._library_service.unlike_album(album))
+        )
+
+    def like_artist(self, artist: Artist) -> None:
+        self._execute_mutation(
+            lambda: self.artist_liked.emit(self._library_service.like_artist(artist))
+        )
+
+    def unlike_artist(self, artist: Artist) -> None:
+        self._execute_mutation(
+            lambda: self.artist_unliked.emit(self._library_service.unlike_artist(artist))
+        )
+
+    def like_playlist(self, playlist: Playlist) -> None:
+        self._execute_mutation(
+            lambda: self.playlist_liked.emit(self._library_service.like_playlist(playlist))
+        )
+
+    def unlike_playlist(self, playlist: Playlist) -> None:
+        self._execute_mutation(
+            lambda: self.playlist_unliked.emit(self._library_service.unlike_playlist(playlist))
         )
 
     def _execute(self, operation) -> None:
@@ -454,6 +502,18 @@ class LibraryController(QObject):
             for playlist in playlists
         )
 
+    def _unique_playlists(self, *playlist_groups: tuple[Playlist, ...]) -> tuple[Playlist, ...]:
+        seen: set[tuple[str | None, str]] = set()
+        playlists: list[Playlist] = []
+        for group in playlist_groups:
+            for playlist in group:
+                key = (playlist.owner_id, playlist.id)
+                if key in seen:
+                    continue
+                seen.add(key)
+                playlists.append(playlist)
+        return tuple(playlists)
+
     def _station_items(self, stations: tuple[Station, ...]) -> tuple[BrowserItem, ...]:
         return tuple(
             BrowserItem(
@@ -466,11 +526,15 @@ class LibraryController(QObject):
         )
 
     def _track_subtitle(self, track: Track, *, source_type: str | None) -> str:
+        parts: list[str] = []
         artists = ", ".join(track.artists)
-        if source_type is None:
-            return artists
-        context = source_type.title()
-        return f"{artists} | {context}" if artists else context
+        if artists:
+            parts.append(artists)
+        if track.album_title:
+            parts.append(track.album_title)
+        elif source_type == "station":
+            parts.append("Radio")
+        return " | ".join(parts) or "Track"
 
     def _album_subtitle(self, album: Album) -> str | None:
         parts = [", ".join(album.artists)]

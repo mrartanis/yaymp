@@ -63,10 +63,15 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
             artists = json.loads(row["artists_json"])
             if not isinstance(artists, list):
                 raise TypeError("artists_json must be a list")
+            artist_ids = json.loads(row["artist_ids_json"] or "[]")
+            if not isinstance(artist_ids, list):
+                raise TypeError("artist_ids_json must be a list")
             return Track(
                 id=str(row["id"]),
                 title=str(row["title"]),
                 artists=tuple(str(artist) for artist in artists),
+                artist_ids=tuple(str(artist_id) for artist_id in artist_ids),
+                album_id=row["album_id"],
                 album_title=row["album_title"],
                 album_year=row["album_year"],
                 duration_ms=row["duration_ms"],
@@ -84,12 +89,15 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                 connection.execute(
                     (
                         "insert into tracks("
-                        "id, title, artists_json, album_title, album_year, duration_ms, "
+                        "id, title, artists_json, artist_ids_json, album_id, album_title, "
+                        "album_year, duration_ms, "
                         "stream_ref, artwork_ref, available, is_liked, cached_at"
-                        ") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                        ") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                         "on conflict(id) do update set "
                         "title = excluded.title, "
                         "artists_json = excluded.artists_json, "
+                        "artist_ids_json = excluded.artist_ids_json, "
+                        "album_id = excluded.album_id, "
                         "album_title = excluded.album_title, "
                         "album_year = excluded.album_year, "
                         "duration_ms = excluded.duration_ms, "
@@ -103,6 +111,8 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                         track.id,
                         track.title,
                         json.dumps(list(track.artists), ensure_ascii=True),
+                        json.dumps(list(track.artist_ids), ensure_ascii=True),
+                        track.album_id,
                         track.album_title,
                         track.album_year,
                         track.duration_ms,
@@ -240,6 +250,8 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                         id text primary key,
                         title text not null,
                         artists_json text not null,
+                        artist_ids_json text not null default '[]',
+                        album_id text,
                         album_title text,
                         album_year integer,
                         duration_ms integer,
@@ -270,6 +282,18 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                     );
                     """
                 )
+                self._ensure_column(
+                    connection,
+                    table="tracks",
+                    column="artist_ids_json",
+                    definition="text not null default '[]'",
+                )
+                self._ensure_column(
+                    connection,
+                    table="tracks",
+                    column="album_id",
+                    definition="text",
+                )
         except (OSError, sqlite3.Error) as exc:
             raise StorageError("Failed to initialize library cache database") from exc
 
@@ -298,3 +322,18 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
         if separator and base_id.isdigit() and album_id.isdigit():
             return base_id
         return raw_track_id
+
+    def _ensure_column(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        table: str,
+        column: str,
+        definition: str,
+    ) -> None:
+        columns = {
+            str(row["name"])
+            for row in connection.execute(f"pragma table_info({table})").fetchall()
+        }
+        if column not in columns:
+            connection.execute(f"alter table {table} add column {column} {definition}")

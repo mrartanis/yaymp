@@ -152,11 +152,32 @@ class FakeMusicService:
     def get_liked_artists(self, *, limit: int = 100):
         return (Artist(id=f"liked-artist-{limit}", name="Liked Artist"),)
 
+    def get_liked_playlists(self, *, limit: int = 100):
+        return (Playlist(id=f"liked-playlist-{limit}", title="Liked Playlist", is_liked=True),)
+
     def like_track(self, track_id: str):
         self.liked_track_id = track_id
 
     def unlike_track(self, track_id: str):
         self.unliked_track_id = track_id
+
+    def like_album(self, album_id: str):
+        self.liked_album_id = album_id
+
+    def unlike_album(self, album_id: str):
+        self.unliked_album_id = album_id
+
+    def like_artist(self, artist_id: str):
+        self.liked_artist_id = artist_id
+
+    def unlike_artist(self, artist_id: str):
+        self.unliked_artist_id = artist_id
+
+    def like_playlist(self, playlist_id: str, *, owner_id: str | None = None):
+        self.liked_playlist = (playlist_id, owner_id)
+
+    def unlike_playlist(self, playlist_id: str, *, owner_id: str | None = None):
+        self.unliked_playlist = (playlist_id, owner_id)
 
     def set_audio_quality(self, quality: AudioQuality):
         self.quality = quality
@@ -301,6 +322,7 @@ def test_library_service_exposes_playlists_and_stations() -> None:
     assert [item.id for item in service.load_liked_tracks()] == ["liked-100"]
     assert [item.id for item in service.load_liked_albums()] == ["liked-album-100"]
     assert [item.id for item in service.load_liked_artists()] == ["liked-artist-100"]
+    assert [item.id for item in service.load_liked_playlists()] == ["liked-playlist-100"]
     assert [item.id for item in service.load_user_playlists()] == ["playlist-1"]
     assert [item.id for item in service.load_generated_playlists()] == ["generated-1"]
     assert [item.id for item in service.load_stations()] == ["user:onyourwave"]
@@ -355,6 +377,34 @@ def test_library_service_likes_and_unlikes_tracks() -> None:
     assert unliked.is_liked is False
     assert cache_repo.load_track_metadata("track-1") == unliked
     assert cache_repo.load_liked_track_ids("user-1").track_ids == frozenset()
+
+
+def test_library_service_likes_and_unlikes_album_artist_and_playlist() -> None:
+    music_service = FakeMusicService()
+    service = LibraryService(
+        music_service=music_service,
+        library_cache_repo=InMemoryLibraryCacheRepo(),
+        logger=TestLogger(),
+    )
+
+    liked_album = service.like_album(Album(id="album-1", title="Album"))
+    unliked_album = service.unlike_album(liked_album)
+    liked_artist = service.like_artist(Artist(id="artist-1", name="Artist"))
+    unliked_artist = service.unlike_artist(liked_artist)
+    liked_playlist = service.like_playlist(
+        Playlist(id="playlist-1", title="Playlist", owner_id="7")
+    )
+    unliked_playlist = service.unlike_playlist(liked_playlist)
+
+    assert music_service.liked_album_id == "album-1"
+    assert music_service.unliked_album_id == "album-1"
+    assert music_service.liked_artist_id == "artist-1"
+    assert music_service.unliked_artist_id == "artist-1"
+    assert music_service.liked_playlist == ("playlist-1", "7")
+    assert music_service.unliked_playlist == ("playlist-1", "7")
+    assert liked_album.is_liked is True and unliked_album.is_liked is False
+    assert liked_artist.is_liked is True and unliked_artist.is_liked is False
+    assert liked_playlist.is_liked is True and unliked_playlist.is_liked is False
 
 
 def test_library_service_refreshes_liked_track_index() -> None:

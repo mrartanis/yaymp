@@ -61,6 +61,11 @@ class LibraryService:
         self._logger.info("Loaded %s liked artists", len(artists))
         return artists
 
+    def load_liked_playlists(self, *, limit: int = 100) -> tuple[Playlist, ...]:
+        playlists = tuple(self._music_service.get_liked_playlists(limit=limit))
+        self._logger.info("Loaded %s liked playlists", len(playlists))
+        return playlists
+
     def load_user_playlists(self) -> tuple[Playlist, ...]:
         playlists = tuple(self._music_service.get_user_playlists())
         self._logger.info("Loaded %s user playlists", len(playlists))
@@ -152,6 +157,8 @@ class LibraryService:
             id=track.id,
             title=track.title,
             artists=track.artists,
+            artist_ids=track.artist_ids,
+            album_id=track.album_id,
             album_title=track.album_title,
             album_year=track.album_year,
             duration_ms=track.duration_ms,
@@ -173,6 +180,8 @@ class LibraryService:
             id=track.id,
             title=track.title,
             artists=track.artists,
+            artist_ids=track.artist_ids,
+            album_id=track.album_id,
             album_title=track.album_title,
             album_year=track.album_year,
             duration_ms=track.duration_ms,
@@ -187,6 +196,92 @@ class LibraryService:
             self._library_cache_repo.mark_track_unliked(user_id, track.id)
         self._logger.info("Unliked track %s", track.id)
         return unliked_track
+
+    def like_album(self, album: Album) -> Album:
+        self._music_service.like_album(album.id)
+        liked_album = Album(
+            id=album.id,
+            title=album.title,
+            artists=album.artists,
+            artist_ids=album.artist_ids,
+            is_liked=True,
+            release_type=album.release_type,
+            year=album.year,
+            track_count=album.track_count,
+            artwork_ref=album.artwork_ref,
+        )
+        self._logger.info("Liked album %s", album.id)
+        return liked_album
+
+    def unlike_album(self, album: Album) -> Album:
+        self._music_service.unlike_album(album.id)
+        unliked_album = Album(
+            id=album.id,
+            title=album.title,
+            artists=album.artists,
+            artist_ids=album.artist_ids,
+            is_liked=False,
+            release_type=album.release_type,
+            year=album.year,
+            track_count=album.track_count,
+            artwork_ref=album.artwork_ref,
+        )
+        self._logger.info("Unliked album %s", album.id)
+        return unliked_album
+
+    def like_artist(self, artist: Artist) -> Artist:
+        self._music_service.like_artist(artist.id)
+        liked_artist = Artist(
+            id=artist.id,
+            name=artist.name,
+            artwork_ref=artist.artwork_ref,
+            is_liked=True,
+        )
+        self._logger.info("Liked artist %s", artist.id)
+        return liked_artist
+
+    def unlike_artist(self, artist: Artist) -> Artist:
+        self._music_service.unlike_artist(artist.id)
+        unliked_artist = Artist(
+            id=artist.id,
+            name=artist.name,
+            artwork_ref=artist.artwork_ref,
+            is_liked=False,
+        )
+        self._logger.info("Unliked artist %s", artist.id)
+        return unliked_artist
+
+    def like_playlist(self, playlist: Playlist) -> Playlist:
+        self._music_service.like_playlist(playlist.id, owner_id=playlist.owner_id)
+        liked_playlist = Playlist(
+            id=playlist.id,
+            title=playlist.title,
+            owner_id=playlist.owner_id,
+            owner_name=playlist.owner_name,
+            description=playlist.description,
+            track_count=playlist.track_count,
+            artwork_ref=playlist.artwork_ref,
+            is_generated=playlist.is_generated,
+            is_liked=True,
+        )
+        self._logger.info("Liked playlist %s", playlist.id)
+        return liked_playlist
+
+    def unlike_playlist(self, playlist: Playlist) -> Playlist:
+        self._music_service.unlike_playlist(playlist.id, owner_id=playlist.owner_id)
+        unliked_playlist = Playlist(
+            id=playlist.id,
+            title=playlist.title,
+            owner_id=playlist.owner_id,
+            owner_name=playlist.owner_name,
+            description=playlist.description,
+            track_count=playlist.track_count,
+            artwork_ref=playlist.artwork_ref,
+            is_generated=playlist.is_generated,
+            is_liked=False,
+        )
+        self._logger.info("Unliked playlist %s", playlist.id)
+        return unliked_playlist
 
     def cached_track(self, track_id: str) -> Track | None:
         return self._library_cache_repo.load_track_metadata(track_id)

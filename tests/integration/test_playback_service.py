@@ -90,11 +90,33 @@ class FakeMusicService:
         del limit
         return ()
 
+    def get_liked_playlists(self, *, limit: int = 100):
+        del limit
+        return ()
+
     def like_track(self, track_id: str) -> None:
         self.liked_track_id = track_id
 
     def unlike_track(self, track_id: str) -> None:
         self.unliked_track_id = track_id
+
+    def like_album(self, album_id: str) -> None:
+        self.liked_album_id = album_id
+
+    def unlike_album(self, album_id: str) -> None:
+        self.unliked_album_id = album_id
+
+    def like_artist(self, artist_id: str) -> None:
+        self.liked_artist_id = artist_id
+
+    def unlike_artist(self, artist_id: str) -> None:
+        self.unliked_artist_id = artist_id
+
+    def like_playlist(self, playlist_id: str, *, owner_id: str | None = None) -> None:
+        self.liked_playlist = (playlist_id, owner_id)
+
+    def unlike_playlist(self, playlist_id: str, *, owner_id: str | None = None) -> None:
+        self.unliked_playlist = (playlist_id, owner_id)
 
     def set_audio_quality(self, quality: AudioQuality) -> None:
         self.quality = quality
@@ -301,6 +323,70 @@ def test_append_queue_preserves_source_context() -> None:
     assert snapshot.queue[1].source_type == "album"
     assert snapshot.queue[1].source_id == "album-1"
     assert snapshot.queue[1].source_index == 0
+
+
+def test_insert_queue_next_places_tracks_after_active_item() -> None:
+    service = PlaybackService(
+        playback_engine=FakePlaybackEngine(),
+        logger=TestLogger(),
+    )
+    service.replace_queue(build_tracks(), start_index=0, source_type="album", source_id="album-1")
+
+    snapshot = service.insert_queue_next(
+        (
+            Track(id="next-1", title="Next 1", artists=("Artist",), stream_ref="demo://next-1"),
+            Track(id="next-2", title="Next 2", artists=("Artist",), stream_ref="demo://next-2"),
+        ),
+        source_type="track",
+        source_id="next",
+    )
+
+    assert [item.track.id for item in snapshot.queue] == ["one", "next-1", "next-2", "two", "three"]
+    assert snapshot.state.active_index == 0
+
+
+def test_move_queue_item_next_reorders_existing_item() -> None:
+    service = PlaybackService(
+        playback_engine=FakePlaybackEngine(),
+        logger=TestLogger(),
+    )
+    service.replace_queue(build_tracks(), start_index=0, source_type="album", source_id="album-1")
+
+    snapshot = service.move_queue_item_next(2)
+
+    assert [item.track.id for item in snapshot.queue] == ["one", "three", "two"]
+    assert snapshot.state.active_index == 0
+
+
+def test_remove_queue_index_removes_non_active_item_without_interrupting_playback() -> None:
+    service = PlaybackService(
+        playback_engine=FakePlaybackEngine(),
+        logger=TestLogger(),
+    )
+    service.replace_queue(build_tracks(), start_index=0, source_type="album", source_id="album-1")
+
+    snapshot = service.remove_queue_index(1)
+
+    assert [item.track.id for item in snapshot.queue] == ["one", "three"]
+    assert snapshot.state.active_index == 0
+    assert snapshot.current_item is not None
+    assert snapshot.current_item.track.id == "one"
+
+
+def test_remove_queue_index_replaces_active_item_with_next_track() -> None:
+    service = PlaybackService(
+        playback_engine=FakePlaybackEngine(),
+        logger=TestLogger(),
+    )
+    service.replace_queue(build_tracks(), start_index=1, source_type="album", source_id="album-1")
+
+    snapshot = service.remove_queue_index(1)
+
+    assert [item.track.id for item in snapshot.queue] == ["one", "three"]
+    assert snapshot.state.active_index == 1
+    assert snapshot.current_item is not None
+    assert snapshot.current_item.track.id == "three"
+    assert snapshot.state.status is PlaybackStatus.PLAYING
 
 
 def test_playback_service_persists_queue_after_replace_and_append() -> None:

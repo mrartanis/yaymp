@@ -44,6 +44,10 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
                 id=str(raw_track["id"]),
                 title=str(raw_track["title"]),
                 artists=tuple(str(artist) for artist in raw_track.get("artists", ())),
+                artist_ids=tuple(
+                    str(artist_id) for artist_id in raw_track.get("artist_ids", ())
+                ),
+                album_id=self._optional_str(raw_track.get("album_id")),
                 album_title=self._optional_str(raw_track.get("album_title")),
                 album_year=self._optional_int(raw_track.get("album_year")),
                 duration_ms=self._optional_int(raw_track.get("duration_ms")),
@@ -64,6 +68,8 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
             "id": track.id,
             "title": track.title,
             "artists": list(track.artists),
+            "artist_ids": list(track.artist_ids),
+            "album_id": track.album_id,
             "album_title": track.album_title,
             "album_year": track.album_year,
             "duration_ms": track.duration_ms,

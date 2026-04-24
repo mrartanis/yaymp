@@ -3,8 +3,8 @@ from __future__ import annotations
 from os import environ
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer, QUrl
-from PySide6.QtGui import QPixmap, QShowEvent
+from PySide6.QtCore import QPoint, Qt, QTimer, QUrl
+from PySide6.QtGui import QAction, QPixmap, QShowEvent
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 from PySide6.QtWidgets import (
     QApplication,
@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QMenu,
     QPushButton,
     QSlider,
     QTabWidget,
@@ -27,6 +28,7 @@ from PySide6.QtWidgets import (
 from app.application.error_presenter import user_facing_error_message
 from app.bootstrap.container import AppContainer
 from app.domain import Album, Artist, AudioQuality, PlaybackStatus, Playlist, Station, Track
+from app.domain.playback import QueueItem
 from app.domain.errors import DomainError
 from app.presentation.qt.auth_dialog import AuthDialog
 from app.presentation.qt.icon_utils import create_icon
@@ -193,6 +195,7 @@ class MainWindow(QMainWindow):
         self._browser_tabs.setVisible(False)
         self._content_list = QListWidget()
         self._content_list.setAlternatingRowColors(True)
+        self._content_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._track_id_input = QLineEdit()
         self._track_id_input.setPlaceholderText("Enter Yandex track id")
         self._play_track_button = QPushButton("Play Track ID")
@@ -242,6 +245,7 @@ class MainWindow(QMainWindow):
         layout = frame.layout()
         assert layout is not None
         self._queue_list = QListWidget()
+        self._queue_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._clear_queue_button = QPushButton("Clear queue")
         self._clear_queue_button.setIcon(create_icon("clear_playlist.svg"))
         layout.addWidget(self._queue_list)
@@ -267,6 +271,12 @@ class MainWindow(QMainWindow):
         self._library_controller.content_failed.connect(self._render_library_error)
         self._library_controller.track_liked.connect(self._render_track_liked)
         self._library_controller.track_unliked.connect(self._render_track_unliked)
+        self._library_controller.album_liked.connect(self._render_album_liked)
+        self._library_controller.album_unliked.connect(self._render_album_unliked)
+        self._library_controller.artist_liked.connect(self._render_artist_liked)
+        self._library_controller.artist_unliked.connect(self._render_artist_unliked)
+        self._library_controller.playlist_liked.connect(self._render_playlist_liked)
+        self._library_controller.playlist_unliked.connect(self._render_playlist_unliked)
         self._previous_button.clicked.connect(self._controller.previous)
         self._play_pause_button.clicked.connect(self._toggle_play_pause)
         self._next_button.clicked.connect(self._controller.next)
@@ -275,6 +285,8 @@ class MainWindow(QMainWindow):
         self._queue_list.itemDoubleClicked.connect(self._select_queue_item)
         self._clear_queue_button.clicked.connect(self._controller.clear_queue)
         self._content_list.itemDoubleClicked.connect(self._open_content_item)
+        self._content_list.customContextMenuRequested.connect(self._show_content_context_menu)
+        self._queue_list.customContextMenuRequested.connect(self._show_queue_context_menu)
         self._search_button.clicked.connect(self._run_search)
         self._search_input.returnPressed.connect(self._run_search)
         self._recent_searches_combo.activated.connect(self._apply_recent_search)
@@ -471,6 +483,7 @@ class MainWindow(QMainWindow):
         for index, item in enumerate(snapshot.queue):
             row = f"{index + 1:02d}. {item.track.title}"
             widget_item = QListWidgetItem(row)
+            widget_item.setData(Qt.ItemDataRole.UserRole, item)
             if snapshot.state.active_index == index:
                 widget_item.setSelected(True)
             self._queue_list.addItem(widget_item)
@@ -561,6 +574,30 @@ class MainWindow(QMainWindow):
         self._replace_content_track(track)
         self._status_label.setText(f"Unliked: {track.title}")
 
+    def _render_album_liked(self, album: Album) -> None:
+        self._replace_content_entity(album)
+        self._status_label.setText(f"Liked album: {album.title}")
+
+    def _render_album_unliked(self, album: Album) -> None:
+        self._replace_content_entity(album)
+        self._status_label.setText(f"Unliked album: {album.title}")
+
+    def _render_artist_liked(self, artist: Artist) -> None:
+        self._replace_content_entity(artist)
+        self._status_label.setText(f"Liked artist: {artist.name}")
+
+    def _render_artist_unliked(self, artist: Artist) -> None:
+        self._replace_content_entity(artist)
+        self._status_label.setText(f"Unliked artist: {artist.name}")
+
+    def _render_playlist_liked(self, playlist: Playlist) -> None:
+        self._replace_content_entity(playlist)
+        self._status_label.setText(f"Liked playlist: {playlist.title}")
+
+    def _render_playlist_unliked(self, playlist: Playlist) -> None:
+        self._replace_content_entity(playlist)
+        self._status_label.setText(f"Unliked playlist: {playlist.title}")
+
     def _like_selected_or_current_track(self) -> None:
         track = self._selected_or_current_track()
         if track is None:
@@ -627,6 +664,8 @@ class MainWindow(QMainWindow):
             title = f"{'❤️ ' if track.is_liked else ''}{track.title}"
             text = title
             subtitle = ", ".join(track.artists)
+            if track.album_title:
+                subtitle = f"{subtitle} | {track.album_title}" if subtitle else track.album_title
             if subtitle:
                 text = f"{title}\n{subtitle}"
             item.setText(text)
@@ -644,6 +683,296 @@ class MainWindow(QMainWindow):
                 ),
             )
             break
+
+    def _replace_content_entity(self, entity: Album | Artist | Playlist) -> None:
+        for index in range(self._content_list.count()):
+            item = self._content_list.item(index)
+            browser_item = item.data(Qt.ItemDataRole.UserRole)
+            if not isinstance(browser_item, BrowserItem):
+                continue
+            payload = browser_item.payload
+            if type(payload) is not type(entity):
+                continue
+            if getattr(payload, "id", None) != getattr(entity, "id", None):
+                continue
+            item.setData(
+                Qt.ItemDataRole.UserRole,
+                BrowserItem(
+                    kind=browser_item.kind,
+                    title=browser_item.title,
+                    subtitle=browser_item.subtitle,
+                    payload=entity,
+                    source_type=browser_item.source_type,
+                    source_id=browser_item.source_id,
+                    source_tracks=browser_item.source_tracks,
+                    source_index=browser_item.source_index,
+                ),
+            )
+            break
+
+    def _show_content_context_menu(self, position: QPoint) -> None:
+        item = self._content_list.itemAt(position)
+        if item is None:
+            return
+        self._content_list.setCurrentItem(item)
+        browser_item = item.data(Qt.ItemDataRole.UserRole)
+        if not isinstance(browser_item, BrowserItem):
+            return
+        menu = QMenu(self)
+        if not self._populate_browser_item_menu(menu, browser_item):
+            return
+        menu.exec(self._content_list.viewport().mapToGlobal(position))
+
+    def _show_queue_context_menu(self, position: QPoint) -> None:
+        item = self._queue_list.itemAt(position)
+        if item is None:
+            return
+        self._queue_list.setCurrentItem(item)
+        queue_item = item.data(Qt.ItemDataRole.UserRole)
+        if not isinstance(queue_item, QueueItem):
+            return
+        menu = QMenu(self)
+        queue_index = self._queue_list.row(item)
+        if not self._populate_queue_item_menu(menu, queue_item, queue_index):
+            return
+        menu.exec(self._queue_list.viewport().mapToGlobal(position))
+
+    def _populate_browser_item_menu(self, menu: QMenu, browser_item: BrowserItem) -> bool:
+        payload = browser_item.payload
+        if isinstance(payload, Track):
+            return self._populate_track_menu(menu, payload)
+        if isinstance(payload, Album):
+            self._add_copy_share_link_action(menu, self._album_share_link(payload))
+            self._add_album_like_action(menu, payload)
+            self._add_album_radio_action(menu, payload)
+            self._add_go_to_artist_actions(menu, payload.artist_ids, payload.artists)
+            return not menu.isEmpty()
+        if isinstance(payload, Artist):
+            self._add_copy_share_link_action(menu, self._artist_share_link(payload))
+            self._add_artist_like_action(menu, payload)
+            self._add_artist_radio_action(menu, payload)
+            return not menu.isEmpty()
+        if isinstance(payload, Playlist):
+            self._add_copy_share_link_action(menu, self._playlist_share_link(payload))
+            self._add_playlist_like_action(menu, payload)
+            return not menu.isEmpty()
+        if isinstance(payload, Station):
+            self._add_copy_share_link_action(menu, self._station_share_link(payload))
+            return not menu.isEmpty()
+        return False
+
+    def _populate_track_menu(
+        self,
+        menu: QMenu,
+        track: Track,
+        *,
+        include_queue_actions: bool = True,
+    ) -> bool:
+        self._add_copy_share_link_action(menu, self._track_share_link(track))
+        action_text = "Unlike" if track.is_liked else "Like"
+        toggle_like = QAction(action_text, self)
+        toggle_like.triggered.connect(
+            lambda checked=False, selected_track=track: self._toggle_track_like(selected_track)
+        )
+        menu.addAction(toggle_like)
+        if include_queue_actions:
+            add_to_queue = QAction("Add to queue", self)
+            add_to_queue.triggered.connect(
+                lambda checked=False, selected_track=track: self._controller.append_tracks(
+                    (selected_track,),
+                    source_type="track",
+                    source_id=selected_track.id,
+                )
+            )
+            menu.addAction(add_to_queue)
+            play_next = QAction("Play next", self)
+            play_next.triggered.connect(
+                lambda checked=False, selected_track=track: self._controller.play_track_next(
+                    selected_track,
+                    source_type="track",
+                    source_id=selected_track.id,
+                )
+            )
+            menu.addAction(play_next)
+        self._add_track_radio_action(menu, track)
+        self._add_go_to_artist_actions(menu, track.artist_ids, track.artists)
+        if track.album_id:
+            go_to_album = QAction("Go to album", self)
+            go_to_album.triggered.connect(
+                lambda checked=False, album_id=track.album_id: self._library_controller.open_album_by_id(
+                    album_id
+                )
+            )
+            menu.addAction(go_to_album)
+        return not menu.isEmpty()
+
+    def _populate_queue_item_menu(
+        self,
+        menu: QMenu,
+        queue_item: QueueItem,
+        queue_index: int,
+    ) -> bool:
+        self._populate_track_menu(menu, queue_item.track, include_queue_actions=False)
+        play_next = QAction("Play next", self)
+        play_next.triggered.connect(
+            lambda checked=False, index=queue_index: self._controller.move_queue_item_next(index)
+        )
+        menu.addAction(play_next)
+        remove_action = QAction("Remove from queue", self)
+        remove_action.triggered.connect(
+            lambda checked=False, index=queue_index: self._controller.remove_queue_index(index)
+        )
+        menu.addAction(remove_action)
+        return not menu.isEmpty()
+
+    def _toggle_track_like(self, track: Track) -> None:
+        if track.is_liked:
+            self._library_controller.unlike_track(track)
+            return
+        self._library_controller.like_track(track)
+
+    def _add_album_like_action(self, menu: QMenu, album: Album) -> None:
+        action = QAction("Unlike" if album.is_liked else "Like", self)
+        action.triggered.connect(
+            lambda checked=False, selected_album=album: self._toggle_album_like(selected_album)
+        )
+        menu.addAction(action)
+
+    def _add_artist_like_action(self, menu: QMenu, artist: Artist) -> None:
+        action = QAction("Unlike" if artist.is_liked else "Like", self)
+        action.triggered.connect(
+            lambda checked=False, selected_artist=artist: self._toggle_artist_like(selected_artist)
+        )
+        menu.addAction(action)
+
+    def _add_playlist_like_action(self, menu: QMenu, playlist: Playlist) -> None:
+        action = QAction("Unlike" if playlist.is_liked else "Like", self)
+        action.triggered.connect(
+            lambda checked=False, selected_playlist=playlist: self._toggle_playlist_like(
+                selected_playlist
+            )
+        )
+        menu.addAction(action)
+
+    def _toggle_album_like(self, album: Album) -> None:
+        if album.is_liked:
+            self._library_controller.unlike_album(album)
+            return
+        self._library_controller.like_album(album)
+
+    def _toggle_artist_like(self, artist: Artist) -> None:
+        if artist.is_liked:
+            self._library_controller.unlike_artist(artist)
+            return
+        self._library_controller.like_artist(artist)
+
+    def _toggle_playlist_like(self, playlist: Playlist) -> None:
+        if playlist.is_liked:
+            self._library_controller.unlike_playlist(playlist)
+            return
+        self._library_controller.like_playlist(playlist)
+
+    def _add_copy_share_link_action(self, menu: QMenu, link: str | None) -> None:
+        if not link:
+            return
+        action = QAction("Copy share link", self)
+        action.triggered.connect(
+            lambda checked=False, share_link=link: self._copy_share_link(share_link)
+        )
+        menu.addAction(action)
+
+    def _add_track_radio_action(self, menu: QMenu, track: Track) -> None:
+        action = QAction("Start track radio", self)
+        action.triggered.connect(
+            lambda checked=False, selected_track=track: self._open_and_play_station(
+                Station(id=f"track:{selected_track.id}", title=f"{selected_track.title} Radio")
+            )
+        )
+        menu.addAction(action)
+
+    def _add_album_radio_action(self, menu: QMenu, album: Album) -> None:
+        action = QAction("Start album radio", self)
+        action.triggered.connect(
+            lambda checked=False, selected_album=album: self._open_and_play_station(
+                Station(id=f"album:{selected_album.id}", title=f"{selected_album.title} Radio")
+            )
+        )
+        menu.addAction(action)
+
+    def _add_artist_radio_action(self, menu: QMenu, artist: Artist) -> None:
+        action = QAction("Start artist radio", self)
+        action.triggered.connect(
+            lambda checked=False, selected_artist=artist: self._open_and_play_station(
+                Station(id=f"artist:{selected_artist.id}", title=f"{selected_artist.name} Radio")
+            )
+        )
+        menu.addAction(action)
+
+    def _add_go_to_artist_actions(
+        self,
+        menu: QMenu,
+        artist_ids: tuple[str, ...],
+        artist_names: tuple[str, ...],
+    ) -> None:
+        artists = [
+            Artist(id=artist_id, name=artist_name)
+            for artist_id, artist_name in zip(artist_ids, artist_names, strict=False)
+        ]
+        if not artists:
+            return
+        if len(artists) == 1:
+            artist = artists[0]
+            action = QAction("Go to artist", self)
+            action.triggered.connect(
+                lambda checked=False, selected_artist=artist: self._library_controller.open_artist(
+                    selected_artist
+                )
+            )
+            menu.addAction(action)
+            return
+        submenu = menu.addMenu("Go to artist")
+        for artist in artists:
+            action = QAction(artist.name, self)
+            action.triggered.connect(
+                lambda checked=False, selected_artist=artist: self._library_controller.open_artist(
+                    selected_artist
+                )
+            )
+            submenu.addAction(action)
+
+    def _open_and_play_station(self, station: Station) -> None:
+        self._library_controller.open_station(station)
+        self._controller.play_station(station.id)
+
+    def _copy_share_link(self, link: str) -> None:
+        clipboard = QApplication.clipboard()
+        clipboard.setText(link)
+        self._status_label.setText(f"Copied share link: {link}")
+
+    def _track_share_link(self, track: Track) -> str | None:
+        if track.album_id:
+            return f"https://music.yandex.ru/album/{track.album_id}/track/{track.id}"
+        return None
+
+    def _album_share_link(self, album: Album) -> str:
+        return f"https://music.yandex.ru/album/{album.id}"
+
+    def _artist_share_link(self, artist: Artist) -> str:
+        return f"https://music.yandex.ru/artist/{artist.id}"
+
+    def _playlist_share_link(self, playlist: Playlist) -> str | None:
+        if playlist.owner_id:
+            return f"https://music.yandex.ru/users/{playlist.owner_id}/playlists/{playlist.id}"
+        return f"https://music.yandex.ru/playlist/{playlist.id}"
+
+    def _station_share_link(self, station: Station) -> str | None:
+        if station.id.startswith("artist:"):
+            return f"https://music.yandex.ru/artist/{station.id.split(':', 1)[1]}"
+        if station.id.startswith("album:"):
+            return f"https://music.yandex.ru/album/{station.id.split(':', 1)[1]}"
+        if station.id.startswith("track:"):
+            return None
+        return None
 
     def _render_artwork(self, track: Track) -> None:
         if not track.artwork_ref:

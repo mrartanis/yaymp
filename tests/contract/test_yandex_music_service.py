@@ -158,9 +158,10 @@ class LikesStub:
 
 
 class LikeStub:
-    def __init__(self, *, album=None, artist=None, entity_id: str | None = None) -> None:
+    def __init__(self, *, album=None, artist=None, playlist=None, entity_id: str | None = None) -> None:
         self.album = album
         self.artist = artist
+        self.playlist = playlist
         self.id = entity_id
 
 
@@ -192,11 +193,18 @@ class FakeYandexClient:
         self.likes = LikesStub([self.track])
         self.album_likes = [LikeStub(album=self.album)]
         self.artist_likes = [LikeStub(artist=ArtistResultStub())]
+        self.playlist_likes = [LikeStub(playlist=self.playlist)]
         self.download_infos = [DownloadInfoStub("https://stream.example/track-1")]
         self.account = type("Account", (), {"uid": 7, "login": "listener"})()
         self.me = type("Me", (), {"account": self.account})()
         self.liked_track_ids: list[str] = []
         self.unliked_track_ids: list[str] = []
+        self.liked_album_ids: list[str] = []
+        self.unliked_album_ids: list[str] = []
+        self.liked_artist_ids: list[str] = []
+        self.unliked_artist_ids: list[str] = []
+        self.liked_playlist_ids: list[str] = []
+        self.unliked_playlist_ids: list[str] = []
         self.playlist_requests: list[tuple[str, str | None]] = []
 
     def tracks(self, track_ids):
@@ -221,11 +229,33 @@ class FakeYandexClient:
         del user_id, with_timestamps
         return self.artist_likes
 
+    def users_likes_playlists(self, user_id=None):
+        del user_id
+        return self.playlist_likes
+
     def users_likes_tracks_add(self, track_id: str):
         self.liked_track_ids.append(track_id)
 
     def users_likes_tracks_remove(self, track_id: str):
         self.unliked_track_ids.append(track_id)
+
+    def users_likes_albums_add(self, album_id: str):
+        self.liked_album_ids.append(album_id)
+
+    def users_likes_albums_remove(self, album_id: str):
+        self.unliked_album_ids.append(album_id)
+
+    def users_likes_artists_add(self, artist_id: str):
+        self.liked_artist_ids.append(artist_id)
+
+    def users_likes_artists_remove(self, artist_id: str):
+        self.unliked_artist_ids.append(artist_id)
+
+    def users_likes_playlists_add(self, playlist_id: str):
+        self.liked_playlist_ids.append(playlist_id)
+
+    def users_likes_playlists_remove(self, playlist_id: str):
+        self.unliked_playlist_ids.append(playlist_id)
 
     def users_playlists_list(self):
         return [self.playlist]
@@ -338,6 +368,7 @@ def test_yandex_music_service_maps_track_and_playlist_data() -> None:
     )
     liked_albums = service.get_liked_albums()
     liked_artists = service.get_liked_artists()
+    liked_playlists = service.get_liked_playlists()
     user_playlists = service.get_user_playlists()
     generated_playlists = service.get_generated_playlists()
     stations = service.get_stations()
@@ -387,6 +418,7 @@ def test_yandex_music_service_maps_track_and_playlist_data() -> None:
     assert unchanged_liked_track_ids is None
     assert [item.id for item in liked_albums] == ["album-1"]
     assert [item.id for item in liked_artists] == ["artist-1"]
+    assert [item.id for item in liked_playlists] == ["playlist-1"]
     assert [item.id for item in user_playlists] == ["playlist-1"]
     assert [item.id for item in generated_playlists] == ["generated-1"]
     assert generated_playlists[0].is_generated is True
@@ -467,6 +499,28 @@ def test_yandex_music_service_likes_and_unlikes_tracks() -> None:
 
     assert client.liked_track_ids == ["track-1"]
     assert client.unliked_track_ids == ["track-1"]
+
+
+def test_yandex_music_service_likes_and_unlikes_album_artist_and_playlist() -> None:
+    client = FakeYandexClient()
+    service = YandexMusicService(
+        session=AuthSession(user_id="user-1", token="token"),
+        client=client,
+    )
+
+    service.like_album("album-1")
+    service.unlike_album("album-1")
+    service.like_artist("artist-1")
+    service.unlike_artist("artist-1")
+    service.like_playlist("playlist-1", owner_id="7")
+    service.unlike_playlist("playlist-1", owner_id="7")
+
+    assert client.liked_album_ids == ["album-1"]
+    assert client.unliked_album_ids == ["album-1"]
+    assert client.liked_artist_ids == ["artist-1"]
+    assert client.unliked_artist_ids == ["artist-1"]
+    assert client.liked_playlist_ids == ["7:playlist-1"]
+    assert client.unliked_playlist_ids == ["7:playlist-1"]
 
 
 def test_yandex_music_service_rejects_unavailable_tracks() -> None:

@@ -13,3 +13,4 @@ class Playlist:
     track_count: int | None = None
     artwork_ref: str | None = None
     is_generated: bool = False
+    is_liked: bool = False
