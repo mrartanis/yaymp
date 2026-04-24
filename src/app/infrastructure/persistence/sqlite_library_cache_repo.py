@@ -198,7 +198,9 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                 )
                 connection.executemany(
                     (
-                        "insert into liked_track_snapshot_items(user_id, position, track_id, updated_at) "
+                        "insert into liked_track_snapshot_items("
+                        "user_id, position, track_id, updated_at"
+                        ") "
                         "values (?, ?, ?, ?)"
                     ),
                     [
@@ -587,12 +589,20 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
             artists=tuple(str(artist) for artist in raw_album.get("artists", ())),
             artist_ids=tuple(str(artist_id) for artist_id in raw_album.get("artist_ids", ())),
             is_liked=bool(raw_album.get("is_liked", False)),
-            release_type=str(raw_album["release_type"]) if raw_album.get("release_type") is not None else None,
+            release_type=(
+                str(raw_album["release_type"])
+                if raw_album.get("release_type") is not None
+                else None
+            ),
             year=int(raw_album["year"]) if raw_album.get("year") is not None else None,
             track_count=(
                 int(raw_album["track_count"]) if raw_album.get("track_count") is not None else None
             ),
-            artwork_ref=str(raw_album["artwork_ref"]) if raw_album.get("artwork_ref") is not None else None,
+            artwork_ref=(
+                str(raw_album["artwork_ref"])
+                if raw_album.get("artwork_ref") is not None
+                else None
+            ),
         )
 
     def _encode_artist(self, artist: Artist) -> dict[str, object]:
@@ -609,7 +619,11 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
         return Artist(
             id=str(raw_artist["id"]),
             name=str(raw_artist["name"]),
-            artwork_ref=str(raw_artist["artwork_ref"]) if raw_artist.get("artwork_ref") is not None else None,
+            artwork_ref=(
+                str(raw_artist["artwork_ref"])
+                if raw_artist.get("artwork_ref") is not None
+                else None
+            ),
             is_liked=bool(raw_artist.get("is_liked", False)),
         )
 
@@ -632,13 +646,31 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
         return Playlist(
             id=str(raw_playlist["id"]),
             title=str(raw_playlist["title"]),
-            owner_id=str(raw_playlist["owner_id"]) if raw_playlist.get("owner_id") is not None else None,
-            owner_name=str(raw_playlist["owner_name"]) if raw_playlist.get("owner_name") is not None else None,
-            description=str(raw_playlist["description"]) if raw_playlist.get("description") is not None else None,
-            track_count=(
-                int(raw_playlist["track_count"]) if raw_playlist.get("track_count") is not None else None
+            owner_id=(
+                str(raw_playlist["owner_id"])
+                if raw_playlist.get("owner_id") is not None
+                else None
             ),
-            artwork_ref=str(raw_playlist["artwork_ref"]) if raw_playlist.get("artwork_ref") is not None else None,
+            owner_name=(
+                str(raw_playlist["owner_name"])
+                if raw_playlist.get("owner_name") is not None
+                else None
+            ),
+            description=(
+                str(raw_playlist["description"])
+                if raw_playlist.get("description") is not None
+                else None
+            ),
+            track_count=(
+                int(raw_playlist["track_count"])
+                if raw_playlist.get("track_count") is not None
+                else None
+            ),
+            artwork_ref=(
+                str(raw_playlist["artwork_ref"])
+                if raw_playlist.get("artwork_ref") is not None
+                else None
+            ),
             is_generated=bool(raw_playlist.get("is_generated", False)),
             is_liked=bool(raw_playlist.get("is_liked", False)),
         )

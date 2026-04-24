@@ -161,7 +161,11 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
             mapper=self._deserialize_album,
         )
 
-    def save_liked_album_snapshot(self, user_id: str, albums: tuple[Album, ...] | list[Album]) -> None:
+    def save_liked_album_snapshot(
+        self,
+        user_id: str,
+        albums: tuple[Album, ...] | list[Album],
+    ) -> None:
         self._save_entity_snapshot(
             user_id,
             snapshot_key="liked_album_snapshots",

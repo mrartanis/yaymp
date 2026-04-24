@@ -310,6 +310,7 @@ class MainWindow(QMainWindow):
         hero.addWidget(self._artwork_label, 0, Qt.AlignmentFlag.AlignCenter)
         info_widget = QWidget()
         info_widget.setMinimumWidth(0)
+        info_widget.setFixedHeight(self._artwork_label.height())
         info_widget.setSizePolicy(
             QSizePolicy.Policy.Ignored,
             QSizePolicy.Policy.Fixed,
@@ -317,13 +318,19 @@ class MainWindow(QMainWindow):
         info_layout = QVBoxLayout(info_widget)
         info_layout.setSpacing(5)
         info_layout.setContentsMargins(0, 0, 0, 0)
-        info_layout.addSpacing(2)
-        info_layout.addWidget(self._track_title_label)
-        info_layout.addWidget(self._track_meta_label)
-        info_layout.addWidget(self._track_album_label)
-        info_layout.addSpacing(6)
+        text_block = QWidget()
+        text_block.setMinimumWidth(0)
+        text_block_layout = QVBoxLayout(text_block)
+        text_block_layout.setContentsMargins(0, 0, 0, 0)
+        text_block_layout.setSpacing(5)
+        text_block_layout.addSpacing(2)
+        text_block_layout.addWidget(self._track_title_label)
+        text_block_layout.addWidget(self._track_meta_label)
+        text_block_layout.addWidget(self._track_album_label)
+        info_layout.addWidget(text_block)
+        info_layout.addStretch(1)
         info_layout.addLayout(self._build_transport_bar())
-        info_layout.addSpacing(2)
+        info_layout.addSpacing(10)
         hero.addWidget(info_widget, 1)
 
         progress_row = QHBoxLayout()
@@ -373,12 +380,12 @@ class MainWindow(QMainWindow):
         discovery_label.setObjectName("nav-section")
         layout.addWidget(discovery_label)
         layout.addWidget(self._search_nav_button)
-        layout.addStretch(1)
         return frame
 
     def _build_sidebar_popup(self) -> None:
         self._sidebar_popup = self._build_nav_panel()
         self._sidebar_popup.setParent(self)
+        self._sidebar_popup.adjustSize()
         self._sidebar_popup.hide()
         self._sidebar_popup.move(14, 54)
         self._sidebar_popup.raise_()

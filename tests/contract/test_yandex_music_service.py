@@ -161,7 +161,14 @@ class LikesStub:
 
 
 class LikeStub:
-    def __init__(self, *, album=None, artist=None, playlist=None, entity_id: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        album=None,
+        artist=None,
+        playlist=None,
+        entity_id: str | None = None,
+    ) -> None:
         self.album = album
         self.artist = artist
         self.playlist = playlist

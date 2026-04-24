@@ -53,7 +53,11 @@ class LibraryService:
         liked_tracks = self._music_service.get_liked_track_ids(
             if_modified_since_revision=current_revision
         )
-        if liked_tracks is None and cached_tracks and total_cached_tracks >= min(limit, total_known_tracks):
+        if (
+            liked_tracks is None
+            and cached_tracks
+            and total_cached_tracks >= min(limit, total_known_tracks)
+        ):
             self._logger.info(
                 "Loaded %s liked tracks from cache at revision %s",
                 len(cached_tracks),
@@ -160,7 +164,9 @@ class LibraryService:
     def load_generated_playlists(self) -> tuple[Playlist, ...]:
         user_id = self._current_user_id()
         cache_user_id = user_id or "__anonymous__"
-        cached = tuple(self._library_cache_repo.load_generated_playlist_snapshot(cache_user_id) or ())
+        cached = tuple(
+            self._library_cache_repo.load_generated_playlist_snapshot(cache_user_id) or ()
+        )
         if cached:
             return cached
         playlists = tuple(self._music_service.get_generated_playlists())
