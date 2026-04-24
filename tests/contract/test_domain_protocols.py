@@ -15,6 +15,7 @@ from app.domain import (
     Clock,
     LibraryCacheRepo,
     LikedTrackIds,
+    LikedTrackSnapshot,
     Logger,
     MusicService,
     PlaybackEngine,
@@ -212,6 +213,16 @@ class FakeLibraryCacheRepo:
             revision=1,
             track_ids=frozenset({"track-1"}),
         )
+        self.liked_track_snapshot = LikedTrackSnapshot(
+            user_id="user-1",
+            revision=1,
+            tracks=(Track(id="track-1", title="Track", artists=("Artist",)),),
+        )
+        self.liked_album_snapshot = (Album(id="album-1", title="Album"),)
+        self.liked_artist_snapshot = (Artist(id="artist-1", name="Artist"),)
+        self.liked_playlist_snapshot = (Playlist(id="playlist-1", title="Playlist"),)
+        self.user_playlist_snapshot = (Playlist(id="playlist-1", title="Playlist"),)
+        self.generated_playlist_snapshot = (Playlist(id="generated-1", title="Generated"),)
 
     def load_recent_searches(self) -> Sequence[str]:
         return ["ambient", "jazz"]
@@ -232,6 +243,58 @@ class FakeLibraryCacheRepo:
 
     def save_liked_track_ids(self, liked_tracks: LikedTrackIds) -> None:
         self.liked_tracks = liked_tracks
+
+    def load_liked_track_snapshot(self, user_id: str) -> LikedTrackSnapshot | None:
+        if user_id != self.liked_track_snapshot.user_id:
+            return None
+        return self.liked_track_snapshot
+
+    def save_liked_track_snapshot(self, snapshot: LikedTrackSnapshot) -> None:
+        self.liked_track_snapshot = snapshot
+
+    def load_liked_album_snapshot(self, user_id: str) -> Sequence[Album] | None:
+        del user_id
+        return self.liked_album_snapshot
+
+    def save_liked_album_snapshot(self, user_id: str, albums: Sequence[Album]) -> None:
+        del user_id
+        self.liked_album_snapshot = tuple(albums)
+
+    def load_liked_artist_snapshot(self, user_id: str) -> Sequence[Artist] | None:
+        del user_id
+        return self.liked_artist_snapshot
+
+    def save_liked_artist_snapshot(self, user_id: str, artists: Sequence[Artist]) -> None:
+        del user_id
+        self.liked_artist_snapshot = tuple(artists)
+
+    def load_liked_playlist_snapshot(self, user_id: str) -> Sequence[Playlist] | None:
+        del user_id
+        return self.liked_playlist_snapshot
+
+    def save_liked_playlist_snapshot(self, user_id: str, playlists: Sequence[Playlist]) -> None:
+        del user_id
+        self.liked_playlist_snapshot = tuple(playlists)
+
+    def load_user_playlist_snapshot(self, user_id: str) -> Sequence[Playlist] | None:
+        del user_id
+        return self.user_playlist_snapshot
+
+    def save_user_playlist_snapshot(self, user_id: str, playlists: Sequence[Playlist]) -> None:
+        del user_id
+        self.user_playlist_snapshot = tuple(playlists)
+
+    def load_generated_playlist_snapshot(self, user_id: str) -> Sequence[Playlist] | None:
+        del user_id
+        return self.generated_playlist_snapshot
+
+    def save_generated_playlist_snapshot(
+        self,
+        user_id: str,
+        playlists: Sequence[Playlist],
+    ) -> None:
+        del user_id
+        self.generated_playlist_snapshot = tuple(playlists)
 
     def mark_track_liked(self, user_id: str, track_id: str) -> None:
         self.liked_tracks = LikedTrackIds(

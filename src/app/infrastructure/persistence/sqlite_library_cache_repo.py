@@ -7,12 +7,21 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from app.domain import LibraryCacheRepo, LikedTrackIds, Track
+from app.domain import (
+    Album,
+    Artist,
+    LibraryCacheRepo,
+    LikedTrackIds,
+    LikedTrackSnapshot,
+    Playlist,
+    Track,
+)
 from app.domain.errors import StorageError
 
 
 class SQLiteLibraryCacheRepo(LibraryCacheRepo):
     _CACHE_TTL = timedelta(days=7)
+    _LIST_CACHE_TTL = timedelta(days=1)
 
     def __init__(self, *, db_path: Path) -> None:
         self._db_path = db_path
@@ -86,43 +95,7 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
     def save_track_metadata(self, track: Track) -> None:
         try:
             with self._connect() as connection:
-                connection.execute(
-                    (
-                        "insert into tracks("
-                        "id, title, artists_json, artist_ids_json, album_id, album_title, "
-                        "album_year, duration_ms, "
-                        "stream_ref, artwork_ref, available, is_liked, cached_at"
-                        ") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-                        "on conflict(id) do update set "
-                        "title = excluded.title, "
-                        "artists_json = excluded.artists_json, "
-                        "artist_ids_json = excluded.artist_ids_json, "
-                        "album_id = excluded.album_id, "
-                        "album_title = excluded.album_title, "
-                        "album_year = excluded.album_year, "
-                        "duration_ms = excluded.duration_ms, "
-                        "stream_ref = excluded.stream_ref, "
-                        "artwork_ref = excluded.artwork_ref, "
-                        "available = excluded.available, "
-                        "is_liked = excluded.is_liked, "
-                        "cached_at = excluded.cached_at"
-                    ),
-                    (
-                        track.id,
-                        track.title,
-                        json.dumps(list(track.artists), ensure_ascii=True),
-                        json.dumps(list(track.artist_ids), ensure_ascii=True),
-                        track.album_id,
-                        track.album_title,
-                        track.album_year,
-                        track.duration_ms,
-                        track.stream_ref,
-                        track.artwork_ref,
-                        int(track.available),
-                        int(track.is_liked),
-                        self._now_iso(),
-                    ),
-                )
+                self._save_track_metadata_with_connection(connection, track)
         except sqlite3.Error as exc:
             raise StorageError("Failed to save cached track metadata") from exc
 
@@ -178,6 +151,151 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                 )
         except sqlite3.Error as exc:
             raise StorageError("Failed to save liked track ids") from exc
+
+    def load_liked_track_snapshot(self, user_id: str) -> LikedTrackSnapshot | None:
+        try:
+            with self._connect() as connection:
+                row = connection.execute(
+                    "select revision from liked_track_snapshot_sync where user_id = ?",
+                    (user_id,),
+                ).fetchone()
+                if row is None:
+                    return None
+                rows = connection.execute(
+                    (
+                        "select s.track_id from liked_track_snapshot_items s "
+                        "where s.user_id = ? "
+                        "order by s.position asc"
+                    ),
+                    (user_id,),
+                ).fetchall()
+        except sqlite3.Error as exc:
+            raise StorageError("Failed to load liked track snapshot") from exc
+
+        tracks = tuple(
+            track
+            for track_id in (str(snapshot_row["track_id"]) for snapshot_row in rows)
+            for track in (self.load_track_metadata(track_id),)
+            if track is not None
+        )
+        return LikedTrackSnapshot(
+            user_id=user_id,
+            revision=int(row["revision"]),
+            tracks=tracks,
+        )
+
+    def save_liked_track_snapshot(self, snapshot: LikedTrackSnapshot) -> None:
+        try:
+            with self._connect() as connection:
+                now = self._now_iso()
+                connection.execute("begin")
+                for track in snapshot.tracks:
+                    self._save_track_metadata_with_connection(connection, track)
+                connection.execute(
+                    "delete from liked_track_snapshot_items where user_id = ?",
+                    (snapshot.user_id,),
+                )
+                connection.executemany(
+                    (
+                        "insert into liked_track_snapshot_items(user_id, position, track_id, updated_at) "
+                        "values (?, ?, ?, ?)"
+                    ),
+                    [
+                        (snapshot.user_id, position, track.id, now)
+                        for position, track in enumerate(snapshot.tracks)
+                    ],
+                )
+                connection.execute(
+                    (
+                        "insert into liked_track_snapshot_sync(user_id, revision, synced_at) "
+                        "values (?, ?, ?) "
+                        "on conflict(user_id) do update set "
+                        "revision = excluded.revision, "
+                        "synced_at = excluded.synced_at"
+                    ),
+                    (snapshot.user_id, snapshot.revision, now),
+                )
+        except sqlite3.Error as exc:
+            raise StorageError("Failed to save liked track snapshot") from exc
+
+    def load_liked_album_snapshot(self, user_id: str) -> tuple[Album, ...] | None:
+        return self._load_entity_snapshot(
+            cache_key="liked_albums",
+            user_id=user_id,
+            mapper=self._decode_album,
+        )
+
+    def save_liked_album_snapshot(self, user_id: str, albums: Sequence[Album]) -> None:
+        self._save_entity_snapshot(
+            cache_key="liked_albums",
+            user_id=user_id,
+            items=albums,
+            encoder=self._encode_album,
+        )
+
+    def load_liked_artist_snapshot(self, user_id: str) -> tuple[Artist, ...] | None:
+        return self._load_entity_snapshot(
+            cache_key="liked_artists",
+            user_id=user_id,
+            mapper=self._decode_artist,
+        )
+
+    def save_liked_artist_snapshot(self, user_id: str, artists: Sequence[Artist]) -> None:
+        self._save_entity_snapshot(
+            cache_key="liked_artists",
+            user_id=user_id,
+            items=artists,
+            encoder=self._encode_artist,
+        )
+
+    def load_liked_playlist_snapshot(self, user_id: str) -> tuple[Playlist, ...] | None:
+        return self._load_entity_snapshot(
+            cache_key="liked_playlists",
+            user_id=user_id,
+            mapper=self._decode_playlist,
+        )
+
+    def save_liked_playlist_snapshot(self, user_id: str, playlists: Sequence[Playlist]) -> None:
+        self._save_entity_snapshot(
+            cache_key="liked_playlists",
+            user_id=user_id,
+            items=playlists,
+            encoder=self._encode_playlist,
+        )
+
+    def load_user_playlist_snapshot(self, user_id: str) -> tuple[Playlist, ...] | None:
+        return self._load_entity_snapshot(
+            cache_key="user_playlists",
+            user_id=user_id,
+            mapper=self._decode_playlist,
+        )
+
+    def save_user_playlist_snapshot(self, user_id: str, playlists: Sequence[Playlist]) -> None:
+        self._save_entity_snapshot(
+            cache_key="user_playlists",
+            user_id=user_id,
+            items=playlists,
+            encoder=self._encode_playlist,
+        )
+
+    def load_generated_playlist_snapshot(self, user_id: str) -> tuple[Playlist, ...] | None:
+        return self._load_entity_snapshot(
+            cache_key="generated_playlists",
+            user_id=user_id,
+            mapper=self._decode_playlist,
+        )
+
+    def save_generated_playlist_snapshot(
+        self,
+        user_id: str,
+        playlists: Sequence[Playlist],
+    ) -> None:
+        self._save_entity_snapshot(
+            cache_key="generated_playlists",
+            user_id=user_id,
+            items=playlists,
+            encoder=self._encode_playlist,
+        )
 
     def mark_track_liked(self, user_id: str, track_id: str) -> None:
         try:
@@ -280,6 +398,28 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                         updated_at text not null,
                         primary key (user_id, track_id)
                     );
+
+                    create table if not exists liked_track_snapshot_sync (
+                        user_id text primary key,
+                        revision integer not null,
+                        synced_at text not null
+                    );
+
+                    create table if not exists liked_track_snapshot_items (
+                        user_id text not null,
+                        position integer not null,
+                        track_id text not null,
+                        updated_at text not null,
+                        primary key (user_id, position)
+                    );
+
+                    create table if not exists entity_list_cache (
+                        cache_key text not null,
+                        user_id text not null,
+                        data_json text not null,
+                        synced_at text not null,
+                        primary key (cache_key, user_id)
+                    );
                     """
                 )
                 self._ensure_column(
@@ -337,3 +477,178 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
         }
         if column not in columns:
             connection.execute(f"alter table {table} add column {column} {definition}")
+
+    def _save_track_metadata_with_connection(
+        self,
+        connection: sqlite3.Connection,
+        track: Track,
+    ) -> None:
+        connection.execute(
+            (
+                "insert into tracks("
+                "id, title, artists_json, artist_ids_json, album_id, album_title, "
+                "album_year, duration_ms, "
+                "stream_ref, artwork_ref, available, is_liked, cached_at"
+                ") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "on conflict(id) do update set "
+                "title = excluded.title, "
+                "artists_json = excluded.artists_json, "
+                "artist_ids_json = excluded.artist_ids_json, "
+                "album_id = excluded.album_id, "
+                "album_title = excluded.album_title, "
+                "album_year = excluded.album_year, "
+                "duration_ms = excluded.duration_ms, "
+                "stream_ref = excluded.stream_ref, "
+                "artwork_ref = excluded.artwork_ref, "
+                "available = excluded.available, "
+                "is_liked = excluded.is_liked, "
+                "cached_at = excluded.cached_at"
+            ),
+            (
+                track.id,
+                track.title,
+                json.dumps(list(track.artists), ensure_ascii=True),
+                json.dumps(list(track.artist_ids), ensure_ascii=True),
+                track.album_id,
+                track.album_title,
+                track.album_year,
+                track.duration_ms,
+                track.stream_ref,
+                track.artwork_ref,
+                int(track.available),
+                int(track.is_liked),
+                self._now_iso(),
+            ),
+        )
+
+    def _load_entity_snapshot(self, *, cache_key: str, user_id: str, mapper):
+        try:
+            with self._connect() as connection:
+                row = connection.execute(
+                    (
+                        "select data_json, synced_at from entity_list_cache "
+                        "where cache_key = ? and user_id = ?"
+                    ),
+                    (cache_key, user_id),
+                ).fetchone()
+        except sqlite3.Error as exc:
+            raise StorageError("Failed to load cached entity snapshot") from exc
+        if row is None or self._is_list_snapshot_expired(row["synced_at"]):
+            return None
+        try:
+            payload = json.loads(row["data_json"])
+        except json.JSONDecodeError as exc:
+            raise StorageError("Cached entity snapshot is invalid") from exc
+        if not isinstance(payload, list):
+            raise StorageError("Cached entity snapshot is invalid")
+        return tuple(mapper(item) for item in payload)
+
+    def _save_entity_snapshot(self, *, cache_key: str, user_id: str, items, encoder) -> None:
+        try:
+            with self._connect() as connection:
+                connection.execute(
+                    (
+                        "insert into entity_list_cache(cache_key, user_id, data_json, synced_at) "
+                        "values (?, ?, ?, ?) "
+                        "on conflict(cache_key, user_id) do update set "
+                        "data_json = excluded.data_json, "
+                        "synced_at = excluded.synced_at"
+                    ),
+                    (
+                        cache_key,
+                        user_id,
+                        json.dumps([encoder(item) for item in items], ensure_ascii=True),
+                        self._now_iso(),
+                    ),
+                )
+        except sqlite3.Error as exc:
+            raise StorageError("Failed to save cached entity snapshot") from exc
+
+    def _encode_album(self, album: Album) -> dict[str, object]:
+        return {
+            "id": album.id,
+            "title": album.title,
+            "artists": list(album.artists),
+            "artist_ids": list(album.artist_ids),
+            "is_liked": album.is_liked,
+            "release_type": album.release_type,
+            "year": album.year,
+            "track_count": album.track_count,
+            "artwork_ref": album.artwork_ref,
+        }
+
+    def _decode_album(self, raw_album: object) -> Album:
+        if not isinstance(raw_album, dict):
+            raise StorageError("Cached album snapshot is invalid")
+        return Album(
+            id=str(raw_album["id"]),
+            title=str(raw_album["title"]),
+            artists=tuple(str(artist) for artist in raw_album.get("artists", ())),
+            artist_ids=tuple(str(artist_id) for artist_id in raw_album.get("artist_ids", ())),
+            is_liked=bool(raw_album.get("is_liked", False)),
+            release_type=str(raw_album["release_type"]) if raw_album.get("release_type") is not None else None,
+            year=int(raw_album["year"]) if raw_album.get("year") is not None else None,
+            track_count=(
+                int(raw_album["track_count"]) if raw_album.get("track_count") is not None else None
+            ),
+            artwork_ref=str(raw_album["artwork_ref"]) if raw_album.get("artwork_ref") is not None else None,
+        )
+
+    def _encode_artist(self, artist: Artist) -> dict[str, object]:
+        return {
+            "id": artist.id,
+            "name": artist.name,
+            "artwork_ref": artist.artwork_ref,
+            "is_liked": artist.is_liked,
+        }
+
+    def _decode_artist(self, raw_artist: object) -> Artist:
+        if not isinstance(raw_artist, dict):
+            raise StorageError("Cached artist snapshot is invalid")
+        return Artist(
+            id=str(raw_artist["id"]),
+            name=str(raw_artist["name"]),
+            artwork_ref=str(raw_artist["artwork_ref"]) if raw_artist.get("artwork_ref") is not None else None,
+            is_liked=bool(raw_artist.get("is_liked", False)),
+        )
+
+    def _encode_playlist(self, playlist: Playlist) -> dict[str, object]:
+        return {
+            "id": playlist.id,
+            "title": playlist.title,
+            "owner_id": playlist.owner_id,
+            "owner_name": playlist.owner_name,
+            "description": playlist.description,
+            "track_count": playlist.track_count,
+            "artwork_ref": playlist.artwork_ref,
+            "is_generated": playlist.is_generated,
+            "is_liked": playlist.is_liked,
+        }
+
+    def _decode_playlist(self, raw_playlist: object) -> Playlist:
+        if not isinstance(raw_playlist, dict):
+            raise StorageError("Cached playlist snapshot is invalid")
+        return Playlist(
+            id=str(raw_playlist["id"]),
+            title=str(raw_playlist["title"]),
+            owner_id=str(raw_playlist["owner_id"]) if raw_playlist.get("owner_id") is not None else None,
+            owner_name=str(raw_playlist["owner_name"]) if raw_playlist.get("owner_name") is not None else None,
+            description=str(raw_playlist["description"]) if raw_playlist.get("description") is not None else None,
+            track_count=(
+                int(raw_playlist["track_count"]) if raw_playlist.get("track_count") is not None else None
+            ),
+            artwork_ref=str(raw_playlist["artwork_ref"]) if raw_playlist.get("artwork_ref") is not None else None,
+            is_generated=bool(raw_playlist.get("is_generated", False)),
+            is_liked=bool(raw_playlist.get("is_liked", False)),
+        )
+
+    def _is_list_snapshot_expired(self, raw_value: Any) -> bool:
+        if not isinstance(raw_value, str):
+            return True
+        try:
+            cached_at = datetime.fromisoformat(raw_value)
+        except ValueError:
+            return True
+        if cached_at.tzinfo is None:
+            cached_at = cached_at.replace(tzinfo=UTC)
+        return datetime.now(tz=UTC) - cached_at > self._LIST_CACHE_TTL

@@ -24,3 +24,10 @@ class LikedTrackIds:
     user_id: str
     revision: int
     track_ids: frozenset[str]
+
+
+@dataclass(frozen=True, slots=True)
+class LikedTrackSnapshot:
+    user_id: str
+    revision: int
+    tracks: tuple[Track, ...]

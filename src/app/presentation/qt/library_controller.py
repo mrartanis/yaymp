@@ -39,6 +39,8 @@ class BrowserContent:
     source_type: str | None = None
     source_id: str | None = None
     source_tracks: tuple[Track, ...] = ()
+    list_key: str | None = None
+    has_more: bool = False
 
 
 class LibraryController(QObject):
@@ -68,6 +70,7 @@ class LibraryController(QObject):
         self._last_search_results: CatalogSearchResults | None = None
         self._active_search_tab = "tracks"
         self._active_page: tuple[str, object | None] = ("search", None)
+        self._liked_tracks_limit = 100
 
     def initialize(self) -> None:
         self._emit_content(self._empty_search_content(self._active_search_tab))
@@ -114,13 +117,15 @@ class LibraryController(QObject):
 
     def load_liked_tracks(self) -> None:
         self._active_page = ("list", None)
-        self._execute(
-            lambda: BrowserContent(
-                title="My Tracks",
-                items=self._track_items(self._library_service.load_liked_tracks()),
-                recent_searches=self.recent_searches(),
-            )
-        )
+        self._liked_tracks_limit = 100
+        self._execute(lambda: self._liked_tracks_content(limit=self._liked_tracks_limit))
+
+    def load_more_current_list(self) -> None:
+        page, _payload = self._active_page
+        if page != "list":
+            return
+        self._liked_tracks_limit += 100
+        self._execute(lambda: self._liked_tracks_content(limit=self._liked_tracks_limit))
 
     def load_liked_albums(self) -> None:
         self._active_page = ("list", None)
@@ -371,6 +376,16 @@ class LibraryController(QObject):
             source_type=source_type,
             source_id=source_id,
             source_tracks=tracks,
+        )
+
+    def _liked_tracks_content(self, *, limit: int) -> BrowserContent:
+        tracks = self._library_service.load_liked_tracks(limit=limit)
+        return BrowserContent(
+            title="My Tracks",
+            items=self._track_items(tracks),
+            recent_searches=self.recent_searches(),
+            list_key="liked_tracks",
+            has_more=len(tracks) >= limit,
         )
 
     def _track_items(

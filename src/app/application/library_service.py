@@ -5,6 +5,7 @@ from app.domain import (
     Album,
     Artist,
     LibraryCacheRepo,
+    LikedTrackSnapshot,
     Logger,
     MusicService,
     Playlist,
@@ -26,9 +27,54 @@ class LibraryService:
         self._logger = logger
 
     def load_liked_tracks(self, *, limit: int = 100) -> tuple[Track, ...]:
-        self.refresh_liked_track_index(force=True)
+        user_id = self._current_user_id()
+        cached_snapshot = (
+            self._library_cache_repo.load_liked_track_snapshot(user_id)
+            if user_id is not None
+            else None
+        )
+        cached_tracks = cached_snapshot.tracks[:limit] if cached_snapshot is not None else ()
+        current_revision = cached_snapshot.revision if cached_snapshot is not None else 0
+        cached_liked_ids = (
+            self._library_cache_repo.load_liked_track_ids(user_id)
+            if user_id is not None
+            else None
+        )
+        total_cached_tracks = len(cached_snapshot.tracks) if cached_snapshot is not None else 0
+        total_known_tracks = (
+            len(cached_liked_ids.track_ids) if cached_liked_ids is not None else total_cached_tracks
+        )
+        if user_id is None:
+            tracks = tuple(self._music_service.get_liked_tracks(limit=limit))
+            self._cache_tracks(tracks)
+            self._logger.info("Loaded %s liked tracks", len(tracks))
+            return tracks
+
+        liked_tracks = self._music_service.get_liked_track_ids(
+            if_modified_since_revision=current_revision
+        )
+        if liked_tracks is None and cached_tracks and total_cached_tracks >= min(limit, total_known_tracks):
+            self._logger.info(
+                "Loaded %s liked tracks from cache at revision %s",
+                len(cached_tracks),
+                current_revision,
+            )
+            return cached_tracks
+
         tracks = tuple(self._music_service.get_liked_tracks(limit=limit))
         self._cache_tracks(tracks)
+        snapshot_revision = (
+            liked_tracks.revision if liked_tracks is not None else current_revision
+        )
+        self._library_cache_repo.save_liked_track_snapshot(
+            LikedTrackSnapshot(
+                user_id=user_id,
+                revision=snapshot_revision,
+                tracks=tracks,
+            )
+        )
+        if liked_tracks is not None:
+            self._library_cache_repo.save_liked_track_ids(liked_tracks)
         self._logger.info("Loaded %s liked tracks", len(tracks))
         return tracks
 
@@ -52,27 +98,73 @@ class LibraryService:
         )
 
     def load_liked_albums(self, *, limit: int = 100) -> tuple[Album, ...]:
+        user_id = self._current_user_id()
+        cached = (
+            tuple(self._library_cache_repo.load_liked_album_snapshot(user_id) or ())
+            if user_id is not None
+            else ()
+        )
+        if cached:
+            return cached[:limit]
         albums = tuple(self._music_service.get_liked_albums(limit=limit))
+        if user_id is not None:
+            self._library_cache_repo.save_liked_album_snapshot(user_id, albums)
         self._logger.info("Loaded %s liked albums", len(albums))
         return albums
 
     def load_liked_artists(self, *, limit: int = 100) -> tuple[Artist, ...]:
+        user_id = self._current_user_id()
+        cached = (
+            tuple(self._library_cache_repo.load_liked_artist_snapshot(user_id) or ())
+            if user_id is not None
+            else ()
+        )
+        if cached:
+            return cached[:limit]
         artists = tuple(self._music_service.get_liked_artists(limit=limit))
+        if user_id is not None:
+            self._library_cache_repo.save_liked_artist_snapshot(user_id, artists)
         self._logger.info("Loaded %s liked artists", len(artists))
         return artists
 
     def load_liked_playlists(self, *, limit: int = 100) -> tuple[Playlist, ...]:
+        user_id = self._current_user_id()
+        cached = (
+            tuple(self._library_cache_repo.load_liked_playlist_snapshot(user_id) or ())
+            if user_id is not None
+            else ()
+        )
+        if cached:
+            return cached[:limit]
         playlists = tuple(self._music_service.get_liked_playlists(limit=limit))
+        if user_id is not None:
+            self._library_cache_repo.save_liked_playlist_snapshot(user_id, playlists)
         self._logger.info("Loaded %s liked playlists", len(playlists))
         return playlists
 
     def load_user_playlists(self) -> tuple[Playlist, ...]:
+        user_id = self._current_user_id()
+        cached = (
+            tuple(self._library_cache_repo.load_user_playlist_snapshot(user_id) or ())
+            if user_id is not None
+            else ()
+        )
+        if cached:
+            return cached
         playlists = tuple(self._music_service.get_user_playlists())
+        if user_id is not None:
+            self._library_cache_repo.save_user_playlist_snapshot(user_id, playlists)
         self._logger.info("Loaded %s user playlists", len(playlists))
         return playlists
 
     def load_generated_playlists(self) -> tuple[Playlist, ...]:
+        user_id = self._current_user_id()
+        cache_user_id = user_id or "__anonymous__"
+        cached = tuple(self._library_cache_repo.load_generated_playlist_snapshot(cache_user_id) or ())
+        if cached:
+            return cached
         playlists = tuple(self._music_service.get_generated_playlists())
+        self._library_cache_repo.save_generated_playlist_snapshot(cache_user_id, playlists)
         self._logger.info("Loaded %s generated playlists", len(playlists))
         return playlists
 

@@ -8,6 +8,7 @@ from app.domain import (
     AudioQuality,
     CatalogSearchResults,
     LikedTrackIds,
+    LikedTrackSnapshot,
     PlaybackBackendError,
     PlaybackStatus,
     QueueItem,
@@ -235,6 +236,12 @@ class InMemoryLibraryCacheRepo:
     def __init__(self) -> None:
         self.tracks: dict[str, Track] = {}
         self.liked_tracks: dict[str, LikedTrackIds] = {}
+        self.liked_track_snapshots: dict[str, LikedTrackSnapshot] = {}
+        self.liked_album_snapshots: dict[str, tuple[Album, ...]] = {}
+        self.liked_artist_snapshots: dict[str, tuple] = {}
+        self.liked_playlist_snapshots: dict[str, tuple] = {}
+        self.user_playlist_snapshots: dict[str, tuple] = {}
+        self.generated_playlist_snapshots: dict[str, tuple] = {}
 
     def load_recent_searches(self):
         return ()
@@ -253,6 +260,42 @@ class InMemoryLibraryCacheRepo:
 
     def save_liked_track_ids(self, liked_tracks: LikedTrackIds):
         self.liked_tracks[liked_tracks.user_id] = liked_tracks
+
+    def load_liked_track_snapshot(self, user_id: str):
+        return self.liked_track_snapshots.get(user_id)
+
+    def save_liked_track_snapshot(self, snapshot: LikedTrackSnapshot):
+        self.liked_track_snapshots[snapshot.user_id] = snapshot
+
+    def load_liked_album_snapshot(self, user_id: str):
+        return self.liked_album_snapshots.get(user_id)
+
+    def save_liked_album_snapshot(self, user_id: str, albums):
+        self.liked_album_snapshots[user_id] = tuple(albums)
+
+    def load_liked_artist_snapshot(self, user_id: str):
+        return self.liked_artist_snapshots.get(user_id)
+
+    def save_liked_artist_snapshot(self, user_id: str, artists):
+        self.liked_artist_snapshots[user_id] = tuple(artists)
+
+    def load_liked_playlist_snapshot(self, user_id: str):
+        return self.liked_playlist_snapshots.get(user_id)
+
+    def save_liked_playlist_snapshot(self, user_id: str, playlists):
+        self.liked_playlist_snapshots[user_id] = tuple(playlists)
+
+    def load_user_playlist_snapshot(self, user_id: str):
+        return self.user_playlist_snapshots.get(user_id)
+
+    def save_user_playlist_snapshot(self, user_id: str, playlists):
+        self.user_playlist_snapshots[user_id] = tuple(playlists)
+
+    def load_generated_playlist_snapshot(self, user_id: str):
+        return self.generated_playlist_snapshots.get(user_id)
+
+    def save_generated_playlist_snapshot(self, user_id: str, playlists):
+        self.generated_playlist_snapshots[user_id] = tuple(playlists)
 
     def mark_track_liked(self, user_id: str, track_id: str):
         current = self.liked_tracks.get(

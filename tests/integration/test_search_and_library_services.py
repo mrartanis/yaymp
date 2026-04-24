@@ -8,6 +8,7 @@ from app.domain import (
     AudioQuality,
     CatalogSearchResults,
     LikedTrackIds,
+    LikedTrackSnapshot,
     Playlist,
     Station,
     Track,
@@ -37,6 +38,12 @@ class InMemoryLibraryCacheRepo:
         self.tracks: dict[str, Track] = {}
         self.artwork: dict[str, str] = {}
         self.liked_tracks: dict[str, LikedTrackIds] = {}
+        self.liked_track_snapshots: dict[str, LikedTrackSnapshot] = {}
+        self.liked_album_snapshots: dict[str, tuple[Album, ...]] = {}
+        self.liked_artist_snapshots: dict[str, tuple[Artist, ...]] = {}
+        self.liked_playlist_snapshots: dict[str, tuple[Playlist, ...]] = {}
+        self.user_playlist_snapshots: dict[str, tuple[Playlist, ...]] = {}
+        self.generated_playlist_snapshots: dict[str, tuple[Playlist, ...]] = {}
 
     def load_recent_searches(self):
         return self.searches
@@ -55,6 +62,42 @@ class InMemoryLibraryCacheRepo:
 
     def save_liked_track_ids(self, liked_tracks: LikedTrackIds):
         self.liked_tracks[liked_tracks.user_id] = liked_tracks
+
+    def load_liked_track_snapshot(self, user_id: str):
+        return self.liked_track_snapshots.get(user_id)
+
+    def save_liked_track_snapshot(self, snapshot: LikedTrackSnapshot):
+        self.liked_track_snapshots[snapshot.user_id] = snapshot
+
+    def load_liked_album_snapshot(self, user_id: str):
+        return self.liked_album_snapshots.get(user_id)
+
+    def save_liked_album_snapshot(self, user_id: str, albums):
+        self.liked_album_snapshots[user_id] = tuple(albums)
+
+    def load_liked_artist_snapshot(self, user_id: str):
+        return self.liked_artist_snapshots.get(user_id)
+
+    def save_liked_artist_snapshot(self, user_id: str, artists):
+        self.liked_artist_snapshots[user_id] = tuple(artists)
+
+    def load_liked_playlist_snapshot(self, user_id: str):
+        return self.liked_playlist_snapshots.get(user_id)
+
+    def save_liked_playlist_snapshot(self, user_id: str, playlists):
+        self.liked_playlist_snapshots[user_id] = tuple(playlists)
+
+    def load_user_playlist_snapshot(self, user_id: str):
+        return self.user_playlist_snapshots.get(user_id)
+
+    def save_user_playlist_snapshot(self, user_id: str, playlists):
+        self.user_playlist_snapshots[user_id] = tuple(playlists)
+
+    def load_generated_playlist_snapshot(self, user_id: str):
+        return self.generated_playlist_snapshots.get(user_id)
+
+    def save_generated_playlist_snapshot(self, user_id: str, playlists):
+        self.generated_playlist_snapshots[user_id] = tuple(playlists)
 
     def mark_track_liked(self, user_id: str, track_id: str):
         current = self.liked_tracks.get(
@@ -85,6 +128,10 @@ class InMemoryLibraryCacheRepo:
 
 
 class FakeMusicService:
+    def __init__(self) -> None:
+        self.liked_tracks_calls = 0
+        self.liked_track_ids_revision = 7
+
     def get_auth_session(self):
         from app.domain import AuthSession
 
@@ -121,6 +168,7 @@ class FakeMusicService:
         )
 
     def get_liked_tracks(self, *, limit: int = 100):
+        self.liked_tracks_calls += 1
         return (
             Track(
                 id=f"liked-{limit}",
@@ -132,15 +180,16 @@ class FakeMusicService:
         )
 
     def get_liked_track_ids(self, *, if_modified_since_revision: int = 0):
-        if if_modified_since_revision == 7:
+        if if_modified_since_revision == self.liked_track_ids_revision:
             return None
         return LikedTrackIds(
             user_id="user-1",
-            revision=7,
+            revision=self.liked_track_ids_revision,
             track_ids=frozenset({"liked-100"}),
         )
 
     def get_liked_albums(self, *, limit: int = 100):
+        self.liked_albums_calls = getattr(self, "liked_albums_calls", 0) + 1
         return (
             Album(
                 id=f"liked-album-{limit}",
@@ -150,9 +199,11 @@ class FakeMusicService:
         )
 
     def get_liked_artists(self, *, limit: int = 100):
+        self.liked_artists_calls = getattr(self, "liked_artists_calls", 0) + 1
         return (Artist(id=f"liked-artist-{limit}", name="Liked Artist"),)
 
     def get_liked_playlists(self, *, limit: int = 100):
+        self.liked_playlists_calls = getattr(self, "liked_playlists_calls", 0) + 1
         return (Playlist(id=f"liked-playlist-{limit}", title="Liked Playlist", is_liked=True),)
 
     def like_track(self, track_id: str):
@@ -186,9 +237,11 @@ class FakeMusicService:
         return getattr(self, "quality", AudioQuality.HQ)
 
     def get_user_playlists(self):
+        self.user_playlists_calls = getattr(self, "user_playlists_calls", 0) + 1
         return (Playlist(id="playlist-1", title="Playlist 1"),)
 
     def get_generated_playlists(self):
+        self.generated_playlists_calls = getattr(self, "generated_playlists_calls", 0) + 1
         return (Playlist(id="generated-1", title="Playlist of the Day"),)
 
     def get_stations(self):
@@ -377,6 +430,93 @@ def test_library_service_likes_and_unlikes_tracks() -> None:
     assert unliked.is_liked is False
     assert cache_repo.load_track_metadata("track-1") == unliked
     assert cache_repo.load_liked_track_ids("user-1").track_ids == frozenset()
+
+
+def test_library_service_uses_cached_liked_tracks_when_revision_is_unchanged() -> None:
+    music_service = FakeMusicService()
+    cache_repo = InMemoryLibraryCacheRepo()
+    cache_repo.save_liked_track_snapshot(
+        LikedTrackSnapshot(
+            user_id="user-1",
+            revision=7,
+            tracks=(
+                Track(id="cached-1", title="Cached", artists=("Artist",), is_liked=True),
+            ),
+        )
+    )
+    service = LibraryService(
+        music_service=music_service,
+        library_cache_repo=cache_repo,
+        logger=TestLogger(),
+    )
+
+    tracks = service.load_liked_tracks()
+
+    assert [track.id for track in tracks] == ["cached-1"]
+    assert music_service.liked_tracks_calls == 0
+
+
+def test_library_service_refreshes_liked_tracks_snapshot_when_revision_changes() -> None:
+    music_service = FakeMusicService()
+    cache_repo = InMemoryLibraryCacheRepo()
+    cache_repo.save_liked_track_snapshot(
+        LikedTrackSnapshot(
+            user_id="user-1",
+            revision=6,
+            tracks=(
+                Track(id="cached-1", title="Cached", artists=("Artist",), is_liked=True),
+            ),
+        )
+    )
+    service = LibraryService(
+        music_service=music_service,
+        library_cache_repo=cache_repo,
+        logger=TestLogger(),
+    )
+
+    tracks = service.load_liked_tracks()
+    snapshot = cache_repo.load_liked_track_snapshot("user-1")
+
+    assert [track.id for track in tracks] == ["liked-100"]
+    assert music_service.liked_tracks_calls == 1
+    assert snapshot is not None
+    assert snapshot.revision == 7
+    assert [track.id for track in snapshot.tracks] == ["liked-100"]
+
+
+def test_library_service_uses_cached_album_artist_and_playlist_lists() -> None:
+    music_service = FakeMusicService()
+    cache_repo = InMemoryLibraryCacheRepo()
+    cache_repo.save_liked_album_snapshot("user-1", (Album(id="cached-album", title="Cached"),))
+    cache_repo.save_liked_artist_snapshot("user-1", (Artist(id="cached-artist", name="Cached"),))
+    cache_repo.save_liked_playlist_snapshot(
+        "user-1",
+        (Playlist(id="cached-liked-playlist", title="Cached"),),
+    )
+    cache_repo.save_user_playlist_snapshot(
+        "user-1",
+        (Playlist(id="cached-user-playlist", title="Cached"),),
+    )
+    cache_repo.save_generated_playlist_snapshot(
+        "user-1",
+        (Playlist(id="cached-generated-playlist", title="Cached", is_generated=True),),
+    )
+    service = LibraryService(
+        music_service=music_service,
+        library_cache_repo=cache_repo,
+        logger=TestLogger(),
+    )
+
+    assert [item.id for item in service.load_liked_albums()] == ["cached-album"]
+    assert [item.id for item in service.load_liked_artists()] == ["cached-artist"]
+    assert [item.id for item in service.load_liked_playlists()] == ["cached-liked-playlist"]
+    assert [item.id for item in service.load_user_playlists()] == ["cached-user-playlist"]
+    assert [item.id for item in service.load_generated_playlists()] == ["cached-generated-playlist"]
+    assert getattr(music_service, "liked_albums_calls", 0) == 0
+    assert getattr(music_service, "liked_artists_calls", 0) == 0
+    assert getattr(music_service, "liked_playlists_calls", 0) == 0
+    assert getattr(music_service, "user_playlists_calls", 0) == 0
+    assert getattr(music_service, "generated_playlists_calls", 0) == 0
 
 
 def test_library_service_likes_and_unlikes_album_artist_and_playlist() -> None:

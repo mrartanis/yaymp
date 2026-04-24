@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import UTC, datetime, timedelta
 
-from app.domain.track import LikedTrackIds, Track
+from app.domain.track import LikedTrackIds, LikedTrackSnapshot, Track
 from app.infrastructure.persistence.sqlite_library_cache_repo import SQLiteLibraryCacheRepo
 
 
@@ -56,12 +56,29 @@ def test_sqlite_library_cache_repo_round_trips_liked_track_ids(tmp_path) -> None
     assert loaded.track_ids == frozenset({"track-1", "track-3:album-1"})
 
 
+def test_sqlite_library_cache_repo_round_trips_liked_track_snapshot(tmp_path) -> None:
+    repo = SQLiteLibraryCacheRepo(db_path=tmp_path / "library.sqlite3")
+    snapshot = LikedTrackSnapshot(
+        user_id="user-1",
+        revision=42,
+        tracks=(
+            Track(id="track-1", title="Signal", artists=("Artist",), is_liked=True),
+            Track(id="track-2", title="Pulse", artists=("Artist",), is_liked=True),
+        ),
+    )
+
+    repo.save_liked_track_snapshot(snapshot)
+
+    assert repo.load_liked_track_snapshot("user-1") == snapshot
+
+
 def test_sqlite_library_cache_repo_returns_empty_when_missing(tmp_path) -> None:
     repo = SQLiteLibraryCacheRepo(db_path=tmp_path / "library.sqlite3")
 
     assert repo.load_recent_searches() == ()
     assert repo.load_track_metadata("missing") is None
     assert repo.load_liked_track_ids("user-1") is None
+    assert repo.load_liked_track_snapshot("user-1") is None
     assert repo.load_artwork_ref("missing") is None
 
 

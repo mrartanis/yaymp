@@ -10,7 +10,7 @@ from app.domain.catalog import Album, Artist, CatalogSearchResults
 from app.domain.playback import PlaybackState, QueueItem, SavedPlaybackQueue
 from app.domain.playlist import Playlist
 from app.domain.station import Station
-from app.domain.track import LikedTrackIds, Track
+from app.domain.track import LikedTrackIds, LikedTrackSnapshot, Track
 
 
 @runtime_checkable
@@ -153,6 +153,42 @@ class LibraryCacheRepo(Protocol):
     def load_liked_track_ids(self, user_id: str) -> LikedTrackIds | None: ...
 
     def save_liked_track_ids(self, liked_tracks: LikedTrackIds) -> None: ...
+
+    def load_liked_track_snapshot(self, user_id: str) -> LikedTrackSnapshot | None: ...
+
+    def save_liked_track_snapshot(self, snapshot: LikedTrackSnapshot) -> None: ...
+
+    def load_liked_album_snapshot(self, user_id: str) -> Sequence[Album] | None: ...
+
+    def save_liked_album_snapshot(self, user_id: str, albums: Sequence[Album]) -> None: ...
+
+    def load_liked_artist_snapshot(self, user_id: str) -> Sequence[Artist] | None: ...
+
+    def save_liked_artist_snapshot(self, user_id: str, artists: Sequence[Artist]) -> None: ...
+
+    def load_liked_playlist_snapshot(self, user_id: str) -> Sequence[Playlist] | None: ...
+
+    def save_liked_playlist_snapshot(
+        self,
+        user_id: str,
+        playlists: Sequence[Playlist],
+    ) -> None: ...
+
+    def load_user_playlist_snapshot(self, user_id: str) -> Sequence[Playlist] | None: ...
+
+    def save_user_playlist_snapshot(
+        self,
+        user_id: str,
+        playlists: Sequence[Playlist],
+    ) -> None: ...
+
+    def load_generated_playlist_snapshot(self, user_id: str) -> Sequence[Playlist] | None: ...
+
+    def save_generated_playlist_snapshot(
+        self,
+        user_id: str,
+        playlists: Sequence[Playlist],
+    ) -> None: ...
 
     def mark_track_liked(self, user_id: str, track_id: str) -> None: ...
 

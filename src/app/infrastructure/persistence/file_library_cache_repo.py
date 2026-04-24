@@ -5,12 +5,21 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from app.domain import LibraryCacheRepo, LikedTrackIds, Track
+from app.domain import (
+    Album,
+    Artist,
+    LibraryCacheRepo,
+    LikedTrackIds,
+    LikedTrackSnapshot,
+    Playlist,
+    Track,
+)
 from app.domain.errors import StorageError
 
 
 class FileLibraryCacheRepo(LibraryCacheRepo):
     _CACHE_TTL = timedelta(days=7)
+    _LIST_CACHE_TTL = timedelta(days=1)
 
     def __init__(self, *, file_path: Path) -> None:
         self._file_path = file_path
@@ -112,6 +121,129 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
         }
         self._save_payload(payload)
 
+    def load_liked_track_snapshot(self, user_id: str) -> LikedTrackSnapshot | None:
+        payload = self._load_payload()
+        raw_snapshots = payload.get("liked_track_snapshots", {})
+        if not isinstance(raw_snapshots, dict):
+            raise StorageError("Library cache liked track snapshots are invalid")
+        raw_snapshot = raw_snapshots.get(user_id)
+        if raw_snapshot is None:
+            return None
+        if not isinstance(raw_snapshot, dict):
+            raise StorageError("Library cache liked track snapshot entry is invalid")
+        raw_tracks = raw_snapshot.get("tracks", ())
+        if not isinstance(raw_tracks, list):
+            raise StorageError("Library cache liked track snapshot tracks are invalid")
+        tracks = tuple(self._deserialize_track(raw_track) for raw_track in raw_tracks)
+        return LikedTrackSnapshot(
+            user_id=user_id,
+            revision=int(raw_snapshot.get("revision", 0) or 0),
+            tracks=tracks,
+        )
+
+    def save_liked_track_snapshot(self, snapshot: LikedTrackSnapshot) -> None:
+        payload = self._load_payload()
+        raw_snapshots = payload.setdefault("liked_track_snapshots", {})
+        if not isinstance(raw_snapshots, dict):
+            raise StorageError("Library cache liked track snapshots are invalid")
+        raw_snapshots[snapshot.user_id] = {
+            "revision": snapshot.revision,
+            "tracks": [self._serialize_track(track) for track in snapshot.tracks],
+            "synced_at": self._now_iso(),
+        }
+        self._save_payload(payload)
+
+    def load_liked_album_snapshot(self, user_id: str) -> tuple[Album, ...] | None:
+        return self._load_entity_snapshot(
+            user_id,
+            snapshot_key="liked_album_snapshots",
+            mapper=self._deserialize_album,
+        )
+
+    def save_liked_album_snapshot(self, user_id: str, albums: tuple[Album, ...] | list[Album]) -> None:
+        self._save_entity_snapshot(
+            user_id,
+            snapshot_key="liked_album_snapshots",
+            items=albums,
+            serializer=self._serialize_album,
+        )
+
+    def load_liked_artist_snapshot(self, user_id: str) -> tuple[Artist, ...] | None:
+        return self._load_entity_snapshot(
+            user_id,
+            snapshot_key="liked_artist_snapshots",
+            mapper=self._deserialize_artist,
+        )
+
+    def save_liked_artist_snapshot(
+        self,
+        user_id: str,
+        artists: tuple[Artist, ...] | list[Artist],
+    ) -> None:
+        self._save_entity_snapshot(
+            user_id,
+            snapshot_key="liked_artist_snapshots",
+            items=artists,
+            serializer=self._serialize_artist,
+        )
+
+    def load_liked_playlist_snapshot(self, user_id: str) -> tuple[Playlist, ...] | None:
+        return self._load_entity_snapshot(
+            user_id,
+            snapshot_key="liked_playlist_snapshots",
+            mapper=self._deserialize_playlist,
+        )
+
+    def save_liked_playlist_snapshot(
+        self,
+        user_id: str,
+        playlists: tuple[Playlist, ...] | list[Playlist],
+    ) -> None:
+        self._save_entity_snapshot(
+            user_id,
+            snapshot_key="liked_playlist_snapshots",
+            items=playlists,
+            serializer=self._serialize_playlist,
+        )
+
+    def load_user_playlist_snapshot(self, user_id: str) -> tuple[Playlist, ...] | None:
+        return self._load_entity_snapshot(
+            user_id,
+            snapshot_key="user_playlist_snapshots",
+            mapper=self._deserialize_playlist,
+        )
+
+    def save_user_playlist_snapshot(
+        self,
+        user_id: str,
+        playlists: tuple[Playlist, ...] | list[Playlist],
+    ) -> None:
+        self._save_entity_snapshot(
+            user_id,
+            snapshot_key="user_playlist_snapshots",
+            items=playlists,
+            serializer=self._serialize_playlist,
+        )
+
+    def load_generated_playlist_snapshot(self, user_id: str) -> tuple[Playlist, ...] | None:
+        return self._load_entity_snapshot(
+            user_id,
+            snapshot_key="generated_playlist_snapshots",
+            mapper=self._deserialize_playlist,
+        )
+
+    def save_generated_playlist_snapshot(
+        self,
+        user_id: str,
+        playlists: tuple[Playlist, ...] | list[Playlist],
+    ) -> None:
+        self._save_entity_snapshot(
+            user_id,
+            snapshot_key="generated_playlist_snapshots",
+            items=playlists,
+            serializer=self._serialize_playlist,
+        )
+
     def mark_track_liked(self, user_id: str, track_id: str) -> None:
         state = self.load_liked_track_ids(user_id)
         track_ids = set(state.track_ids if state is not None else ())
@@ -163,7 +295,18 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
 
     def _load_payload(self) -> dict[str, Any]:
         if not self._file_path.exists():
-            return {"recent_searches": [], "tracks": {}, "artwork": {}, "liked_tracks": {}}
+            return {
+                "recent_searches": [],
+                "tracks": {},
+                "artwork": {},
+                "liked_tracks": {},
+                "liked_track_snapshots": {},
+                "liked_album_snapshots": {},
+                "liked_artist_snapshots": {},
+                "liked_playlist_snapshots": {},
+                "user_playlist_snapshots": {},
+                "generated_playlist_snapshots": {},
+            }
         try:
             payload = json.loads(self._file_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
@@ -173,13 +316,30 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
             return {"recent_searches": payload, "tracks": {}, "artwork": {}}
         if not isinstance(payload, dict):
             raise StorageError("Library cache file is invalid")
-        known_keys = {"recent_searches", "tracks", "artwork", "liked_tracks"}
+        known_keys = {
+            "recent_searches",
+            "tracks",
+            "artwork",
+            "liked_tracks",
+            "liked_track_snapshots",
+            "liked_album_snapshots",
+            "liked_artist_snapshots",
+            "liked_playlist_snapshots",
+            "user_playlist_snapshots",
+            "generated_playlist_snapshots",
+        }
         if not any(key in payload for key in known_keys):
             raise StorageError("Library cache file is invalid")
         payload.setdefault("recent_searches", [])
         payload.setdefault("tracks", {})
         payload.setdefault("artwork", {})
         payload.setdefault("liked_tracks", {})
+        payload.setdefault("liked_track_snapshots", {})
+        payload.setdefault("liked_album_snapshots", {})
+        payload.setdefault("liked_artist_snapshots", {})
+        payload.setdefault("liked_playlist_snapshots", {})
+        payload.setdefault("user_playlist_snapshots", {})
+        payload.setdefault("generated_playlist_snapshots", {})
         return payload
 
     def _save_payload(self, payload: dict[str, Any]) -> None:
@@ -201,6 +361,165 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
         if value is None:
             return None
         return int(value)
+
+    def _serialize_track(self, track: Track) -> dict[str, object]:
+        return {
+            "id": track.id,
+            "title": track.title,
+            "artists": list(track.artists),
+            "artist_ids": list(track.artist_ids),
+            "album_id": track.album_id,
+            "album_title": track.album_title,
+            "album_year": track.album_year,
+            "duration_ms": track.duration_ms,
+            "stream_ref": track.stream_ref,
+            "artwork_ref": track.artwork_ref,
+            "available": track.available,
+            "is_liked": track.is_liked,
+        }
+
+    def _deserialize_track(self, raw_track: object) -> Track:
+        if not isinstance(raw_track, dict):
+            raise StorageError("Library cache track entry is invalid")
+        try:
+            return Track(
+                id=str(raw_track["id"]),
+                title=str(raw_track["title"]),
+                artists=tuple(str(artist) for artist in raw_track.get("artists", ())),
+                artist_ids=tuple(
+                    str(artist_id) for artist_id in raw_track.get("artist_ids", ())
+                ),
+                album_id=self._optional_str(raw_track.get("album_id")),
+                album_title=self._optional_str(raw_track.get("album_title")),
+                album_year=self._optional_int(raw_track.get("album_year")),
+                duration_ms=self._optional_int(raw_track.get("duration_ms")),
+                stream_ref=self._optional_str(raw_track.get("stream_ref")),
+                artwork_ref=self._optional_str(raw_track.get("artwork_ref")),
+                available=bool(raw_track.get("available", True)),
+                is_liked=bool(raw_track.get("is_liked", False)),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise StorageError("Library cache track entry is invalid") from exc
+
+    def _serialize_album(self, album: Album) -> dict[str, object]:
+        return {
+            "id": album.id,
+            "title": album.title,
+            "artists": list(album.artists),
+            "artist_ids": list(album.artist_ids),
+            "is_liked": album.is_liked,
+            "release_type": album.release_type,
+            "year": album.year,
+            "track_count": album.track_count,
+            "artwork_ref": album.artwork_ref,
+        }
+
+    def _deserialize_album(self, raw_album: object) -> Album:
+        if not isinstance(raw_album, dict):
+            raise StorageError("Library cache album entry is invalid")
+        return Album(
+            id=str(raw_album["id"]),
+            title=str(raw_album["title"]),
+            artists=tuple(str(artist) for artist in raw_album.get("artists", ())),
+            artist_ids=tuple(str(artist_id) for artist_id in raw_album.get("artist_ids", ())),
+            is_liked=bool(raw_album.get("is_liked", False)),
+            release_type=self._optional_str(raw_album.get("release_type")),
+            year=self._optional_int(raw_album.get("year")),
+            track_count=self._optional_int(raw_album.get("track_count")),
+            artwork_ref=self._optional_str(raw_album.get("artwork_ref")),
+        )
+
+    def _serialize_artist(self, artist: Artist) -> dict[str, object]:
+        return {
+            "id": artist.id,
+            "name": artist.name,
+            "artwork_ref": artist.artwork_ref,
+            "is_liked": artist.is_liked,
+        }
+
+    def _deserialize_artist(self, raw_artist: object) -> Artist:
+        if not isinstance(raw_artist, dict):
+            raise StorageError("Library cache artist entry is invalid")
+        return Artist(
+            id=str(raw_artist["id"]),
+            name=str(raw_artist["name"]),
+            artwork_ref=self._optional_str(raw_artist.get("artwork_ref")),
+            is_liked=bool(raw_artist.get("is_liked", False)),
+        )
+
+    def _serialize_playlist(self, playlist: Playlist) -> dict[str, object]:
+        return {
+            "id": playlist.id,
+            "title": playlist.title,
+            "owner_id": playlist.owner_id,
+            "owner_name": playlist.owner_name,
+            "description": playlist.description,
+            "track_count": playlist.track_count,
+            "artwork_ref": playlist.artwork_ref,
+            "is_generated": playlist.is_generated,
+            "is_liked": playlist.is_liked,
+        }
+
+    def _deserialize_playlist(self, raw_playlist: object) -> Playlist:
+        if not isinstance(raw_playlist, dict):
+            raise StorageError("Library cache playlist entry is invalid")
+        return Playlist(
+            id=str(raw_playlist["id"]),
+            title=str(raw_playlist["title"]),
+            owner_id=self._optional_str(raw_playlist.get("owner_id")),
+            owner_name=self._optional_str(raw_playlist.get("owner_name")),
+            description=self._optional_str(raw_playlist.get("description")),
+            track_count=self._optional_int(raw_playlist.get("track_count")),
+            artwork_ref=self._optional_str(raw_playlist.get("artwork_ref")),
+            is_generated=bool(raw_playlist.get("is_generated", False)),
+            is_liked=bool(raw_playlist.get("is_liked", False)),
+        )
+
+    def _load_entity_snapshot(self, user_id: str, *, snapshot_key: str, mapper):
+        payload = self._load_payload()
+        raw_snapshots = payload.get(snapshot_key, {})
+        if not isinstance(raw_snapshots, dict):
+            raise StorageError("Library cache snapshot map is invalid")
+        raw_snapshot = raw_snapshots.get(user_id)
+        if raw_snapshot is None:
+            return None
+        if not isinstance(raw_snapshot, dict):
+            raise StorageError("Library cache snapshot entry is invalid")
+        if self._is_list_snapshot_expired(raw_snapshot.get("synced_at")):
+            return None
+        raw_items = raw_snapshot.get("items", ())
+        if not isinstance(raw_items, list):
+            raise StorageError("Library cache snapshot items are invalid")
+        return tuple(mapper(raw_item) for raw_item in raw_items)
+
+    def _save_entity_snapshot(
+        self,
+        user_id: str,
+        *,
+        snapshot_key: str,
+        items,
+        serializer,
+    ) -> None:
+        payload = self._load_payload()
+        raw_snapshots = payload.setdefault(snapshot_key, {})
+        if not isinstance(raw_snapshots, dict):
+            raise StorageError("Library cache snapshot map is invalid")
+        raw_snapshots[user_id] = {
+            "items": [serializer(item) for item in items],
+            "synced_at": self._now_iso(),
+        }
+        self._save_payload(payload)
+
+    def _is_list_snapshot_expired(self, raw_value: object) -> bool:
+        if not isinstance(raw_value, str):
+            return True
+        try:
+            cached_at = datetime.fromisoformat(raw_value)
+        except ValueError:
+            return True
+        if cached_at.tzinfo is None:
+            cached_at = cached_at.replace(tzinfo=UTC)
+        return datetime.now(tz=UTC) - cached_at > self._LIST_CACHE_TTL
 
     def _now_iso(self) -> str:
         return datetime.now(tz=UTC).isoformat()

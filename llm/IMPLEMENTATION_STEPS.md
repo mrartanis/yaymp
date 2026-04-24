@@ -195,6 +195,9 @@ Current notes:
 
 - Settings and auth/session are still JSON-backed in platform config/data directories.
 - Library cache uses SQLite for recent searches, track metadata, and artwork refs.
+- `My Tracks` uses SQLite snapshot caching plus Yandex liked-track revision sync to avoid full reloads when unchanged.
+- `My Albums`, `My Artists`, liked playlists, user playlists, and generated playlists currently use simple 1-day snapshot caching in the library cache.
+- TODO: replace list TTL refresh with a proper background job / controlled executor path so cached lists can render immediately and then refresh lazily off the UI thread.
 - Playback queue state is persisted in SQLite with queue items, active index, source context, and saved position.
 - Restored playback does not autoplay or resolve streams at startup; the stream is resolved on first Play.
 - Saved restore seek is applied from playback backend readiness events, not refresh polling.

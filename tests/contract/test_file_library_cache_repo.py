@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from app.domain import StorageError
-from app.domain.track import LikedTrackIds, Track
+from app.domain.track import LikedTrackIds, LikedTrackSnapshot, Track
 from app.infrastructure.persistence.file_library_cache_repo import FileLibraryCacheRepo
 
 
@@ -58,6 +58,21 @@ def test_file_library_cache_repo_round_trips_liked_track_ids(tmp_path) -> None:
     assert loaded.track_ids == frozenset({"track-1", "track-3"})
 
 
+def test_file_library_cache_repo_round_trips_liked_track_snapshot(tmp_path) -> None:
+    repo = FileLibraryCacheRepo(file_path=tmp_path / "library.json")
+    snapshot = LikedTrackSnapshot(
+        user_id="user-1",
+        revision=7,
+        tracks=(
+            Track(id="track-1", title="Signal", artists=("Artist",), is_liked=True),
+        ),
+    )
+
+    repo.save_liked_track_snapshot(snapshot)
+
+    assert repo.load_liked_track_snapshot("user-1") == snapshot
+
+
 def test_file_library_cache_repo_expires_track_metadata_and_artwork_refs(tmp_path) -> None:
     path = tmp_path / "library.json"
     expired_at = (datetime.now(tz=UTC) - timedelta(days=8)).isoformat()
@@ -90,6 +105,7 @@ def test_file_library_cache_repo_returns_empty_when_missing(tmp_path) -> None:
 
     assert repo.load_recent_searches() == ()
     assert repo.load_liked_track_ids("user-1") is None
+    assert repo.load_liked_track_snapshot("user-1") is None
 
 
 def test_file_library_cache_repo_rejects_invalid_payload(tmp_path) -> None:

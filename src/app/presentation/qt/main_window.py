@@ -62,6 +62,7 @@ class MainWindow(QMainWindow):
         self._auth_flow_checked = False
         self._browser_tab_ids: tuple[str, ...] = ()
         self._updating_browser_tabs = False
+        self._loading_more_content = False
         self._playback_poll_timer = QTimer(self)
         self._playback_poll_timer.setInterval(1000)
         self.setWindowTitle("YAYMP")
@@ -286,6 +287,7 @@ class MainWindow(QMainWindow):
         self._clear_queue_button.clicked.connect(self._controller.clear_queue)
         self._content_list.itemDoubleClicked.connect(self._open_content_item)
         self._content_list.customContextMenuRequested.connect(self._show_content_context_menu)
+        self._content_list.verticalScrollBar().valueChanged.connect(self._maybe_load_more_content)
         self._queue_list.customContextMenuRequested.connect(self._show_queue_context_menu)
         self._search_button.clicked.connect(self._run_search)
         self._search_input.returnPressed.connect(self._run_search)
@@ -505,6 +507,7 @@ class MainWindow(QMainWindow):
 
     def _render_content(self, content: BrowserContent) -> None:
         self._current_browser_content = content
+        self._loading_more_content = False
         self._browser_title_label.setText(content.title)
         self._render_browser_tabs(content.tabs, active_tab=content.active_tab)
         self._recent_searches_combo.blockSignals(True)
@@ -537,6 +540,18 @@ class MainWindow(QMainWindow):
         )
         self._play_all_button.setEnabled(can_play_source)
         self._append_all_button.setEnabled(can_play_source)
+
+    def _maybe_load_more_content(self, value: int) -> None:
+        content = self._current_browser_content
+        if self._loading_more_content or content is None:
+            return
+        if content.list_key != "liked_tracks" or not content.has_more:
+            return
+        scroll_bar = self._content_list.verticalScrollBar()
+        if value < scroll_bar.maximum() - 2:
+            return
+        self._loading_more_content = True
+        self._library_controller.load_more_current_list()
 
     def _render_browser_tabs(
         self,
