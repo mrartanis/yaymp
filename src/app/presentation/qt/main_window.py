@@ -1,13 +1,23 @@
 from __future__ import annotations
 
 import colorsys
+import sys
 from dataclasses import replace
 from os import environ
 from pathlib import Path
 
 import shiboken6
 from PySide6.QtCore import QEvent, QPoint, Qt, QTimer, QUrl
-from PySide6.QtGui import QAction, QColor, QCursor, QFont, QPixmap, QResizeEvent, QShowEvent
+from PySide6.QtGui import (
+    QAction,
+    QColor,
+    QCursor,
+    QFont,
+    QMouseEvent,
+    QPixmap,
+    QResizeEvent,
+    QShowEvent,
+)
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 from PySide6.QtWidgets import (
     QApplication,
@@ -46,8 +56,11 @@ from app.presentation.qt.playback_controller import PlaybackController
 
 
 class MainWindow(QMainWindow):
+    _RESIZE_MARGIN = 8
+
     def __init__(self, *, container: AppContainer) -> None:
         super().__init__()
+        self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
         self._container = container
         self._controller = PlaybackController(
             playback_service=container.services.playback_service,
@@ -79,11 +92,16 @@ class MainWindow(QMainWindow):
         self._theme_buttons: dict[str, QPushButton] = {}
         self._volume_popup: QFrame | None = None
         self._sidebar_popup: QFrame | None = None
+        self._title_bar: QFrame | None = None
+        self._title_drag_handle: QWidget | None = None
+        self._player_panel_frame: QFrame | None = None
+        self._track_metadata_zone: QWidget | None = None
         self._rendered_queue_key: tuple[tuple[str, str, str, str], ...] = ()
         self._rendered_active_index: int | None = None
         self._queue_selected_index: int | None = None
         self._track_like_overrides: dict[str, bool] = {}
         self._track_label_base_sizes: dict[QLabel, int] = {}
+        self._updating_resize_cursor = False
         self._playback_poll_timer = QTimer(self)
         self._playback_poll_timer.setInterval(1000)
         self.setWindowTitle("YAYMP")
@@ -112,23 +130,69 @@ class MainWindow(QMainWindow):
         self._fit_track_text_labels()
 
     def eventFilter(self, watched: object, event: QEvent) -> bool:
-        if watched is self._auth_label:
+        if self._handle_frame_resize_event(watched, event):
+            return True
+        auth_label = getattr(self, "_auth_label", None)
+        title_bar = getattr(self, "_title_bar", None)
+        title_drag_handle = getattr(self, "_title_drag_handle", None)
+        settings_popup = getattr(self, "_settings_popup", None)
+        volume_button = getattr(self, "_volume_button", None)
+        volume_popup = getattr(self, "_volume_popup", None)
+        player_panel_frame = getattr(self, "_player_panel_frame", None)
+        track_metadata_zone = getattr(self, "_track_metadata_zone", None)
+        artwork_label = getattr(self, "_artwork_label", None)
+        track_title_label = getattr(self, "_track_title_label", None)
+        track_meta_label = getattr(self, "_track_meta_label", None)
+        track_album_label = getattr(self, "_track_album_label", None)
+        if watched is auth_label:
             if event.type() == QEvent.Type.MouseButtonPress:
-                if self._settings_popup is not None and self._settings_popup.isVisible():
-                    self._settings_popup.hide()
+                if settings_popup is not None and settings_popup.isVisible():
+                    settings_popup.hide()
                 else:
                     self._show_settings_popup()
                 return True
             return False
-        if watched is self._settings_popup:
-            if event.type() == QEvent.Type.Leave and self._settings_popup is not None:
-                self._settings_popup.hide()
+        if watched in {title_bar, title_drag_handle}:
+            if event.type() == QEvent.Type.MouseButtonDblClick:
+                self._toggle_maximized()
+                return True
+            if event.type() == QEvent.Type.MouseButtonPress:
+                mouse_event = self._as_mouse_event(event)
+                if (
+                    mouse_event is not None
+                    and mouse_event.button() == Qt.MouseButton.LeftButton
+                    and not self.isMaximized()
+                ):
+                    self._start_system_move()
+                    return True
             return False
-        if watched is self._volume_button:
+        if watched in {
+            player_panel_frame,
+            track_metadata_zone,
+            artwork_label,
+            track_title_label,
+            track_meta_label,
+            track_album_label,
+        }:
+            if event.type() == QEvent.Type.MouseButtonPress:
+                mouse_event = self._as_mouse_event(event)
+                if (
+                    mouse_event is not None
+                    and mouse_event.button() == Qt.MouseButton.LeftButton
+                    and not self.isMaximized()
+                ):
+                    self._start_system_move()
+                    return True
+            return False
+        if watched is settings_popup:
+            if event.type() == QEvent.Type.Leave and settings_popup is not None:
+                settings_popup.hide()
+            return False
+        if watched is volume_button:
             if event.type() == QEvent.Type.Enter:
                 self._show_volume_popup()
             return False
-        if watched is self._volume_popup:
+        if watched is volume_popup:
             if event.type() == QEvent.Type.Leave:
                 self._hide_volume_popup_if_idle()
             return False
@@ -136,10 +200,12 @@ class MainWindow(QMainWindow):
 
     def _build_ui(self) -> None:
         root = QWidget(self)
+        root.installEventFilter(self)
         outer_layout = QVBoxLayout(root)
-        outer_layout.setContentsMargins(14, 14, 14, 14)
-        outer_layout.setSpacing(8)
+        outer_layout.setContentsMargins(10, 10, 10, 10)
+        outer_layout.setSpacing(6)
 
+        outer_layout.addWidget(self._build_title_bar())
         outer_layout.addLayout(self._build_body(), 1)
 
         self.setCentralWidget(root)
@@ -148,19 +214,37 @@ class MainWindow(QMainWindow):
     def _build_title_bar(self) -> QFrame:
         frame = self._plain_frame("top-bar")
         frame.setObjectName("top-bar")
+        frame.setFixedHeight(32)
+        frame.installEventFilter(self)
+        self._title_bar = frame
         layout = QHBoxLayout(frame)
-        layout.setContentsMargins(4, 0, 4, 0)
-        layout.setSpacing(10)
-        self._sidebar_toggle_button = QPushButton("≡")
-        self._sidebar_toggle_button.setObjectName("sidebar-toggle")
-        self._sidebar_toggle_button.setToolTip("Toggle navigation")
-        self._sidebar_toggle_button.setFixedSize(38, 34)
-        layout.addWidget(self._sidebar_toggle_button)
-        self._now_playing_label = self._panel_label("Ready to play")
-        self._now_playing_label.setObjectName("now-playing")
-        layout.addWidget(self._now_playing_label, 1)
-        self._auth_label = self._panel_label("Login required", align_right=True)
-        layout.addWidget(self._auth_label)
+        layout.setContentsMargins(2, 0, 0, 0)
+        layout.setSpacing(6)
+        self._window_minimize_button = self._icon_button("window-minimize.svg", "Minimize")
+        self._window_minimize_button.setObjectName("window-control-button")
+        self._window_maximize_button = self._icon_button("window-maximize.svg", "Maximize")
+        self._window_maximize_button.setObjectName("window-control-button")
+        self._window_close_button = self._icon_button("window-close.svg", "Close")
+        self._window_close_button.setObjectName("window-close-button")
+        window_buttons = (
+            self._window_close_button,
+            self._window_minimize_button,
+            self._window_maximize_button,
+        )
+        if environ.get("QT_QPA_PLATFORM") != "offscreen" and sys.platform == "darwin":
+            for button in window_buttons:
+                layout.addWidget(button, 0, Qt.AlignmentFlag.AlignVCenter)
+        self._title_drag_handle = QWidget()
+        self._title_drag_handle.setObjectName("title-drag-handle")
+        self._title_drag_handle.installEventFilter(self)
+        layout.addWidget(self._title_drag_handle, 1)
+        if environ.get("QT_QPA_PLATFORM") == "offscreen" or sys.platform != "darwin":
+            for button in (
+                self._window_minimize_button,
+                self._window_maximize_button,
+                self._window_close_button,
+            ):
+                layout.addWidget(button, 0, Qt.AlignmentFlag.AlignVCenter)
         return frame
 
     def _build_transport_bar(self) -> QHBoxLayout:
@@ -200,6 +284,8 @@ class MainWindow(QMainWindow):
 
     def _build_player_panel(self) -> QFrame:
         frame = self._panel_frame("Main Player")
+        frame.installEventFilter(self)
+        self._player_panel_frame = frame
         layout = frame.layout()
         assert layout is not None
 
@@ -283,6 +369,7 @@ class MainWindow(QMainWindow):
             QSizePolicy.Policy.Fixed,
             QSizePolicy.Policy.Fixed,
         )
+        self._artwork_label.installEventFilter(self)
         self._sidebar_toggle_button = QPushButton("≡")
         self._sidebar_toggle_button.setObjectName("sidebar-toggle")
         self._sidebar_toggle_button.setToolTip("Toggle navigation")
@@ -339,12 +426,17 @@ class MainWindow(QMainWindow):
             QSizePolicy.Policy.Ignored,
             QSizePolicy.Policy.Fixed,
         )
+        text_block.installEventFilter(self)
+        self._track_metadata_zone = text_block
         text_block_layout = QVBoxLayout(text_block)
         text_block_layout.setContentsMargins(0, 0, 0, 0)
         text_block_layout.setSpacing(5)
         text_block_layout.addStretch(1)
+        self._track_title_label.installEventFilter(self)
         text_block_layout.addWidget(self._track_title_label)
+        self._track_meta_label.installEventFilter(self)
         text_block_layout.addWidget(self._track_meta_label)
+        self._track_album_label.installEventFilter(self)
         text_block_layout.addWidget(self._track_album_label)
         text_block_layout.addStretch(1)
         info_layout.addStretch(1)
@@ -637,6 +729,9 @@ class MainWindow(QMainWindow):
         self._append_all_button.clicked.connect(self._append_current_source)
         self._browser_tabs.currentChanged.connect(self._change_browser_tab)
         self._quality_combo.currentIndexChanged.connect(self._apply_audio_quality)
+        self._window_minimize_button.clicked.connect(self.showMinimized)
+        self._window_maximize_button.clicked.connect(self._toggle_maximized)
+        self._window_close_button.clicked.connect(self.close)
         self._playback_poll_timer.timeout.connect(self._controller.refresh)
         self._artwork_manager.finished.connect(self._handle_artwork_downloaded)
 
@@ -707,6 +802,12 @@ class MainWindow(QMainWindow):
             self._controller.pause()
             return
         self._controller.play()
+
+    def _toggle_maximized(self) -> None:
+        if self.isMaximized():
+            self.showNormal()
+            return
+        self.showMaximized()
 
     def _toggle_current_track_like(self) -> None:
         if self._current_track is None:
@@ -1931,8 +2032,12 @@ class MainWindow(QMainWindow):
                 background: #101116;
             }}
             QFrame#top-bar {{
-                background: transparent;
+                background: #0d0f15;
                 border: 0;
+                border-radius: 10px;
+            }}
+            QWidget#title-drag-handle {{
+                background: transparent;
             }}
             QFrame {{
                 background: transparent;
@@ -2105,6 +2210,20 @@ class MainWindow(QMainWindow):
                 padding: 0;
                 border-radius: 10px;
                 font-size: 18px;
+            }}
+            QPushButton#window-control-button, QPushButton#window-close-button {{
+                background: transparent;
+                border: 0;
+                border-radius: 9px;
+                padding: 0;
+            }}
+            QPushButton#window-control-button:hover {{
+                background: #1a1f2c;
+                border: 0;
+            }}
+            QPushButton#window-close-button:hover {{
+                background: #8f2d3f;
+                border: 0;
             }}
             QPushButton#queue-icon-button {{
                 padding: 0;
@@ -2282,6 +2401,94 @@ class MainWindow(QMainWindow):
             return "0:00"
         minutes, remainder = divmod(value // 1000, 60)
         return f"{minutes}:{remainder:02d}"
+
+    def _handle_frame_resize_event(self, watched: object, event: QEvent) -> bool:
+        if self._updating_resize_cursor:
+            return False
+        if self.isMaximized():
+            self._set_resize_cursor(None)
+            return False
+        if not isinstance(watched, QWidget):
+            return False
+        if watched.window() is not self:
+            return False
+        if event.type() not in {
+            QEvent.Type.MouseMove,
+            QEvent.Type.MouseButtonPress,
+            QEvent.Type.Leave,
+        }:
+            return False
+        if event.type() == QEvent.Type.Leave:
+            if watched is self:
+                self._set_resize_cursor(None)
+            return False
+
+        mouse_event = self._as_mouse_event(event)
+        if mouse_event is None:
+            return False
+        edges = self._resize_edges_for_global_pos(mouse_event.globalPosition().toPoint())
+        if event.type() == QEvent.Type.MouseMove:
+            if edges == Qt.Edge(0):
+                self._set_resize_cursor(None)
+            else:
+                self._set_resize_cursor(self._cursor_for_edges(edges))
+            return False
+        if (
+            event.type() == QEvent.Type.MouseButtonPress
+            and mouse_event.button() == Qt.MouseButton.LeftButton
+            and edges != Qt.Edge(0)
+        ):
+            self._start_system_resize(edges)
+            return True
+        return False
+
+    def _as_mouse_event(self, event: QEvent) -> QMouseEvent | None:
+        return event if isinstance(event, QMouseEvent) else None
+
+    def _resize_edges_for_global_pos(self, global_pos: QPoint) -> Qt.Edge:
+        rect = self.frameGeometry()
+        edges = Qt.Edge(0)
+        if abs(global_pos.x() - rect.left()) <= self._RESIZE_MARGIN:
+            edges |= Qt.Edge.LeftEdge
+        elif abs(global_pos.x() - rect.right()) <= self._RESIZE_MARGIN:
+            edges |= Qt.Edge.RightEdge
+        if abs(global_pos.y() - rect.top()) <= self._RESIZE_MARGIN:
+            edges |= Qt.Edge.TopEdge
+        elif abs(global_pos.y() - rect.bottom()) <= self._RESIZE_MARGIN:
+            edges |= Qt.Edge.BottomEdge
+        return edges
+
+    def _cursor_for_edges(self, edges: Qt.Edge) -> Qt.CursorShape:
+        if edges in {Qt.Edge.TopEdge, Qt.Edge.BottomEdge}:
+            return Qt.CursorShape.SizeVerCursor
+        if edges in {Qt.Edge.LeftEdge, Qt.Edge.RightEdge}:
+            return Qt.CursorShape.SizeHorCursor
+        if edges in {
+            Qt.Edge.TopEdge | Qt.Edge.LeftEdge,
+            Qt.Edge.BottomEdge | Qt.Edge.RightEdge,
+        }:
+            return Qt.CursorShape.SizeFDiagCursor
+        return Qt.CursorShape.SizeBDiagCursor
+
+    def _start_system_move(self) -> None:
+        window_handle = self.windowHandle()
+        if window_handle is not None:
+            window_handle.startSystemMove()
+
+    def _start_system_resize(self, edges: Qt.Edge) -> None:
+        window_handle = self.windowHandle()
+        if window_handle is not None:
+            window_handle.startSystemResize(edges)
+
+    def _set_resize_cursor(self, cursor: Qt.CursorShape | None) -> None:
+        self._updating_resize_cursor = True
+        try:
+            if cursor is None:
+                QWidget.unsetCursor(self)
+            else:
+                QWidget.setCursor(self, cursor)
+        finally:
+            self._updating_resize_cursor = False
 
     def _fit_track_text_labels(self) -> None:
         self._fit_track_text_label(self._track_title_label, min_point_size=20, max_lines=3)
