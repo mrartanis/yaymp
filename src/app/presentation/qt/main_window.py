@@ -76,6 +76,7 @@ class MainWindow(QMainWindow):
         self._browser_auto_open_enabled = False
         self._browser_dialog: QDialog | None = None
         self._settings_popup: QFrame | None = None
+        self._theme_buttons: dict[str, QPushButton] = {}
         self._volume_popup: QFrame | None = None
         self._sidebar_popup: QFrame | None = None
         self._rendered_queue_key: tuple[tuple[str, str, str, str], ...] = ()
@@ -112,8 +113,12 @@ class MainWindow(QMainWindow):
 
     def eventFilter(self, watched: object, event: QEvent) -> bool:
         if watched is self._auth_label:
-            if event.type() == QEvent.Type.Enter:
-                self._show_settings_popup()
+            if event.type() == QEvent.Type.MouseButtonPress:
+                if self._settings_popup is not None and self._settings_popup.isVisible():
+                    self._settings_popup.hide()
+                else:
+                    self._show_settings_popup()
+                return True
             return False
         if watched is self._settings_popup:
             if event.type() == QEvent.Type.Leave and self._settings_popup is not None:
@@ -419,9 +424,16 @@ class MainWindow(QMainWindow):
         )
         self._settings_popup.setObjectName("settings-popup")
         self._settings_popup.installEventFilter(self)
-        layout = QHBoxLayout(self._settings_popup)
-        layout.setContentsMargins(10, 8, 10, 8)
+        layout = QVBoxLayout(self._settings_popup)
+        layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(6)
+
+        quality_label = QLabel("Quality")
+        quality_label.setObjectName("settings-section")
+        layout.addWidget(quality_label)
+        quality_row = QHBoxLayout()
+        quality_row.setContentsMargins(0, 0, 0, 0)
+        quality_row.setSpacing(6)
         self._quality_buttons: dict[AudioQuality, QPushButton] = {}
         for quality in (AudioQuality.HQ, AudioQuality.SD, AudioQuality.LQ):
             button = QPushButton(quality.name)
@@ -431,7 +443,34 @@ class MainWindow(QMainWindow):
                 lambda checked=False, selected=quality: self._set_audio_quality(selected)
             )
             self._quality_buttons[quality] = button
-            layout.addWidget(button)
+            quality_row.addWidget(button)
+        layout.addLayout(quality_row)
+
+        theme_label = QLabel("Theme")
+        theme_label.setObjectName("settings-section")
+        layout.addWidget(theme_label)
+        theme_row = QHBoxLayout()
+        theme_row.setContentsMargins(0, 0, 0, 0)
+        theme_row.setSpacing(6)
+        for theme_id, title in (
+            ("system", "System"),
+            ("light", "Light"),
+            ("dark", "Dark"),
+        ):
+            button = QPushButton(title)
+            button.setObjectName("quality-option")
+            button.setCheckable(True)
+            button.clicked.connect(
+                lambda checked=False, selected=theme_id: self._set_theme_preference(selected)
+            )
+            self._theme_buttons[theme_id] = button
+            theme_row.addWidget(button)
+        layout.addLayout(theme_row)
+
+        self._logout_button = QPushButton("Logout")
+        self._logout_button.setObjectName("settings-action")
+        self._logout_button.clicked.connect(self._logout)
+        layout.addWidget(self._logout_button)
         self._settings_popup.hide()
 
     def _build_volume_popup(self) -> None:
@@ -689,6 +728,24 @@ class MainWindow(QMainWindow):
         for candidate, button in self._quality_buttons.items():
             button.setChecked(candidate is quality)
 
+    def _set_theme_preference(self, theme: str) -> None:
+        self._container.services.settings_service.save_theme_preference(theme)
+        self._render_theme_preference(theme)
+        self._status_label.setText(f"Theme preference: {theme}")
+
+    def _render_theme_preference(self, theme: str) -> None:
+        for candidate, button in self._theme_buttons.items():
+            button.setChecked(candidate == theme)
+
+    def _logout(self) -> None:
+        self._container.services.auth_service.clear_session()
+        self._container.services.music_service.clear_auth_session()
+        if self._settings_popup is not None:
+            self._settings_popup.hide()
+        self._render_auth_state()
+        self._status_label.setText("Logged out")
+        self._maybe_start_auth_flow()
+
     def _apply_volume(self, volume: int) -> None:
         self._controller.set_volume(volume)
         self._container.services.settings_service.save_volume(volume)
@@ -700,6 +757,9 @@ class MainWindow(QMainWindow):
             self._quality_combo.setCurrentIndex(quality_index)
         for candidate, button in self._quality_buttons.items():
             button.setChecked(candidate is quality)
+        self._render_theme_preference(
+            self._container.services.settings_service.load_theme_preference()
+        )
 
     def _select_queue_item(self, item: QListWidgetItem) -> None:
         self._select_queue_highlight(item)
@@ -1018,9 +1078,13 @@ class MainWindow(QMainWindow):
         session = self._container.services.auth_service.current_session()
         if session is None:
             self._auth_label.setText("Login required")
+            if hasattr(self, "_logout_button"):
+                self._logout_button.setEnabled(False)
             return
         username = session.display_name or session.user_id
         self._auth_label.setText(username)
+        if hasattr(self, "_logout_button"):
+            self._logout_button.setEnabled(True)
 
     def _render_content(self, content: BrowserContent) -> None:
         if self._browser_auto_open_enabled:
@@ -1932,6 +1996,14 @@ class MainWindow(QMainWindow):
                 letter-spacing: 1px;
                 text-transform: uppercase;
             }}
+            QLabel#settings-section {{
+                color: #7f88a8;
+                font-size: 10px;
+                font-weight: 700;
+                letter-spacing: 1px;
+                text-transform: uppercase;
+                padding-top: 2px;
+            }}
             QLabel#album-art {{
                 background: #0b0c11;
                 border: 0;
@@ -2055,6 +2127,21 @@ class MainWindow(QMainWindow):
                 background: {accent};
                 border-color: {accent};
                 color: {accent_text};
+            }}
+            QPushButton#settings-action {{
+                background: #151923;
+                border: 1px solid #2d3343;
+                border-radius: 9px;
+                color: #eef1fb;
+                padding: 6px 10px;
+                text-align: left;
+            }}
+            QPushButton#settings-action:hover {{
+                background: #1b2030;
+            }}
+            QPushButton#settings-action:disabled {{
+                color: #6f7896;
+                border-color: #23283a;
             }}
             QLineEdit, QComboBox {{
                 background: #0f1118;

@@ -35,6 +35,9 @@ class FakeMusicService:
     def get_auth_session(self) -> AuthSession | None:
         return AuthSession(user_id="user-1", token="token")
 
+    def clear_auth_session(self) -> None:
+        self.cleared_session = True
+
     def build_auth_session(
         self,
         token: str,

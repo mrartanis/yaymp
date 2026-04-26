@@ -7,6 +7,7 @@ from app.domain.errors import StorageError
 class SettingsService:
     _VOLUME_KEY = "volume"
     _AUDIO_QUALITY_KEY = "audio_quality"
+    _THEME_KEY = "theme"
 
     def __init__(self, *, settings_repo: SettingsRepo, logger: Logger) -> None:
         self._settings_repo = settings_repo
@@ -32,6 +33,23 @@ class SettingsService:
 
     def save_audio_quality(self, quality: AudioQuality) -> None:
         self._save_value(self._AUDIO_QUALITY_KEY, quality.value)
+
+    def load_theme_preference(
+        self,
+        *,
+        default: str = "system",
+    ) -> str:
+        value = self._load_value(self._THEME_KEY)
+        if not isinstance(value, str):
+            return default
+        if value not in {"system", "light", "dark"}:
+            return default
+        return value
+
+    def save_theme_preference(self, theme: str) -> None:
+        if theme not in {"system", "light", "dark"}:
+            theme = "system"
+        self._save_value(self._THEME_KEY, theme)
 
     def _load_value(self, key: str) -> object | None:
         try:

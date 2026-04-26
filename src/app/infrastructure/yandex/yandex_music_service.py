@@ -57,6 +57,10 @@ class YandexMusicService(MusicService):
     def get_auth_session(self) -> AuthSession | None:
         return self._session
 
+    def clear_auth_session(self) -> None:
+        self._session = None
+        self._client = None
+
     def build_auth_session(
         self,
         token: str,

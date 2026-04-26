@@ -38,6 +38,9 @@ class InMemoryAuthRepo:
 
 
 class FakeMusicService:
+    def clear_auth_session(self) -> None:
+        self.cleared_session = True
+
     def build_auth_session(
         self,
         token: str,

@@ -51,6 +51,9 @@ class FakeMusicService:
 
         return AuthSession(user_id="user-1", token="token")
 
+    def clear_auth_session(self):
+        self.cleared_session = True
+
     def build_auth_session(self, token: str, *, expires_at=None):
         from app.domain import AuthSession
 

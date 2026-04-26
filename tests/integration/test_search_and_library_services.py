@@ -145,6 +145,9 @@ class FakeMusicService:
 
         return AuthSession(user_id="user-1", token="token")
 
+    def clear_auth_session(self):
+        self.session = None
+
     def set_auth_session(self, session):
         self.session = session
 

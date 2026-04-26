@@ -17,6 +17,8 @@ from app.domain.track import LikedTrackIds, LikedTrackSnapshot, Track
 class MusicService(Protocol):
     def get_auth_session(self) -> AuthSession | None: ...
 
+    def clear_auth_session(self) -> None: ...
+
     def build_auth_session(
         self,
         token: str,
