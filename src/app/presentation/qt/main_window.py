@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMainWindow,
     QMenu,
+    QProgressBar,
     QPushButton,
     QSizePolicy,
     QSlider,
@@ -664,6 +665,12 @@ class MainWindow(
         self._search_input = QLineEdit()
         self._search_input.setPlaceholderText("Search Yandex Music")
         self._search_button = QPushButton("Search")
+        self._search_loading = QProgressBar()
+        self._search_loading.setRange(0, 0)
+        self._search_loading.setTextVisible(False)
+        self._search_loading.setFixedWidth(30)
+        self._search_loading.setFixedHeight(12)
+        self._search_loading.hide()
         self._recent_searches_combo = QComboBox()
         self._recent_searches_combo.setPlaceholderText("Recent searches")
         self._recent_searches_combo.addItem("Recent searches")
@@ -698,6 +705,7 @@ class MainWindow(
         search_row.setSpacing(8)
         search_row.addWidget(self._search_input, 1)
         search_row.addWidget(self._search_button)
+        search_row.addWidget(self._search_loading, 0, Qt.AlignmentFlag.AlignVCenter)
         search_row.addWidget(self._recent_searches_combo)
         browser_footer = QWidget()
         browser_footer.setFixedHeight(32)
@@ -1212,6 +1220,10 @@ class MainWindow(
         self._browser_title_label.setText(content.title)
         self._browser_back_button.setEnabled(self._library_controller.can_go_back())
         self._render_browser_tabs(content.tabs, active_tab=content.active_tab)
+        self._search_loading.setVisible(content.is_loading)
+        self._search_button.setEnabled(not content.is_loading)
+        if content.search_query is not None:
+            self._search_input.setText(content.search_query)
         self._recent_searches_combo.blockSignals(True)
         self._recent_searches_combo.clear()
         self._recent_searches_combo.addItem("Recent searches")

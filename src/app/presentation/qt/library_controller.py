@@ -36,11 +36,13 @@ class BrowserContent:
     recent_searches: tuple[str, ...] = ()
     tabs: tuple[BrowserTab, ...] = ()
     active_tab: str | None = None
+    search_query: str | None = None
     source_type: str | None = None
     source_id: str | None = None
     source_tracks: tuple[Track, ...] = ()
     list_key: str | None = None
     has_more: bool = False
+    is_loading: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,11 +150,16 @@ class LibraryController(QObject):
         )
 
     def search_tracks(self, query: str) -> None:
-        if self._active_page != ("search", None):
+        normalized_query = query.strip()
+        if self._active_page != ("search", None) or (
+            self._last_search_query is not None
+            and normalized_query
+            and normalized_query != self._last_search_query
+        ):
             self._push_history()
         self._active_page = ("search", None)
         self._active_list_kind = None
-        self._dispatch_search(query)
+        self._dispatch_search(normalized_query)
 
     def show_browser_tab(self, tab: str) -> None:
         page, payload = self._active_page
@@ -509,6 +516,7 @@ class LibraryController(QObject):
             recent_searches=self.recent_searches(),
             tabs=self._search_tabs(),
             active_tab=tab,
+            search_query=normalized_query,
         )
 
     def _empty_search_content(self, tab: str) -> BrowserContent:
@@ -518,6 +526,7 @@ class LibraryController(QObject):
             recent_searches=self.recent_searches(),
             tabs=self._search_tabs(),
             active_tab=tab,
+            search_query=self._last_search_query,
         )
 
     def _loading_search_content(self, query: str, tab: str) -> BrowserContent:
@@ -529,6 +538,8 @@ class LibraryController(QObject):
             recent_searches=self.recent_searches(),
             tabs=self._search_tabs(),
             active_tab=tab,
+            search_query=normalized_query,
+            is_loading=True,
         )
 
     def _dispatch_search(self, query: str) -> None:
