@@ -22,6 +22,9 @@ class MainWindowWindowingMixin:
         update_responsive_layout = getattr(self, "_update_responsive_layout", None)
         if callable(update_responsive_layout):
             update_responsive_layout()
+        relayout_queue_rows = getattr(self, "_relayout_queue_rows", None)
+        if callable(relayout_queue_rows):
+            QTimer.singleShot(0, relayout_queue_rows)
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self._system_media.shutdown()

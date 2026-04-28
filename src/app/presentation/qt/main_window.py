@@ -111,6 +111,10 @@ class MainWindow(
         self._sidebar_panel: QFrame | None = None
         self._sidebar_host: QWidget | None = None
         self._sidebar_host_layout: QVBoxLayout | None = None
+        self._left_zone: QWidget | None = None
+        self._left_zone_layout: QHBoxLayout | None = None
+        self._queue_host: QWidget | None = None
+        self._queue_host_layout: QVBoxLayout | None = None
         self._sidebar_docked = False
         self._title_bar: QFrame | None = None
         self._title_drag_handle: QWidget | None = None
@@ -223,6 +227,15 @@ class MainWindow(
     def _build_body(self) -> QHBoxLayout:
         layout = QHBoxLayout()
         layout.setSpacing(8)
+        self._left_zone = QWidget()
+        self._left_zone.installEventFilter(self)
+        self._left_zone.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
+        self._left_zone_layout = QHBoxLayout(self._left_zone)
+        self._left_zone_layout.setContentsMargins(0, 0, 0, 0)
+        self._left_zone_layout.setSpacing(8)
         self._sidebar_host = QWidget()
         self._sidebar_host.setMinimumWidth(170)
         self._sidebar_host.setMaximumWidth(210)
@@ -231,10 +244,20 @@ class MainWindow(
         self._sidebar_host_layout.setContentsMargins(0, 0, 0, 0)
         self._sidebar_host_layout.setSpacing(0)
         self._sidebar_host.hide()
-        layout.addWidget(self._sidebar_host, 0)
-        main_column = QVBoxLayout()
-        main_column.setSpacing(4)
-        main_column.setContentsMargins(0, 0, 0, 0)
+        self._left_zone_layout.addWidget(self._sidebar_host, 0)
+        self._queue_host = QWidget()
+        self._queue_host.installEventFilter(self)
+        self._queue_host.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
+        self._queue_host_layout = QVBoxLayout(self._queue_host)
+        self._queue_host_layout.setContentsMargins(0, 0, 0, 0)
+        self._queue_host_layout.setSpacing(0)
+        self._queue_host.hide()
+        self._left_zone_layout.addWidget(self._queue_host, 1)
+        self._left_zone.hide()
+        layout.addWidget(self._left_zone, 1)
         self._main_column_widget = QWidget()
         self._main_column_widget.installEventFilter(self)
         self._main_column_widget.setSizePolicy(
@@ -246,11 +269,10 @@ class MainWindow(
         self._main_column_layout.setSpacing(4)
         self._main_column_layout.addWidget(self._build_player_panel(), 0)
         self._main_column_layout.addWidget(self._build_queue_panel(), 1)
-        main_column.addWidget(self._main_column_widget, 1)
-        layout.addLayout(main_column, 2)
+        layout.addWidget(self._main_column_widget, 0)
         self._browser_host = QWidget()
         self._browser_host.setMinimumWidth(460)
-        self._browser_host.setMaximumWidth(860)
+        self._browser_host.setMaximumWidth(920)
         self._browser_host.installEventFilter(self)
         self._browser_host.setSizePolicy(
             QSizePolicy.Policy.Expanding,
@@ -261,6 +283,9 @@ class MainWindow(
         self._browser_host_layout.setSpacing(0)
         self._browser_host.hide()
         layout.addWidget(self._browser_host, 1)
+        layout.setStretch(0, 1)
+        layout.setStretch(1, 0)
+        layout.setStretch(2, 1)
 
         self._sidebar_panel = self._build_nav_panel()
         self._sidebar_panel.installEventFilter(self)
@@ -472,7 +497,21 @@ class MainWindow(
         self._player_body_layout = QHBoxLayout(self._player_body_widget)
         self._player_body_layout.setContentsMargins(0, 0, 0, 0)
         self._player_body_layout.setSpacing(14)
+        self._player_left_spacer = QWidget()
+        self._player_left_spacer.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Preferred,
+        )
+        self._player_right_spacer = QWidget()
+        self._player_right_spacer.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Preferred,
+        )
+        self._player_body_layout.addWidget(self._player_left_spacer, 1)
         self._player_body_layout.addWidget(self._player_right_widget, 0)
+        self._player_body_layout.addWidget(self._player_right_spacer, 1)
+        self._player_left_spacer.hide()
+        self._player_right_spacer.hide()
 
         layout.addWidget(self._player_body_widget, 1)
         self._build_settings_popup()
@@ -1812,6 +1851,7 @@ class MainWindow(
         self._set_sidebar_docked(self.width() >= self._SIDEBAR_DOCK_BREAKPOINT)
         self._set_browser_docked(self.width() >= self._BROWSER_DOCK_BREAKPOINT)
         self._set_player_queue_wide(self.width() >= self._PLAYER_QUEUE_WIDE_BREAKPOINT)
+        self._update_wide_zone_balance()
 
     def _set_sidebar_docked(self, docked: bool) -> None:
         if self._sidebar_docked == docked or self._sidebar_panel is None:
@@ -1832,13 +1872,18 @@ class MainWindow(
                 )
             if self._sidebar_host is not None:
                 self._sidebar_host.show()
+            if self._left_zone is not None:
+                self._left_zone.show()
             self._sidebar_panel.show()
             self._sidebar_toggle_button.hide()
+            self._update_wide_zone_balance()
             return
         if self._sidebar_host_layout is not None:
             self._sidebar_host_layout.removeWidget(self._sidebar_panel)
         if self._sidebar_host is not None:
             self._sidebar_host.hide()
+        if self._left_zone is not None and not self._player_queue_wide:
+            self._left_zone.hide()
         layout = self._sidebar_panel.layout()
         if layout is not None:
             layout.setContentsMargins(8, 10, 8, 10)
@@ -1846,6 +1891,7 @@ class MainWindow(
         self._sidebar_panel.setWindowFlags(Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
         self._sidebar_panel.hide()
         self._sidebar_toggle_button.show()
+        self._update_wide_zone_balance()
 
     def _set_browser_docked(self, docked: bool) -> None:
         if self._browser_docked == docked or self._browser_panel is None:
@@ -1859,6 +1905,7 @@ class MainWindow(
                 self._browser_host.show()
             self._browser_panel.show()
             self._browser_close_button.hide()
+            self._update_wide_zone_balance()
             return
         if self._browser_host_layout is not None:
             self._browser_host_layout.removeWidget(self._browser_panel)
@@ -1867,6 +1914,7 @@ class MainWindow(
         if self._browser_dialog is not None and self._browser_dialog.layout() is not None:
             self._move_widget_to_layout(self._browser_panel, self._browser_dialog.layout())
         self._browser_close_button.show()
+        self._update_wide_zone_balance()
 
     def _move_widget_to_layout(self, widget: QWidget, layout) -> None:
         parent = widget.parentWidget()
@@ -1882,17 +1930,68 @@ class MainWindow(
             return
         self._player_queue_wide = wide
         if wide:
-            self._move_widget_to_layout(queue_panel, self._player_body_layout)
+            self._move_widget_to_layout(queue_panel, self._queue_host_layout)
+            if self._queue_host is not None:
+                self._queue_host.show()
+            if self._left_zone is not None and self._sidebar_docked:
+                self._left_zone.show()
+            self._player_left_spacer.show()
+            self._player_right_spacer.show()
             self._player_body_layout.setStretch(0, 1)
             self._player_body_layout.setStretch(1, 0)
-            self._player_body_layout.removeWidget(self._player_right_widget)
-            self._player_body_layout.addWidget(self._player_right_widget, 0)
+            self._player_body_layout.setStretch(2, 1)
             self._configure_player_right_layout(wide=True)
+            self._update_wide_zone_balance()
             return
         self._move_widget_to_layout(queue_panel, self._main_column_layout)
-        self._main_column_layout.setStretch(0, 1)
-        self._main_column_layout.setStretch(1, 1)
+        if self._queue_host is not None:
+            self._queue_host.hide()
+        self._player_left_spacer.hide()
+        self._player_right_spacer.hide()
+        self._player_body_layout.setStretch(0, 0)
+        self._player_body_layout.setStretch(1, 0)
+        self._player_body_layout.setStretch(2, 0)
         self._configure_player_right_layout(wide=False)
+        self._update_wide_zone_balance()
+
+    def _update_wide_zone_balance(self) -> None:
+        if (
+            self._left_zone is None
+            or self._browser_host is None
+            or self._main_column_widget is None
+        ):
+            return
+        left_visible = self._sidebar_docked or self._player_queue_wide
+        right_visible = self._browser_docked
+        if not left_visible:
+            self._left_zone.hide()
+        else:
+            self._left_zone.show()
+        if not right_visible:
+            self._browser_host.hide()
+        self._left_zone.setMinimumWidth(0)
+        self._left_zone.setMaximumWidth(16_777_215)
+        self._browser_host.setMinimumWidth(460)
+        self._browser_host.setMaximumWidth(920)
+        if not self._player_queue_wide or not left_visible or not right_visible:
+            self._player_left_spacer.setMinimumWidth(0)
+            self._player_left_spacer.setMaximumWidth(16_777_215)
+            self._player_right_spacer.setMinimumWidth(0)
+            self._player_right_spacer.setMaximumWidth(16_777_215)
+            return
+        left_width = self._left_zone.width()
+        right_width = self._browser_host.width()
+        if left_width <= 0:
+            left_width = self._left_zone.sizeHint().width()
+        if right_width <= 0:
+            right_width = self._browser_host.sizeHint().width()
+        delta = right_width - left_width
+        left_pad = max(0, delta // 2)
+        right_pad = max(0, -delta // 2)
+        self._player_left_spacer.setMinimumWidth(left_pad)
+        self._player_left_spacer.setMaximumWidth(16_777_215)
+        self._player_right_spacer.setMinimumWidth(right_pad)
+        self._player_right_spacer.setMaximumWidth(16_777_215)
 
     def _configure_player_right_layout(self, *, wide: bool) -> None:
         self._apply_player_visual_mode(wide=wide)

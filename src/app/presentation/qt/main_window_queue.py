@@ -53,6 +53,7 @@ class MainWindowQueueMixin:
                 self._queue_list.addItem(widget_item)
                 self._queue_list.setItemWidget(widget_item, row_widget)
             self._update_queue_active_row(snapshot.state.active_index)
+            self._relayout_queue_rows()
         finally:
             self._queue_list.blockSignals(False)
 
@@ -81,8 +82,23 @@ class MainWindowQueueMixin:
                         has_selected_row and selected_index == index,
                     ),
                 )
+            self._relayout_queue_rows()
         finally:
             self._queue_list.blockSignals(False)
+
+    def _relayout_queue_rows(self) -> None:
+        if getattr(self, "_queue_list", None) is None:
+            return
+        for index in range(self._queue_list.count()):
+            widget_item = self._queue_list.item(index)
+            row_widget = self._queue_list.itemWidget(widget_item)
+            if row_widget is None:
+                continue
+            row_widget.updateGeometry()
+            widget_item.setSizeHint(row_widget.sizeHint())
+        self._queue_list.updateGeometries()
+        self._queue_list.doItemsLayout()
+        self._queue_list.viewport().update()
 
     def _queue_row_widget(
         self,
