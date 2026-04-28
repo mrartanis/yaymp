@@ -17,3 +17,7 @@ def test_main_window_can_be_constructed(qtbot, qapp, tmp_path, monkeypatch) -> N
     assert context.container.config.settings_file.name == "settings.json"
     assert context.container.services.settings_service.load_volume() == 100
     assert context.main_window.isVisible()
+    context.main_window._set_theme_preference("light")
+
+    assert context.container.services.settings_service.load_theme_preference() == "light"
+    assert "#f5f7fb" in context.main_window.styleSheet()

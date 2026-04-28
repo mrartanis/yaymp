@@ -764,6 +764,7 @@ class MainWindow(
     def _set_theme_preference(self, theme: str) -> None:
         self._container.services.settings_service.save_theme_preference(theme)
         self._render_theme_preference(theme)
+        self._apply_theme()
         self._status_label.setText(f"Theme preference: {theme}")
 
     def _render_theme_preference(self, theme: str) -> None:
@@ -790,9 +791,8 @@ class MainWindow(
             self._quality_combo.setCurrentIndex(quality_index)
         for candidate, button in self._quality_buttons.items():
             button.setChecked(candidate is quality)
-        self._render_theme_preference(
-            self._container.services.settings_service.load_theme_preference()
-        )
+        self._render_theme_preference(self._stored_theme_preference())
+        self._apply_theme()
 
     def _select_queue_item(self, item: QListWidgetItem) -> None:
         self._select_queue_highlight(item)
@@ -948,7 +948,7 @@ class MainWindow(
         self._like_track_button.setIcon(
             create_icon("heart.svg", color=self._accent_color)
             if is_liked
-            else create_icon("heart_outline.svg")
+            else create_icon("heart_outline.svg", color=self._theme_icon_color())
         )
         self._like_track_button.setToolTip(
             "Unlike current track" if is_liked else "Like current track"
@@ -957,11 +957,13 @@ class MainWindow(
     def _render_play_pause_button(self, status: PlaybackStatus) -> None:
         self._play_pause_button.setProperty("playback_status", status.value)
         if status is PlaybackStatus.PLAYING:
-            self._play_pause_button.setIcon(create_icon("pause.svg"))
+            self._play_pause_button.setIcon(
+                create_icon("pause.svg", color=self._accent_text_color())
+            )
             self._play_pause_button.setToolTip("Pause")
             self._play_pause_button.setAccessibleName("Pause")
             return
-        self._play_pause_button.setIcon(create_icon("play.svg"))
+        self._play_pause_button.setIcon(create_icon("play.svg", color=self._accent_text_color()))
         self._play_pause_button.setToolTip("Play")
         self._play_pause_button.setAccessibleName("Play")
 
@@ -1632,14 +1634,71 @@ class MainWindow(
             build_main_window_stylesheet(
                 accent=self._accent_color,
                 accent_text=self._accent_text_color(),
+                theme=self._resolved_theme_mode(),
             )
         )
+        self._refresh_theme_icons()
         if self._browser_dialog is not None:
             self._browser_dialog.setStyleSheet(self.styleSheet())
         if self._settings_popup is not None:
             self._settings_popup.setStyleSheet(self.styleSheet())
         if self._volume_popup is not None:
             self._volume_popup.setStyleSheet(self.styleSheet())
+
+    def _stored_theme_preference(self) -> str:
+        return self._container.services.settings_service.load_theme_preference()
+
+    def _resolved_theme_mode(self) -> str:
+        preference = self._stored_theme_preference()
+        if preference in {"light", "dark"}:
+            return preference
+        app = QApplication.instance()
+        if app is None:
+            return "dark"
+        return (
+            "light"
+            if app.styleHints().colorScheme() == Qt.ColorScheme.Light
+            else "dark"
+        )
+
+    def _theme_icon_color(self) -> str:
+        return "#1f2736" if self._resolved_theme_mode() == "light" else "#ffffff"
+
+    def _refresh_theme_icons(self) -> None:
+        icon_color = self._theme_icon_color()
+        if hasattr(self, "_window_minimize_button"):
+            self._window_minimize_button.setIcon(
+                create_icon("window-minimize.svg", color=icon_color)
+            )
+        if hasattr(self, "_window_maximize_button"):
+            self._window_maximize_button.setIcon(
+                create_icon("window-maximize.svg", color=icon_color)
+            )
+        if hasattr(self, "_window_close_button"):
+            self._window_close_button.setIcon(create_icon("window-close.svg", color=icon_color))
+        if hasattr(self, "_volume_button"):
+            self._volume_button.setIcon(create_icon("volume.svg", color=icon_color))
+        if hasattr(self, "_previous_button"):
+            self._previous_button.setIcon(create_icon("previous.svg", color=icon_color))
+        if hasattr(self, "_next_button"):
+            self._next_button.setIcon(create_icon("next.svg", color=icon_color))
+        if hasattr(self, "_play_all_button"):
+            self._play_all_button.setIcon(create_icon("play.svg", color=icon_color))
+        if hasattr(self, "_append_all_button"):
+            self._append_all_button.setIcon(create_icon("add_to_playlist.svg", color=icon_color))
+        if hasattr(self, "_queue_shuffle_button"):
+            self._queue_shuffle_button.setIcon(
+                create_icon("shuffle_playlist.svg", color=icon_color)
+            )
+        if hasattr(self, "_clear_queue_button"):
+            self._clear_queue_button.setIcon(create_icon("clear_playlist.svg", color=icon_color))
+        if hasattr(self, "_play_pause_button"):
+            status_value = self._play_pause_button.property("playback_status") or "stopped"
+            self._render_play_pause_button(PlaybackStatus(status_value))
+        if hasattr(self, "_like_track_button"):
+            self._render_current_track_like_button(
+                self._current_track.is_liked if self._current_track else False
+            )
 
     def _plain_frame(self, name: str) -> QFrame:
         frame = QFrame()
