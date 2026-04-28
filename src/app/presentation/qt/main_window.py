@@ -4,6 +4,7 @@ import sys
 from dataclasses import replace
 from os import environ
 from pathlib import Path
+from time import monotonic
 
 import shiboken6
 from PySide6.QtCore import QEvent, QPoint, Qt, QTimer, QUrl
@@ -73,6 +74,7 @@ class MainWindow(
     _PLAYER_PANEL_COMPACT_HEIGHT = 434
     _QUEUE_PANEL_MIN_HEIGHT = 172
     _WINDOW_MIN_HEIGHT = 704
+    _QUEUE_AUTOSCROLL_IDLE_SECONDS = 1.6
 
     def __init__(self, *, container: AppContainer) -> None:
         super().__init__()
@@ -128,6 +130,7 @@ class MainWindow(
         self._rendered_active_index: int | None = None
         self._rendered_playback_status = PlaybackStatus.STOPPED
         self._queue_selected_index: int | None = None
+        self._queue_last_interaction_at = 0.0
         self._track_like_overrides: dict[str, bool] = {}
         self._track_label_base_sizes: dict[QLabel, int] = {}
         self._updating_resize_cursor = False
@@ -726,6 +729,8 @@ class MainWindow(
         self._queue_list.setObjectName("queue-list")
         self._queue_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._queue_list.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self._queue_list.installEventFilter(self)
+        self._queue_list.viewport().installEventFilter(self)
         self._queue_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._queue_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         footer = QHBoxLayout()
@@ -958,11 +963,13 @@ class MainWindow(
         self._apply_theme()
 
     def _select_queue_item(self, item: QListWidgetItem) -> None:
+        self._mark_queue_user_interaction()
         self._select_queue_highlight(item)
         row = self._queue_list.row(item)
         self._controller.select_index(row)
 
     def _select_queue_highlight(self, item: QListWidgetItem) -> None:
+        self._mark_queue_user_interaction()
         self._queue_selected_index = self._queue_list.row(item)
         self._update_queue_active_row(
             self._rendered_active_index,
@@ -972,10 +979,20 @@ class MainWindow(
     def _select_queue_highlight_row(self, row: int) -> None:
         if not self._queue_list.hasFocus():
             return
+        self._mark_queue_user_interaction()
         self._queue_selected_index = row if row >= 0 else None
         self._update_queue_active_row(
             self._rendered_active_index,
             self._rendered_playback_status,
+        )
+
+    def _mark_queue_user_interaction(self) -> None:
+        self._queue_last_interaction_at = monotonic()
+
+    def _should_autoscroll_queue(self) -> bool:
+        return (
+            monotonic() - self._queue_last_interaction_at
+            >= self._QUEUE_AUTOSCROLL_IDLE_SECONDS
         )
 
     def _open_content_item(self, item: QListWidgetItem) -> None:

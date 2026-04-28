@@ -89,7 +89,11 @@ class MainWindowQueueMixin:
         elif active_changed or status_changed:
             self._update_queue_active_row(active_index, playback_status)
 
-        if active_changed and active_index is not None:
+        if (
+            active_changed
+            and active_index is not None
+            and self._should_autoscroll_queue()
+        ):
             active_item = self._queue_list.item(active_index)
             if active_item is not None:
                 self._queue_list.scrollToItem(active_item)

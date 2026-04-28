@@ -47,12 +47,15 @@ class MainWindowWindowingMixin:
         settings_popup = getattr(self, "_settings_popup", None)
         volume_button = getattr(self, "_volume_button", None)
         volume_popup = getattr(self, "_volume_popup", None)
+        queue_list = getattr(self, "_queue_list", None)
         player_panel_frame = getattr(self, "_player_panel_frame", None)
         track_metadata_zone = getattr(self, "_track_metadata_zone", None)
         artwork_label = getattr(self, "_artwork_label", None)
         track_title_label = getattr(self, "_track_title_label", None)
         track_meta_label = getattr(self, "_track_meta_label", None)
         track_album_label = getattr(self, "_track_album_label", None)
+        queue_viewport = queue_list.viewport() if queue_list is not None else None
+        mark_queue_user_interaction = getattr(self, "_mark_queue_user_interaction", None)
         if watched is auth_label:
             if event.type() == QEvent.Type.MouseButtonPress:
                 if settings_popup is not None and settings_popup.isVisible():
@@ -104,6 +107,15 @@ class MainWindowWindowingMixin:
         if watched is volume_popup:
             if event.type() == QEvent.Type.Leave:
                 self._hide_volume_popup_if_idle()
+            return False
+        if watched in {queue_list, queue_viewport}:
+            if event.type() in {
+                QEvent.Type.Wheel,
+                QEvent.Type.MouseButtonPress,
+                QEvent.Type.MouseButtonDblClick,
+                QEvent.Type.KeyPress,
+            } and callable(mark_queue_user_interaction):
+                mark_queue_user_interaction()
             return False
         return super().eventFilter(watched, event)
 
