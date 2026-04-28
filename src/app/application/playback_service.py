@@ -32,6 +32,7 @@ class PlaybackService:
     _STATION_QUEUE_REFILL_THRESHOLD = 3
     _STATION_QUEUE_BATCH_SIZE = 10
     _STATION_QUEUE_REFILL_MAX_ATTEMPTS = 3
+    _STREAM_PREFETCH_AHEAD = 2
     _STATION_QUEUE_RETAIN_BEFORE_ACTIVE = 10
     _STATION_QUEUE_MAX_LENGTH = 60
     _STATION_QUEUE_PERSIST_LENGTH = 50
@@ -371,6 +372,7 @@ class PlaybackService:
         engine_state = self._playback_engine.get_state()
         if self._should_auto_advance(engine_state):
             return self.next()
+        self._prefetch_queue_ahead()
         self._persist_playback_position_if_due(engine_state)
         return self._build_snapshot(engine_state)
 
@@ -656,6 +658,32 @@ class PlaybackService:
             self._trim_station_queue()
             self._rebuild_play_order(anchor_index=self._active_index)
             self._persist_playback_queue(position_ms=self._current_position_ms())
+
+    def _prefetch_queue_ahead(self) -> None:
+        self._ensure_station_queue_capacity(
+            min_remaining=max(
+                self._STATION_QUEUE_REFILL_THRESHOLD,
+                self._STREAM_PREFETCH_AHEAD,
+            )
+        )
+        if self._active_index is None:
+            return
+        last_index = min(
+            len(self._queue),
+            self._active_index + self._STREAM_PREFETCH_AHEAD + 1,
+        )
+        for index in range(self._active_index + 1, last_index):
+            item = self._queue[index]
+            if item.track.stream_ref:
+                continue
+            try:
+                self._queue[index] = self._prepare_queue_item(item)
+            except StreamResolveError as exc:
+                self._logger.warning(
+                    "Failed to prefetch stream for track %s: %s",
+                    item.track.id,
+                    exc,
+                )
 
     def _trim_station_queue(self) -> None:
         current_item = self.current_item()
