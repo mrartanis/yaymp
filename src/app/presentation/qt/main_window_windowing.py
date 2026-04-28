@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+
 from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtGui import QCloseEvent, QMouseEvent, QResizeEvent, QShowEvent
 
@@ -25,6 +27,12 @@ class MainWindowWindowingMixin:
         relayout_queue_rows = getattr(self, "_relayout_queue_rows", None)
         if callable(relayout_queue_rows):
             QTimer.singleShot(0, relayout_queue_rows)
+
+    def changeEvent(self, event: QEvent) -> None:
+        super().changeEvent(event)
+        refresh_window_button = getattr(self, "_refresh_window_maximize_button", None)
+        if callable(refresh_window_button) and event.type() == QEvent.Type.WindowStateChange:
+            refresh_window_button()
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self._system_media.shutdown()
@@ -101,3 +109,6 @@ class MainWindowWindowingMixin:
 
     def _as_mouse_event(self, event: QEvent) -> QMouseEvent | None:
         return event if isinstance(event, QMouseEvent) else None
+
+    def _is_macos_window_controls(self) -> bool:
+        return sys.platform == "darwin"

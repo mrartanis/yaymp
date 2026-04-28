@@ -883,6 +883,20 @@ class MainWindow(
         self._controller.play()
 
     def _toggle_maximized(self) -> None:
+        if self._is_macos_window_controls():
+            if self.isFullScreen():
+                self.showNormal()
+                return
+            if QApplication.keyboardModifiers() & Qt.KeyboardModifier.AltModifier:
+                if self.isMaximized():
+                    self.showNormal()
+                else:
+                    self.showMaximized()
+                self._refresh_window_maximize_button()
+                return
+            self.showFullScreen()
+            self._refresh_window_maximize_button()
+            return
         if self.isMaximized():
             self.showNormal()
             return
@@ -1818,9 +1832,7 @@ class MainWindow(
                 create_icon("window-minimize.svg", color=icon_color)
             )
         if hasattr(self, "_window_maximize_button"):
-            self._window_maximize_button.setIcon(
-                create_icon("window-maximize.svg", color=icon_color)
-            )
+            self._refresh_window_maximize_button()
         if hasattr(self, "_window_close_button"):
             self._window_close_button.setIcon(create_icon("window-close.svg", color=icon_color))
         if hasattr(self, "_volume_button"):
@@ -1846,6 +1858,31 @@ class MainWindow(
             self._render_current_track_like_button(
                 self._current_track.is_liked if self._current_track else False
             )
+
+    def _refresh_window_maximize_button(self) -> None:
+        if not hasattr(self, "_window_maximize_button"):
+            return
+        icon_color = self._theme_icon_color()
+        if self._is_macos_window_controls() and self._title_bar is not None:
+            self._title_bar.setVisible(not self.isFullScreen())
+        if not self._is_macos_window_controls():
+            self._window_maximize_button.setIcon(
+                create_icon("window-maximize.svg", color=icon_color)
+            )
+            self._window_maximize_button.setToolTip(
+                "Restore" if self.isMaximized() else "Maximize"
+            )
+            return
+        if self.isFullScreen():
+            self._window_maximize_button.setIcon(
+                create_icon("window-maximize.svg", color=icon_color)
+            )
+            self._window_maximize_button.setToolTip("Exit Full Screen")
+            return
+        self._window_maximize_button.setIcon(
+            create_icon("window-maximize.svg", color=icon_color)
+        )
+        self._window_maximize_button.setToolTip("Full Screen")
 
     def _update_responsive_layout(self) -> None:
         self._set_sidebar_docked(self.width() >= self._SIDEBAR_DOCK_BREAKPOINT)
