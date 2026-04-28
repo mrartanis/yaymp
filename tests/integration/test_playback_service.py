@@ -860,6 +860,42 @@ def test_station_queue_refills_when_near_end() -> None:
     assert music_service.station_requests == ["user:onyourwave", "user:onyourwave"]
 
 
+def test_station_queue_next_retries_duplicate_refills_before_stopping() -> None:
+    music_service = FakeMusicService(stream_ref="resolved://wave")
+    music_service.station_batches["user:onyourwave"] = [
+        (Track(id="w1", title="Wave 1", artists=("Artist",), duration_ms=1_000),),
+        (Track(id="w1", title="Wave 1", artists=("Artist",), duration_ms=1_000),),
+        (Track(id="w2", title="Wave 2", artists=("Artist",), duration_ms=1_000),),
+    ]
+    service = PlaybackService(
+        playback_engine=FakePlaybackEngine(),
+        logger=TestLogger(),
+        music_service=music_service,
+    )
+
+    service.replace_queue(
+        (
+            Track(
+                id="w1",
+                title="Wave 1",
+                artists=("Artist",),
+                duration_ms=1_000,
+                stream_ref="resolved://wave",
+            ),
+        ),
+        start_index=0,
+        source_type="station",
+        source_id="user:onyourwave",
+    )
+
+    snapshot = service.next()
+
+    assert snapshot.current_item is not None
+    assert snapshot.current_item.track.id == "w2"
+    assert [item.track.id for item in snapshot.queue] == ["w1", "w2"]
+    assert len(music_service.station_requests) >= 3
+
+
 def test_station_queue_persistence_is_bounded_around_active_item() -> None:
     state_repo = InMemoryPlaybackStateRepo()
     tracks = tuple(

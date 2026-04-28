@@ -31,6 +31,7 @@ class PlaybackSnapshot:
 class PlaybackService:
     _STATION_QUEUE_REFILL_THRESHOLD = 3
     _STATION_QUEUE_BATCH_SIZE = 10
+    _STATION_QUEUE_REFILL_MAX_ATTEMPTS = 3
     _STATION_QUEUE_RETAIN_BEFORE_ACTIVE = 10
     _STATION_QUEUE_MAX_LENGTH = 60
     _STATION_QUEUE_PERSIST_LENGTH = 50
@@ -330,6 +331,7 @@ class PlaybackService:
             self._activate_index(self._active_index)
             return self.play()
 
+        self._ensure_station_queue_capacity(min_remaining=1)
         next_index = self._resolve_next_index()
         if next_index is None:
             self.stop()
@@ -607,38 +609,49 @@ class PlaybackService:
         if not station_id:
             return
 
-        fetched_tracks = merge_cached_liked_states(
-            tuple(
-                self._music_service.get_station_tracks(
-                    station_id,
-                    limit=self._STATION_QUEUE_BATCH_SIZE,
-                )
-            ),
-            self._library_cache_repo,
-            user_id=self._current_user_id(),
-        )
-        if not fetched_tracks:
-            return
-
         existing_ids = {item.track.id for item in self._queue}
         next_source_index = len(self._queue)
         appended = 0
-        for track in fetched_tracks:
-            if track.id in existing_ids:
-                continue
-            self._queue.append(
-                QueueItem(
-                    track=track,
-                    source_type="station",
-                    source_id=station_id,
-                    source_index=next_source_index,
-                )
-            )
-            existing_ids.add(track.id)
-            next_source_index += 1
-            appended += 1
 
-        if appended:
+        for _attempt in range(self._STATION_QUEUE_REFILL_MAX_ATTEMPTS):
+            remaining = len(self._queue) - self._active_index - 1
+            if remaining >= min_remaining:
+                break
+
+            fetched_tracks = merge_cached_liked_states(
+                tuple(
+                    self._music_service.get_station_tracks(
+                        station_id,
+                        limit=self._STATION_QUEUE_BATCH_SIZE,
+                    )
+                ),
+                self._library_cache_repo,
+                user_id=self._current_user_id(),
+            )
+            if not fetched_tracks:
+                break
+
+            appended_this_attempt = 0
+            for track in fetched_tracks:
+                if track.id in existing_ids:
+                    continue
+                self._queue.append(
+                    QueueItem(
+                        track=track,
+                        source_type="station",
+                        source_id=station_id,
+                        source_index=next_source_index,
+                    )
+                )
+                existing_ids.add(track.id)
+                next_source_index += 1
+                appended += 1
+                appended_this_attempt += 1
+
+            if appended_this_attempt == 0:
+                continue
+
+        if appended > 0:
             self._logger.info("Appended %s station tracks for %s", appended, station_id)
             self._trim_station_queue()
             self._rebuild_play_order(anchor_index=self._active_index)
