@@ -16,6 +16,7 @@ from PySide6.QtGui import (
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest
 from PySide6.QtWidgets import (
     QApplication,
+    QBoxLayout,
     QComboBox,
     QDialog,
     QFrame,
@@ -62,6 +63,16 @@ class MainWindow(
     QMainWindow,
 ):
     _RESIZE_MARGIN = 8
+    _SIDEBAR_DOCK_BREAKPOINT = 1180
+    _BROWSER_DOCK_BREAKPOINT = 1580
+    _PLAYER_MIN_WIDTH = 560
+    _PLAYER_MAX_WIDTH = 700
+    _PLAYER_QUEUE_WIDE_BREAKPOINT = 1700
+    _COMPACT_ARTWORK_SIZE = 300
+    _WIDE_ARTWORK_SIZE = 420
+    _PLAYER_PANEL_COMPACT_HEIGHT = 434
+    _QUEUE_PANEL_MIN_HEIGHT = 172
+    _WINDOW_MIN_HEIGHT = 704
 
     def __init__(self, *, container: AppContainer) -> None:
         super().__init__()
@@ -97,10 +108,18 @@ class MainWindow(
         self._theme_buttons: dict[str, QPushButton] = {}
         self._volume_popup: QFrame | None = None
         self._sidebar_popup: QFrame | None = None
+        self._sidebar_panel: QFrame | None = None
+        self._sidebar_host: QWidget | None = None
+        self._sidebar_host_layout: QVBoxLayout | None = None
+        self._sidebar_docked = False
         self._title_bar: QFrame | None = None
         self._title_drag_handle: QWidget | None = None
         self._player_panel_frame: QFrame | None = None
         self._track_metadata_zone: QWidget | None = None
+        self._browser_host: QWidget | None = None
+        self._browser_host_layout: QVBoxLayout | None = None
+        self._browser_docked = False
+        self._player_queue_wide = False
         self._rendered_queue_key: tuple[tuple[str, str, str, str], ...] = ()
         self._rendered_active_index: int | None = None
         self._queue_selected_index: int | None = None
@@ -117,7 +136,8 @@ class MainWindow(
             window=self,
             logger=container.logger,
         )
-        self.setMinimumWidth(560)
+        self.setMinimumWidth(600)
+        self.setMinimumHeight(self._WINDOW_MIN_HEIGHT)
         self.resize(self.minimumWidth(), 720)
         self._apply_saved_settings_to_ui()
         self._wire_controller()
@@ -203,13 +223,50 @@ class MainWindow(
     def _build_body(self) -> QHBoxLayout:
         layout = QHBoxLayout()
         layout.setSpacing(8)
+        self._sidebar_host = QWidget()
+        self._sidebar_host.setMinimumWidth(170)
+        self._sidebar_host.setMaximumWidth(210)
+        self._sidebar_host.installEventFilter(self)
+        self._sidebar_host_layout = QVBoxLayout(self._sidebar_host)
+        self._sidebar_host_layout.setContentsMargins(0, 0, 0, 0)
+        self._sidebar_host_layout.setSpacing(0)
+        self._sidebar_host.hide()
+        layout.addWidget(self._sidebar_host, 0)
         main_column = QVBoxLayout()
         main_column.setSpacing(4)
-        main_column.addWidget(self._build_player_panel(), 0)
-        main_column.addWidget(self._build_queue_panel(), 1)
-        layout.addLayout(main_column, 1)
+        main_column.setContentsMargins(0, 0, 0, 0)
+        self._main_column_widget = QWidget()
+        self._main_column_widget.installEventFilter(self)
+        self._main_column_widget.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
+        self._main_column_layout = QVBoxLayout(self._main_column_widget)
+        self._main_column_layout.setContentsMargins(0, 0, 0, 0)
+        self._main_column_layout.setSpacing(4)
+        self._main_column_layout.addWidget(self._build_player_panel(), 0)
+        self._main_column_layout.addWidget(self._build_queue_panel(), 1)
+        main_column.addWidget(self._main_column_widget, 1)
+        layout.addLayout(main_column, 2)
+        self._browser_host = QWidget()
+        self._browser_host.setMinimumWidth(460)
+        self._browser_host.setMaximumWidth(860)
+        self._browser_host.installEventFilter(self)
+        self._browser_host.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
+        self._browser_host_layout = QVBoxLayout(self._browser_host)
+        self._browser_host_layout.setContentsMargins(0, 0, 0, 0)
+        self._browser_host_layout.setSpacing(0)
+        self._browser_host.hide()
+        layout.addWidget(self._browser_host, 1)
 
+        self._sidebar_panel = self._build_nav_panel()
+        self._sidebar_panel.installEventFilter(self)
         self._build_sidebar_popup()
+        self._browser_panel = self._build_browser_panel()
+        self._browser_panel.installEventFilter(self)
         self._build_browser_dialog()
         return layout
 
@@ -225,7 +282,12 @@ class MainWindow(
         self._seek_slider.setSingleStep(1_000)
         self._seek_slider.setPageStep(10_000)
         self._seek_slider.setObjectName("seek-slider")
-        self._seek_slider.setFixedWidth(302)
+        self._seek_slider.setMinimumWidth(280)
+        self._seek_slider.setMaximumWidth(16_777_215)
+        self._seek_slider.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
         self._seek_label = self._panel_label("0:00 / 0:00")
         self._seek_label.setObjectName("seek-label")
         self._seek_label.setFixedHeight(28)
@@ -295,7 +357,7 @@ class MainWindow(
         self._artwork_label = QLabel("No cover")
         self._artwork_label.setObjectName("album-art")
         self._artwork_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._artwork_label.setFixedSize(300, 300)
+        self._artwork_label.setFixedSize(self._COMPACT_ARTWORK_SIZE, self._COMPACT_ARTWORK_SIZE)
         self._artwork_label.setSizePolicy(
             QSizePolicy.Policy.Fixed,
             QSizePolicy.Policy.Fixed,
@@ -333,12 +395,8 @@ class MainWindow(
         layout.addLayout(top_row)
         layout.addSpacing(6)
 
-        hero_widget = QWidget()
-        hero_widget.setFixedHeight(self._artwork_label.height())
-        hero = QHBoxLayout(hero_widget)
-        hero.setSpacing(14)
-        hero.setContentsMargins(0, 0, 0, 0)
-        hero.addWidget(self._artwork_label, 0, Qt.AlignmentFlag.AlignCenter)
+        self._hero_widget = QWidget()
+        self._hero_widget.setFixedHeight(self._artwork_label.height())
         info_widget = QWidget()
         info_widget.setMinimumWidth(0)
         info_widget.setFixedHeight(self._artwork_label.height())
@@ -346,9 +404,10 @@ class MainWindow(
             QSizePolicy.Policy.Ignored,
             QSizePolicy.Policy.Fixed,
         )
-        info_layout = QVBoxLayout(info_widget)
-        info_layout.setSpacing(5)
-        info_layout.setContentsMargins(0, 0, 0, 0)
+        self._hero_info_widget = info_widget
+        self._hero_info_layout = QVBoxLayout(info_widget)
+        self._hero_info_layout.setSpacing(5)
+        self._hero_info_layout.setContentsMargins(0, 0, 0, 0)
         text_block = QWidget()
         text_block.setObjectName("track-metadata-zone")
         text_block.setMinimumWidth(0)
@@ -359,41 +418,63 @@ class MainWindow(
         )
         text_block.installEventFilter(self)
         self._track_metadata_zone = text_block
-        text_block_layout = QVBoxLayout(text_block)
-        text_block_layout.setContentsMargins(0, 0, 0, 0)
-        text_block_layout.setSpacing(5)
-        text_block_layout.addStretch(1)
+        self._text_block_layout = QVBoxLayout(text_block)
+        self._text_block_layout.setContentsMargins(0, 0, 0, 0)
+        self._text_block_layout.setSpacing(5)
+        self._text_block_layout.addStretch(1)
         self._track_title_label.installEventFilter(self)
-        text_block_layout.addWidget(self._track_title_label)
+        self._text_block_layout.addWidget(self._track_title_label)
         self._track_meta_label.installEventFilter(self)
-        text_block_layout.addWidget(self._track_meta_label)
+        self._text_block_layout.addWidget(self._track_meta_label)
         self._track_album_label.installEventFilter(self)
-        text_block_layout.addWidget(self._track_album_label)
-        text_block_layout.addStretch(1)
-        info_layout.addStretch(1)
-        info_layout.addWidget(text_block)
-        info_layout.addStretch(1)
-        info_layout.addLayout(self._build_transport_bar())
-        info_layout.addSpacing(10)
-        hero.addWidget(info_widget, 1)
+        self._text_block_layout.addWidget(self._track_album_label)
+        self._text_block_layout.addStretch(1)
+        self._transport_widget = QWidget()
+        self._transport_widget.setSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Fixed,
+        )
+        self._transport_widget.setLayout(self._build_transport_bar())
+        self._hero_info_layout.addStretch(1)
+        self._hero_info_layout.addWidget(text_block)
+        self._hero_info_layout.addStretch(1)
+        self._hero_info_layout.addWidget(self._transport_widget)
+        self._hero_info_layout.addSpacing(10)
 
-        progress_row = QHBoxLayout()
+        self._progress_widget = QWidget()
+        self._progress_widget.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
+        progress_row = QHBoxLayout(self._progress_widget)
         progress_row.setSpacing(8)
         progress_row.setContentsMargins(0, 0, 0, 0)
-        progress_row.addWidget(self._seek_slider, 0)
+        progress_row.addWidget(self._seek_slider, 1)
         progress_row.addWidget(self._seek_label)
         progress_row.addWidget(self._volume_button)
         progress_row.addWidget(self._like_track_button)
-        progress_row.addStretch(1)
 
-        secondary_row = QHBoxLayout()
-        secondary_row.setSpacing(8)
-        secondary_row.setContentsMargins(0, 0, 0, 0)
-        secondary_row.addStretch(1)
+        self._player_right_widget = QWidget()
+        self._player_right_widget.setMinimumWidth(self._PLAYER_MIN_WIDTH)
+        self._player_right_widget.setMaximumWidth(self._PLAYER_MAX_WIDTH)
+        self._player_right_widget.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Preferred,
+        )
+        self._player_right_layout = QVBoxLayout(self._player_right_widget)
+        self._player_right_layout.setContentsMargins(0, 0, 0, 0)
+        self._player_right_layout.setSpacing(8)
+        self._player_right_layout.addWidget(self._hero_widget)
+        self._player_right_layout.addWidget(self._progress_widget)
+        self._player_right_layout.addStretch(1)
 
-        layout.addWidget(hero_widget)
-        layout.addLayout(progress_row)
-        layout.addLayout(secondary_row)
+        self._player_body_widget = QWidget()
+        self._player_body_layout = QHBoxLayout(self._player_body_widget)
+        self._player_body_layout.setContentsMargins(0, 0, 0, 0)
+        self._player_body_layout.setSpacing(14)
+        self._player_body_layout.addWidget(self._player_right_widget, 0)
+
+        layout.addWidget(self._player_body_widget, 1)
         self._build_settings_popup()
         self._build_volume_popup()
         self._track_label_base_sizes = {
@@ -401,6 +482,7 @@ class MainWindow(
             self._track_meta_label: 16,
             self._track_album_label: 13,
         }
+        self._configure_player_right_layout(wide=False)
         return frame
 
     def _build_nav_panel(self) -> QFrame:
@@ -408,6 +490,7 @@ class MainWindow(
         frame.setObjectName("sidebar")
         frame.setMinimumWidth(170)
         frame.setMaximumWidth(210)
+        frame.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         layout = frame.layout()
         assert layout is not None
         self._search_nav_button = QPushButton("Search")
@@ -430,14 +513,21 @@ class MainWindow(
         discovery_label.setObjectName("nav-section")
         layout.addWidget(discovery_label)
         layout.addWidget(self._search_nav_button)
+        layout.addStretch(1)
         return frame
 
     def _build_sidebar_popup(self) -> None:
-        self._sidebar_popup = self._build_nav_panel()
+        self._sidebar_popup = self._sidebar_panel
+        if self._sidebar_popup is None:
+            return
+        layout = self._sidebar_popup.layout()
+        if layout is not None:
+            layout.setContentsMargins(8, 10, 8, 10)
         self._sidebar_popup.setParent(self)
+        self._sidebar_popup.setWindowFlags(Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
         self._sidebar_popup.adjustSize()
         self._sidebar_popup.hide()
-        self._sidebar_popup.move(14, 54)
+        self._sidebar_popup.move(self.mapToGlobal(QPoint(14, 54)))
         self._sidebar_popup.raise_()
 
     def _build_settings_popup(self) -> None:
@@ -510,6 +600,10 @@ class MainWindow(
 
     def _build_browser_panel(self) -> QFrame:
         frame = self._panel_frame("Search / Library")
+        frame.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
         base_layout = frame.layout()
         assert base_layout is not None
         header_row = QHBoxLayout()
@@ -540,8 +634,10 @@ class MainWindow(
         self._content_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._play_all_button = QPushButton("Play all")
         self._play_all_button.setIcon(create_icon("play.svg"))
+        self._play_all_button.setFixedHeight(32)
         self._append_all_button = QPushButton("Append all")
         self._append_all_button.setIcon(create_icon("add_to_playlist.svg"))
+        self._append_all_button.setFixedHeight(32)
         header_row.addWidget(self._browser_back_button)
         header_row.addWidget(self._browser_title_label, 1)
         header_row.addWidget(self._browser_close_button)
@@ -550,16 +646,19 @@ class MainWindow(
         search_row.addWidget(self._search_input, 1)
         search_row.addWidget(self._search_button)
         search_row.addWidget(self._recent_searches_combo)
-        like_row = QHBoxLayout()
+        browser_footer = QWidget()
+        browser_footer.setFixedHeight(32)
+        like_row = QHBoxLayout(browser_footer)
         like_row.setSpacing(8)
-        like_row.addWidget(self._play_all_button)
-        like_row.addWidget(self._append_all_button)
+        like_row.setContentsMargins(0, 0, 0, 0)
+        like_row.addWidget(self._play_all_button, 0, Qt.AlignmentFlag.AlignVCenter)
+        like_row.addWidget(self._append_all_button, 0, Qt.AlignmentFlag.AlignVCenter)
         like_row.addStretch(1)
         base_layout.addLayout(header_row)
         base_layout.addLayout(search_row)
         base_layout.addWidget(self._browser_tabs)
         base_layout.addWidget(self._content_list, 1)
-        base_layout.addLayout(like_row)
+        base_layout.addWidget(browser_footer, 0, Qt.AlignmentFlag.AlignBottom)
         return frame
 
     def _build_browser_dialog(self) -> None:
@@ -569,13 +668,14 @@ class MainWindow(
         self._browser_dialog.resize(860, 560)
         dialog_layout = QVBoxLayout(self._browser_dialog)
         dialog_layout.setContentsMargins(0, 0, 0, 0)
-        self._browser_panel = self._build_browser_panel()
         dialog_layout.addWidget(self._browser_panel)
         self._browser_dialog.setStyleSheet(self.styleSheet())
 
     def _build_queue_panel(self) -> QFrame:
         frame = self._panel_frame("Queue")
         frame.setObjectName("queue-panel")
+        self._queue_panel_widget = frame
+        frame.setMinimumHeight(self._QUEUE_PANEL_MIN_HEIGHT)
         layout = frame.layout()
         assert layout is not None
         self._queue_separator = QFrame()
@@ -673,6 +773,8 @@ class MainWindow(
     def _toggle_sidebar(self) -> None:
         if self._sidebar_popup is None:
             return
+        if self._sidebar_docked:
+            return
         if self._sidebar_popup.isVisible():
             self._sidebar_popup.hide()
             return
@@ -680,11 +782,15 @@ class MainWindow(
             self,
             QPoint(0, self._sidebar_toggle_button.height() + 6),
         )
-        self._sidebar_popup.move(position)
+        self._sidebar_popup.move(self.mapToGlobal(position))
         self._sidebar_popup.show()
         self._sidebar_popup.raise_()
 
     def _show_browser_panel(self) -> None:
+        if self._browser_docked:
+            if self._browser_host is not None:
+                self._browser_host.show()
+            return
         if self._browser_dialog is None:
             return
         self._browser_dialog.show()
@@ -692,6 +798,8 @@ class MainWindow(
         self._browser_dialog.activateWindow()
 
     def _hide_browser_panel(self) -> None:
+        if self._browser_docked:
+            return
         if self._browser_dialog is not None:
             self._browser_dialog.hide()
 
@@ -1699,6 +1807,208 @@ class MainWindow(
             self._render_current_track_like_button(
                 self._current_track.is_liked if self._current_track else False
             )
+
+    def _update_responsive_layout(self) -> None:
+        self._set_sidebar_docked(self.width() >= self._SIDEBAR_DOCK_BREAKPOINT)
+        self._set_browser_docked(self.width() >= self._BROWSER_DOCK_BREAKPOINT)
+        self._set_player_queue_wide(self.width() >= self._PLAYER_QUEUE_WIDE_BREAKPOINT)
+
+    def _set_sidebar_docked(self, docked: bool) -> None:
+        if self._sidebar_docked == docked or self._sidebar_panel is None:
+            return
+        self._sidebar_docked = docked
+        if docked:
+            if self._sidebar_popup is not None:
+                self._sidebar_popup.hide()
+            layout = self._sidebar_panel.layout()
+            if layout is not None:
+                layout.setContentsMargins(8, 0, 8, 2)
+            self._sidebar_panel.setWindowFlags(Qt.WindowType.Widget)
+            self._move_widget_to_layout(self._sidebar_panel, self._sidebar_host_layout)
+            if self._sidebar_host_layout is not None:
+                self._sidebar_host_layout.setAlignment(
+                    self._sidebar_panel,
+                    Qt.AlignmentFlag.AlignTop,
+                )
+            if self._sidebar_host is not None:
+                self._sidebar_host.show()
+            self._sidebar_panel.show()
+            self._sidebar_toggle_button.hide()
+            return
+        if self._sidebar_host_layout is not None:
+            self._sidebar_host_layout.removeWidget(self._sidebar_panel)
+        if self._sidebar_host is not None:
+            self._sidebar_host.hide()
+        layout = self._sidebar_panel.layout()
+        if layout is not None:
+            layout.setContentsMargins(8, 10, 8, 10)
+        self._sidebar_panel.setParent(self)
+        self._sidebar_panel.setWindowFlags(Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
+        self._sidebar_panel.hide()
+        self._sidebar_toggle_button.show()
+
+    def _set_browser_docked(self, docked: bool) -> None:
+        if self._browser_docked == docked or self._browser_panel is None:
+            return
+        self._browser_docked = docked
+        if docked:
+            if self._browser_dialog is not None:
+                self._browser_dialog.hide()
+            self._move_widget_to_layout(self._browser_panel, self._browser_host_layout)
+            if self._browser_host is not None:
+                self._browser_host.show()
+            self._browser_panel.show()
+            self._browser_close_button.hide()
+            return
+        if self._browser_host_layout is not None:
+            self._browser_host_layout.removeWidget(self._browser_panel)
+        if self._browser_host is not None:
+            self._browser_host.hide()
+        if self._browser_dialog is not None and self._browser_dialog.layout() is not None:
+            self._move_widget_to_layout(self._browser_panel, self._browser_dialog.layout())
+        self._browser_close_button.show()
+
+    def _move_widget_to_layout(self, widget: QWidget, layout) -> None:
+        parent = widget.parentWidget()
+        if parent is not None and parent.layout() is not None:
+            parent.layout().removeWidget(widget)
+        widget.setParent(None)
+        layout.addWidget(widget)
+        widget.show()
+
+    def _set_player_queue_wide(self, wide: bool) -> None:
+        queue_panel = getattr(self, "_queue_panel_widget", None)
+        if queue_panel is None or self._player_queue_wide == wide:
+            return
+        self._player_queue_wide = wide
+        if wide:
+            self._move_widget_to_layout(queue_panel, self._player_body_layout)
+            self._player_body_layout.setStretch(0, 1)
+            self._player_body_layout.setStretch(1, 0)
+            self._player_body_layout.removeWidget(self._player_right_widget)
+            self._player_body_layout.addWidget(self._player_right_widget, 0)
+            self._configure_player_right_layout(wide=True)
+            return
+        self._move_widget_to_layout(queue_panel, self._main_column_layout)
+        self._main_column_layout.setStretch(0, 1)
+        self._main_column_layout.setStretch(1, 1)
+        self._configure_player_right_layout(wide=False)
+
+    def _configure_player_right_layout(self, *, wide: bool) -> None:
+        self._apply_player_visual_mode(wide=wide)
+        self._rebuild_hero_layout(wide=wide)
+        self._player_right_layout.removeWidget(self._hero_widget)
+        self._player_right_layout.removeWidget(self._transport_widget)
+        self._player_right_layout.removeWidget(self._progress_widget)
+        self._clear_layout_widgets(self._player_right_layout)
+        if wide:
+            self._player_right_layout.addStretch(1)
+            self._player_right_layout.addWidget(self._hero_widget, 0, Qt.AlignmentFlag.AlignHCenter)
+            self._player_right_layout.addStretch(1)
+            self._player_right_layout.addWidget(
+                self._transport_widget,
+                0,
+                Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom,
+            )
+            self._player_right_layout.addWidget(self._progress_widget, 0)
+            return
+        self._player_right_layout.addWidget(self._hero_widget)
+        self._player_right_layout.addWidget(self._progress_widget)
+        if hasattr(self, "_player_panel_frame") and self._player_panel_frame is not None:
+            self._player_panel_frame.setFixedHeight(self._PLAYER_PANEL_COMPACT_HEIGHT)
+
+    def _apply_player_visual_mode(self, *, wide: bool) -> None:
+        artwork_size = self._WIDE_ARTWORK_SIZE if wide else self._COMPACT_ARTWORK_SIZE
+        self._artwork_label.setFixedSize(artwork_size, artwork_size)
+        if wide:
+            if self._player_panel_frame is not None:
+                self._player_panel_frame.setMinimumHeight(self._PLAYER_PANEL_COMPACT_HEIGHT)
+                self._player_panel_frame.setMaximumHeight(16_777_215)
+                self._player_panel_frame.setSizePolicy(
+                    QSizePolicy.Policy.Preferred,
+                    QSizePolicy.Policy.Expanding,
+                )
+            self._seek_slider.setMinimumWidth(max(320, artwork_size))
+            self._seek_slider.setMaximumWidth(16_777_215)
+            self._seek_slider.setSizePolicy(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Fixed,
+            )
+            self._progress_widget.setMinimumWidth(self._PLAYER_MIN_WIDTH)
+            self._progress_widget.setMaximumWidth(self._PLAYER_MAX_WIDTH)
+            self._progress_widget.setSizePolicy(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Fixed,
+            )
+            self._track_metadata_zone.setMinimumWidth(artwork_size)
+            self._track_metadata_zone.setMaximumWidth(self._PLAYER_MAX_WIDTH)
+            self._track_metadata_zone.setSizePolicy(
+                QSizePolicy.Policy.Preferred,
+                QSizePolicy.Policy.Fixed,
+            )
+            self._track_title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._track_meta_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._track_album_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        else:
+            if self._player_panel_frame is not None:
+                self._player_panel_frame.setFixedHeight(self._PLAYER_PANEL_COMPACT_HEIGHT)
+            self._seek_slider.setMinimumWidth(280)
+            self._seek_slider.setMaximumWidth(16_777_215)
+            self._seek_slider.setSizePolicy(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Fixed,
+            )
+            self._progress_widget.setMinimumWidth(self._PLAYER_MIN_WIDTH)
+            self._progress_widget.setMaximumWidth(self._PLAYER_MAX_WIDTH)
+            self._progress_widget.setSizePolicy(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Fixed,
+            )
+            self._track_metadata_zone.setMinimumWidth(0)
+            self._track_metadata_zone.setMaximumWidth(16_777_215)
+            self._track_metadata_zone.setSizePolicy(
+                QSizePolicy.Policy.Ignored,
+                QSizePolicy.Policy.Fixed,
+            )
+        self._fit_track_text_labels()
+
+    def _rebuild_hero_layout(self, *, wide: bool) -> None:
+        hero_layout = self._hero_widget.layout()
+        if hero_layout is None:
+            hero_layout = QBoxLayout(QBoxLayout.Direction.LeftToRight, self._hero_widget)
+            hero_layout.setContentsMargins(0, 0, 0, 0)
+        hero_layout.setSpacing(10 if wide else 14)
+        self._clear_layout_widgets(hero_layout)
+        if wide:
+            hero_layout.setDirection(QBoxLayout.Direction.TopToBottom)
+            hero_layout.addWidget(self._artwork_label, 0, Qt.AlignmentFlag.AlignHCenter)
+            hero_layout.addWidget(
+                self._track_metadata_zone,
+                0,
+                Qt.AlignmentFlag.AlignHCenter,
+            )
+            self._hero_widget.setMinimumHeight(self._artwork_label.height() + 220)
+            self._hero_widget.setMaximumHeight(16_777_215)
+            return
+        hero_layout.setDirection(QBoxLayout.Direction.LeftToRight)
+        hero_layout.addWidget(self._artwork_label, 0, Qt.AlignmentFlag.AlignCenter)
+        hero_layout.addWidget(self._hero_info_widget, 1)
+        self._hero_widget.setFixedHeight(self._artwork_label.height())
+        self._hero_info_layout.removeWidget(self._track_metadata_zone)
+        self._hero_info_layout.removeWidget(self._transport_widget)
+        self._clear_layout_widgets(self._hero_info_layout)
+        self._hero_info_layout.addStretch(1)
+        self._hero_info_layout.addWidget(self._track_metadata_zone)
+        self._hero_info_layout.addStretch(1)
+        self._hero_info_layout.addWidget(self._transport_widget)
+        self._hero_info_layout.addSpacing(10)
+
+    def _clear_layout_widgets(self, layout) -> None:
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(None)
 
     def _plain_frame(self, name: str) -> QFrame:
         frame = QFrame()

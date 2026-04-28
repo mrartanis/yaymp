@@ -8,6 +8,9 @@ class MainWindowWindowingMixin:
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
         self._fit_track_text_labels()
+        update_responsive_layout = getattr(self, "_update_responsive_layout", None)
+        if callable(update_responsive_layout):
+            update_responsive_layout()
         if self._auth_flow_checked:
             return
         self._auth_flow_checked = True
@@ -16,6 +19,9 @@ class MainWindowWindowingMixin:
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         self._fit_track_text_labels()
+        update_responsive_layout = getattr(self, "_update_responsive_layout", None)
+        if callable(update_responsive_layout):
+            update_responsive_layout()
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self._system_media.shutdown()
