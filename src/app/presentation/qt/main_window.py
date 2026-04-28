@@ -126,6 +126,7 @@ class MainWindow(
         self._player_queue_wide = False
         self._rendered_queue_key: tuple[tuple[str, str, str, str], ...] = ()
         self._rendered_active_index: int | None = None
+        self._rendered_playback_status = PlaybackStatus.STOPPED
         self._queue_selected_index: int | None = None
         self._track_like_overrides: dict[str, bool] = {}
         self._track_label_base_sizes: dict[QLabel, int] = {}
@@ -724,6 +725,7 @@ class MainWindow(
         self._queue_list = QListWidget()
         self._queue_list.setObjectName("queue-list")
         self._queue_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._queue_list.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         self._queue_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._queue_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         footer = QHBoxLayout()
@@ -962,13 +964,19 @@ class MainWindow(
 
     def _select_queue_highlight(self, item: QListWidgetItem) -> None:
         self._queue_selected_index = self._queue_list.row(item)
-        self._update_queue_active_row(self._rendered_active_index)
+        self._update_queue_active_row(
+            self._rendered_active_index,
+            self._rendered_playback_status,
+        )
 
     def _select_queue_highlight_row(self, row: int) -> None:
         if not self._queue_list.hasFocus():
             return
         self._queue_selected_index = row if row >= 0 else None
-        self._update_queue_active_row(self._rendered_active_index)
+        self._update_queue_active_row(
+            self._rendered_active_index,
+            self._rendered_playback_status,
+        )
 
     def _open_content_item(self, item: QListWidgetItem) -> None:
         browser_item = item.data(Qt.ItemDataRole.UserRole)
@@ -1461,7 +1469,10 @@ class MainWindow(
                 Qt.ItemDataRole.UserRole,
                 replace(queue_item, track=track),
             )
-        self._update_queue_active_row(self._rendered_active_index)
+        self._update_queue_active_row(
+            self._rendered_active_index,
+            self._rendered_playback_status,
+        )
 
     def _replace_content_entity(self, entity: Album | Artist | Playlist) -> None:
         for index in range(self._content_list.count()):

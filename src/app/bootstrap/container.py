@@ -108,14 +108,7 @@ def build_container(config: AppConfig, logger: logging.Logger) -> AppContainer:
         playback_state_repo=playback_state_repo,
     )
     demo_tracks = build_demo_tracks()
-    restored_snapshot = playback_service.restore_saved_queue()
-    if not restored_snapshot.queue:
-        playback_service.replace_queue(
-            demo_tracks,
-            start_index=0,
-            source_type="demo",
-            source_id="bootstrap-demo",
-        )
+    playback_service.restore_saved_queue()
     playback_service.set_volume(settings_service.load_volume())
     return AppContainer(
         config=config,
