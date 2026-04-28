@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot
 
 from app.application.error_presenter import user_facing_error_message
 from app.application.library_service import LibraryService
@@ -53,6 +53,26 @@ class BrowserHistoryEntry:
     list_kind: str | None = None
 
 
+class _SearchWorker(QObject):
+    search_ready = Signal(int, str, object)
+    search_failed = Signal(int, str)
+
+    def __init__(self, *, search_service: SearchService, logger: Logger) -> None:
+        super().__init__()
+        self._search_service = search_service
+        self._logger = logger
+
+    @Slot(int, str)
+    def run_search(self, request_id: int, query: str) -> None:
+        try:
+            results = self._search_service.search_catalog(query)
+        except DomainError as exc:
+            self._logger.warning("Library search failed: %s", exc)
+            self.search_failed.emit(request_id, user_facing_error_message(exc))
+            return
+        self.search_ready.emit(request_id, query, results)
+
+
 class LibraryController(QObject):
     content_changed = Signal(object)
     content_failed = Signal(str)
@@ -64,6 +84,7 @@ class LibraryController(QObject):
     artist_unliked = Signal(object)
     playlist_liked = Signal(object)
     playlist_unliked = Signal(object)
+    _search_requested = Signal(int, str)
 
     def __init__(
         self,
@@ -84,9 +105,28 @@ class LibraryController(QObject):
         self._active_list_kind: str | None = None
         self._liked_tracks_limit = 100
         self._history: list[BrowserHistoryEntry] = []
+        self._search_request_id = 0
+        self._search_thread = QThread(self)
+        self._search_worker = _SearchWorker(
+            search_service=search_service,
+            logger=logger,
+        )
+        self._search_worker.moveToThread(self._search_thread)
+        self._search_requested.connect(
+            self._search_worker.run_search,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        self._search_worker.search_ready.connect(self._handle_search_ready)
+        self._search_worker.search_failed.connect(self._handle_search_failed)
+        self._search_thread.finished.connect(self._search_worker.deleteLater)
+        self._search_thread.start()
 
     def initialize(self) -> None:
         self._emit_content(self._empty_search_content(self._active_search_tab))
+
+    def shutdown(self) -> None:
+        self._search_thread.quit()
+        self._search_thread.wait(3000)
 
     def recent_searches(self) -> tuple[str, ...]:
         return self._search_service.load_recent_searches()
@@ -112,9 +152,7 @@ class LibraryController(QObject):
             self._push_history()
         self._active_page = ("search", None)
         self._active_list_kind = None
-        self._execute(
-            lambda: self._search_content(query, tab=self._active_search_tab, refresh=True)
-        )
+        self._dispatch_search(query)
 
     def show_browser_tab(self, tab: str) -> None:
         page, payload = self._active_page
@@ -360,13 +398,7 @@ class LibraryController(QObject):
             self._active_list_kind = None
             self._active_search_tab = entry.active_tab or "tracks"
             if entry.search_query:
-                self._execute(
-                    lambda: self._search_content(
-                        entry.search_query or "",
-                        tab=self._active_search_tab,
-                        refresh=True,
-                    )
-                )
+                self._dispatch_search(entry.search_query or "")
                 return
             self._emit_content(self._empty_search_content(self._active_search_tab))
             return
@@ -487,6 +519,51 @@ class LibraryController(QObject):
             tabs=self._search_tabs(),
             active_tab=tab,
         )
+
+    def _loading_search_content(self, query: str, tab: str) -> BrowserContent:
+        normalized_query = query.strip()
+        title = f"Search: {normalized_query}" if normalized_query else "Search"
+        return BrowserContent(
+            title=f"{title} | {self._search_tab_title(tab)}",
+            items=(),
+            recent_searches=self.recent_searches(),
+            tabs=self._search_tabs(),
+            active_tab=tab,
+        )
+
+    def _dispatch_search(self, query: str) -> None:
+        normalized_query = query.strip()
+        self._search_request_id += 1
+        request_id = self._search_request_id
+        self._emit_content(
+            self._loading_search_content(normalized_query, self._active_search_tab)
+        )
+        self._search_requested.emit(request_id, normalized_query)
+
+    def _handle_search_ready(
+        self,
+        request_id: int,
+        query: str,
+        results: CatalogSearchResults,
+    ) -> None:
+        if request_id != self._search_request_id:
+            return
+        self._last_search_query = query
+        self._last_search_results = results
+        if self._active_page != ("search", None):
+            return
+        self._emit_content(
+            self._search_content(
+                query,
+                tab=self._active_search_tab,
+                refresh=False,
+            )
+        )
+
+    def _handle_search_failed(self, request_id: int, message: str) -> None:
+        if request_id != self._search_request_id:
+            return
+        self.content_failed.emit(message)
 
     def _artist_content(self, artist: Artist, *, tab: str) -> BrowserContent:
         if tab == "playlists":
