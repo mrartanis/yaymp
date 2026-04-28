@@ -12,6 +12,9 @@ dependencies = [
     "platformdirs>=4.3,<5.0",
     "python-mpv>=1.0.8,<2.0",
     "PySide6>=6.8,<7.0",
+    "pyobjc-core>=10.3; sys_platform == 'darwin'",
+    "pyobjc-framework-Cocoa>=10.3; sys_platform == 'darwin'",
+    "pyobjc-framework-MediaPlayer>=10.3; sys_platform == 'darwin'",
     "yandex-music>=3.0,<4.0",
 ]
 

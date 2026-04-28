@@ -10,6 +10,7 @@ import shiboken6
 from PySide6.QtCore import QEvent, QPoint, Qt, QTimer, QUrl
 from PySide6.QtGui import (
     QAction,
+    QCloseEvent,
     QColor,
     QCursor,
     QFont,
@@ -53,6 +54,7 @@ from app.presentation.qt.library_controller import (
     LibraryController,
 )
 from app.presentation.qt.playback_controller import PlaybackController
+from app.presentation.qt.system_media import build_system_media_integration
 
 
 class MainWindow(QMainWindow):
@@ -106,10 +108,17 @@ class MainWindow(QMainWindow):
         self._playback_poll_timer.setInterval(1000)
         self.setWindowTitle("YAYMP")
         self._build_ui()
+        self._system_media = build_system_media_integration(
+            playback_controller=self._controller,
+            artwork_cache=container.services.artwork_cache,
+            window=self,
+            logger=container.logger,
+        )
         self.setMinimumWidth(560)
         self.resize(self.minimumWidth(), 720)
         self._apply_saved_settings_to_ui()
         self._wire_controller()
+        self._system_media.initialize()
         self._controller.initialize()
         self._library_controller.initialize()
         self._browser_auto_open_enabled = True
@@ -128,6 +137,10 @@ class MainWindow(QMainWindow):
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         self._fit_track_text_labels()
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        self._system_media.shutdown()
+        super().closeEvent(event)
 
     def eventFilter(self, watched: object, event: QEvent) -> bool:
         if self._handle_frame_resize_event(watched, event):
@@ -685,6 +698,7 @@ class MainWindow(QMainWindow):
 
     def _wire_controller(self) -> None:
         self._controller.playback_changed.connect(self._render_snapshot)
+        self._controller.playback_changed.connect(self._system_media.update_snapshot)
         self._controller.playback_failed.connect(self._render_error)
         self._library_controller.content_changed.connect(self._render_content)
         self._library_controller.content_failed.connect(self._render_library_error)
