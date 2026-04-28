@@ -134,6 +134,16 @@ class MainWindow(
         self._track_like_overrides: dict[str, bool] = {}
         self._track_label_base_sizes: dict[QLabel, int] = {}
         self._updating_resize_cursor = False
+        self._pending_artwork_track: Track | None = None
+        self._pending_system_media_snapshot = None
+        self._artwork_render_timer = QTimer(self)
+        self._artwork_render_timer.setSingleShot(True)
+        self._artwork_render_timer.setInterval(0)
+        self._artwork_render_timer.timeout.connect(self._flush_deferred_artwork)
+        self._system_media_timer = QTimer(self)
+        self._system_media_timer.setSingleShot(True)
+        self._system_media_timer.setInterval(40)
+        self._system_media_timer.timeout.connect(self._flush_system_media_update)
         self._playback_poll_timer = QTimer(self)
         self._playback_poll_timer.setInterval(1000)
         self.setWindowTitle("YAYMP")
@@ -762,7 +772,6 @@ class MainWindow(
 
     def _wire_controller(self) -> None:
         self._controller.playback_changed.connect(self._render_snapshot)
-        self._controller.playback_changed.connect(self._system_media.update_snapshot)
         self._controller.playback_failed.connect(self._render_error)
         self._library_controller.content_changed.connect(self._render_content)
         self._library_controller.content_failed.connect(self._render_library_error)
@@ -1089,7 +1098,7 @@ class MainWindow(
             self._track_album_label.setToolTip(album_text)
             self._fit_track_text_labels()
             self._render_current_track_like_button(current_track.is_liked)
-            self._render_artwork(current_track)
+            self._defer_artwork_render(current_track)
         else:
             self._current_track = None
             self._track_title_label.setText("No track selected")
@@ -1097,6 +1106,8 @@ class MainWindow(
             self._track_album_label.setText("")
             self._fit_track_text_labels()
             self._render_current_track_like_button(False)
+            self._pending_artwork_track = None
+            self._artwork_render_timer.stop()
             self._clear_artwork()
             self._set_accent_color("#526ee8")
 
@@ -1123,6 +1134,31 @@ class MainWindow(
         )
         self._render_queue(snapshot)
         self._render_auth_state()
+        self._defer_system_media_update(snapshot)
+
+    def _defer_artwork_render(self, track: Track) -> None:
+        self._pending_artwork_track = track
+        self._artwork_render_timer.start()
+
+    def _flush_deferred_artwork(self) -> None:
+        track = self._pending_artwork_track
+        if track is None:
+            return
+        self._pending_artwork_track = None
+        if self._current_track is None or self._current_track.id != track.id:
+            return
+        self._render_artwork(track)
+
+    def _defer_system_media_update(self, snapshot) -> None:
+        self._pending_system_media_snapshot = snapshot
+        self._system_media_timer.start()
+
+    def _flush_system_media_update(self) -> None:
+        snapshot = self._pending_system_media_snapshot
+        if snapshot is None:
+            return
+        self._pending_system_media_snapshot = None
+        self._system_media.update_snapshot(snapshot)
 
     def _track_with_like_override(self, track: Track) -> Track:
         liked = self._track_like_overrides.get(track.id)
