@@ -36,6 +36,7 @@ class MainWindowWindowingMixin:
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self._system_media.shutdown()
+        self._controller.shutdown()
         super().closeEvent(event)
 
     def eventFilter(self, watched: object, event: QEvent) -> bool:
