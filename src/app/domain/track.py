@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -14,6 +15,7 @@ class Track:
     album_year: int | None = None
     duration_ms: int | None = None
     stream_ref: str | None = None
+    stream_ref_cached_at: datetime | None = None
     artwork_ref: str | None = None
     available: bool = True
     is_liked: bool = False

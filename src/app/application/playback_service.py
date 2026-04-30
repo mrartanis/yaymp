@@ -3,6 +3,7 @@ from __future__ import annotations
 import random
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from time import monotonic
 
 from app.application.track_metadata import merge_cached_liked_state, merge_cached_liked_states
@@ -29,6 +30,7 @@ class PlaybackSnapshot:
 
 
 class PlaybackService:
+    _STREAM_REF_TTL = timedelta(hours=1)
     _STATION_QUEUE_REFILL_THRESHOLD = 3
     _STATION_QUEUE_BATCH_SIZE = 10
     _STATION_QUEUE_REFILL_MAX_ATTEMPTS = 3
@@ -504,12 +506,17 @@ class PlaybackService:
 
     def _prepare_queue_item(self, item: QueueItem) -> QueueItem:
         stream_ref = item.track.stream_ref
-        if not stream_ref:
+        if not self._has_fresh_stream_ref(item.track):
             if self._music_service is None:
                 raise StreamResolveError("Track has no stream reference")
             stream_ref = self._music_service.resolve_stream_ref(item.track)
+            stream_ref_cached_at = datetime.now(tz=UTC)
+        else:
+            stream_ref_cached_at = item.track.stream_ref_cached_at
         if not stream_ref:
             raise StreamResolveError("Track has no stream reference")
+        if stream_ref_cached_at is not None and stream_ref_cached_at.tzinfo is None:
+            stream_ref_cached_at = stream_ref_cached_at.replace(tzinfo=UTC)
         return QueueItem(
             track=Track(
                 id=item.track.id,
@@ -521,6 +528,7 @@ class PlaybackService:
                 album_year=item.track.album_year,
                 duration_ms=item.track.duration_ms,
                 stream_ref=stream_ref,
+                stream_ref_cached_at=stream_ref_cached_at,
                 artwork_ref=item.track.artwork_ref,
                 available=item.track.available,
                 is_liked=item.track.is_liked,
@@ -529,6 +537,19 @@ class PlaybackService:
             source_id=item.source_id,
             source_index=item.source_index,
         )
+
+    def _has_fresh_stream_ref(self, track: Track) -> bool:
+        stream_ref = track.stream_ref
+        if not stream_ref:
+            return False
+        if not stream_ref.startswith(("http://", "https://")):
+            return True
+        cached_at = track.stream_ref_cached_at
+        if cached_at is None:
+            return False
+        if cached_at.tzinfo is None:
+            cached_at = cached_at.replace(tzinfo=UTC)
+        return datetime.now(tz=UTC) - cached_at <= self._STREAM_REF_TTL
 
     def _rebuild_play_order(self, *, anchor_index: int | None) -> None:
         self._play_order = list(range(len(self._queue)))

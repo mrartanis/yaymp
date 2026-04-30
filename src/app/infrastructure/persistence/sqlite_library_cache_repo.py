@@ -131,6 +131,7 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                 album_year=row["album_year"],
                 duration_ms=row["duration_ms"],
                 stream_ref=row["stream_ref"],
+                stream_ref_cached_at=self._optional_datetime(row["stream_ref_cached_at"]),
                 artwork_ref=row["artwork_ref"],
                 available=bool(row["available"]),
                 is_liked=bool(row["is_liked"]),
@@ -422,6 +423,7 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                         album_year integer,
                         duration_ms integer,
                         stream_ref text,
+                        stream_ref_cached_at text,
                         artwork_ref text,
                         available integer not null,
                         is_liked integer not null,
@@ -488,6 +490,12 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                     column="album_id",
                     definition="text",
                 )
+                self._ensure_column(
+                    connection,
+                    table="tracks",
+                    column="stream_ref_cached_at",
+                    definition="text",
+                )
         except (OSError, sqlite3.Error) as exc:
             raise StorageError("Failed to initialize library cache database") from exc
 
@@ -542,8 +550,8 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                 "insert into tracks("
                 "id, title, artists_json, artist_ids_json, album_id, album_title, "
                 "album_year, duration_ms, "
-                "stream_ref, artwork_ref, available, is_liked, cached_at"
-                ") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "stream_ref, stream_ref_cached_at, artwork_ref, available, is_liked, cached_at"
+                ") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 "on conflict(id) do update set "
                 "title = excluded.title, "
                 "artists_json = excluded.artists_json, "
@@ -553,6 +561,7 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                 "album_year = excluded.album_year, "
                 "duration_ms = excluded.duration_ms, "
                 "stream_ref = excluded.stream_ref, "
+                "stream_ref_cached_at = excluded.stream_ref_cached_at, "
                 "artwork_ref = excluded.artwork_ref, "
                 "available = excluded.available, "
                 "is_liked = excluded.is_liked, "
@@ -568,6 +577,11 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                 track.album_year,
                 track.duration_ms,
                 track.stream_ref,
+                (
+                    track.stream_ref_cached_at.isoformat()
+                    if track.stream_ref_cached_at is not None
+                    else None
+                ),
                 track.artwork_ref,
                 int(track.available),
                 int(track.is_liked),
@@ -788,6 +802,11 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
             "album_year": track.album_year,
             "duration_ms": track.duration_ms,
             "stream_ref": track.stream_ref,
+            "stream_ref_cached_at": (
+                track.stream_ref_cached_at.isoformat()
+                if track.stream_ref_cached_at is not None
+                else None
+            ),
             "artwork_ref": track.artwork_ref,
             "available": track.available,
             "is_liked": track.is_liked,
@@ -809,6 +828,9 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                 album_year=self._optional_int(raw_track.get("album_year")),
                 duration_ms=self._optional_int(raw_track.get("duration_ms")),
                 stream_ref=self._optional_str(raw_track.get("stream_ref")),
+                stream_ref_cached_at=self._optional_datetime(
+                    raw_track.get("stream_ref_cached_at")
+                ),
                 artwork_ref=self._optional_str(raw_track.get("artwork_ref")),
                 available=bool(raw_track.get("available", True)),
                 is_liked=bool(raw_track.get("is_liked", False)),
@@ -825,6 +847,16 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
         if value is None:
             return None
         return int(value)
+
+    def _optional_datetime(self, value: object) -> datetime | None:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("datetime value must be a string")
+        parsed = datetime.fromisoformat(value)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+        return parsed
 
     def _normalize_search_query(self, query: str) -> str:
         return query.strip().casefold()

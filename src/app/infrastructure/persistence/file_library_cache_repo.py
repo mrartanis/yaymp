@@ -89,6 +89,9 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
                 album_year=self._optional_int(raw_track.get("album_year")),
                 duration_ms=self._optional_int(raw_track.get("duration_ms")),
                 stream_ref=self._optional_str(raw_track.get("stream_ref")),
+                stream_ref_cached_at=self._optional_datetime(
+                    raw_track.get("stream_ref_cached_at")
+                ),
                 artwork_ref=self._optional_str(raw_track.get("artwork_ref")),
                 available=bool(raw_track.get("available", True)),
                 is_liked=bool(raw_track.get("is_liked", False)),
@@ -111,6 +114,11 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
             "album_year": track.album_year,
             "duration_ms": track.duration_ms,
             "stream_ref": track.stream_ref,
+            "stream_ref_cached_at": (
+                track.stream_ref_cached_at.isoformat()
+                if track.stream_ref_cached_at is not None
+                else None
+            ),
             "artwork_ref": track.artwork_ref,
             "available": track.available,
             "is_liked": track.is_liked,
@@ -402,6 +410,16 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
             return None
         return int(value)
 
+    def _optional_datetime(self, value: object) -> datetime | None:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("datetime value must be a string")
+        parsed = datetime.fromisoformat(value)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+        return parsed
+
     def _serialize_track(self, track: Track) -> dict[str, object]:
         return {
             "id": track.id,
@@ -413,6 +431,11 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
             "album_year": track.album_year,
             "duration_ms": track.duration_ms,
             "stream_ref": track.stream_ref,
+            "stream_ref_cached_at": (
+                track.stream_ref_cached_at.isoformat()
+                if track.stream_ref_cached_at is not None
+                else None
+            ),
             "artwork_ref": track.artwork_ref,
             "available": track.available,
             "is_liked": track.is_liked,
@@ -434,6 +457,9 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
                 album_year=self._optional_int(raw_track.get("album_year")),
                 duration_ms=self._optional_int(raw_track.get("duration_ms")),
                 stream_ref=self._optional_str(raw_track.get("stream_ref")),
+                stream_ref_cached_at=self._optional_datetime(
+                    raw_track.get("stream_ref_cached_at")
+                ),
                 artwork_ref=self._optional_str(raw_track.get("artwork_ref")),
                 available=bool(raw_track.get("available", True)),
                 is_liked=bool(raw_track.get("is_liked", False)),
