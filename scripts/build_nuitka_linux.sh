@@ -8,6 +8,9 @@ OUTPUT_DIR="${PROJECT_ROOT}/build/nuitka"
 APP_NAME="YaYmp"
 APPDIR="${OUTPUT_DIR}/${APP_NAME}.AppDir"
 APP_LIB_DIR="${APPDIR}/usr/lib"
+NUITKA_STEM="nuitka_entry"
+BUILT_DIST_DIR="${OUTPUT_DIR}/${NUITKA_STEM}.dist"
+DIST_DIR="${OUTPUT_DIR}/${APP_NAME}.dist"
 MPV_LIBRARY="${YAYMP_MPV_LIBRARY:-}"
 MPV_LIBRARY_NAME=""
 APP_ICON="${PROJECT_ROOT}/icon.png"
@@ -45,9 +48,10 @@ MPV_LIBRARY_NAME="$(basename "${MPV_LIBRARY}")"
 
 mkdir -p "${OUTPUT_DIR}"
 rm -rf \
-    "${OUTPUT_DIR}/${APP_NAME}.build" \
-    "${OUTPUT_DIR}/${APP_NAME}.dist" \
-    "${OUTPUT_DIR}/${APP_NAME}.onefile-build" \
+    "${OUTPUT_DIR}/${NUITKA_STEM}.build" \
+    "${BUILT_DIST_DIR}" \
+    "${DIST_DIR}" \
+    "${OUTPUT_DIR}/${NUITKA_STEM}.onefile-build" \
     "${APPDIR}"
 
 "${VENV_PYTHON}" -m nuitka \
@@ -60,12 +64,14 @@ rm -rf \
     --output-filename="${APP_NAME}" \
     tools/nuitka_entry.py
 
+mv "${BUILT_DIST_DIR}" "${DIST_DIR}"
+
 mkdir -p \
     "${APPDIR}/usr/bin" \
     "${APPDIR}/usr/lib" \
     "${APPDIR}/usr/share/applications" \
     "${APPDIR}/usr/share/icons/hicolor/256x256/apps"
-cp -a "${OUTPUT_DIR}/${APP_NAME}.dist/." "${APPDIR}/usr/bin/"
+cp -a "${DIST_DIR}/." "${APPDIR}/usr/bin/"
 cp -f "${MPV_LIBRARY}" "${APP_LIB_DIR}/${MPV_LIBRARY_NAME}"
 chmod u+rw "${APP_LIB_DIR}/${MPV_LIBRARY_NAME}"
 "${VENV_PYTHON}" tools/bundle_linux_libs.py \
@@ -94,5 +100,5 @@ cp "${APPDIR}/yaymp.desktop" "${APPDIR}/usr/share/applications/yaymp.desktop"
 cp "${APP_ICON}" "${APPDIR}/yaymp.png"
 cp "${APP_ICON}" "${APPDIR}/usr/share/icons/hicolor/256x256/apps/yaymp.png"
 
-echo "Built: ${OUTPUT_DIR}/${APP_NAME}.dist"
+echo "Built: ${DIST_DIR}"
 echo "Built AppDir: ${APPDIR}"

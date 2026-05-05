@@ -8,6 +8,8 @@ OUTPUT_DIR="${PROJECT_ROOT}/build/nuitka"
 VENDOR_DIR="${OUTPUT_DIR}/vendor"
 VENDORED_MPV_LIBRARY="${VENDOR_DIR}/libmpv.2.dylib"
 APP_NAME="YaYmp"
+NUITKA_STEM="nuitka_entry"
+BUILT_APP_DIR="${OUTPUT_DIR}/${NUITKA_STEM}.app"
 APP_DIR="${OUTPUT_DIR}/${APP_NAME}.app"
 APP_LIB_DIR="${APP_DIR}/Contents/MacOS/lib"
 MPV_LIBRARY="${YAYMP_MPV_LIBRARY:-/opt/homebrew/lib/libmpv.2.dylib}"
@@ -43,10 +45,11 @@ MPV_LIBRARY="$(realpath "${MPV_LIBRARY}")"
 
 mkdir -p "${OUTPUT_DIR}"
 rm -rf \
-    "${OUTPUT_DIR}/${APP_NAME}.app" \
-    "${OUTPUT_DIR}/${APP_NAME}.build" \
-    "${OUTPUT_DIR}/${APP_NAME}.dist" \
-    "${OUTPUT_DIR}/${APP_NAME}.onefile-build"
+    "${BUILT_APP_DIR}" \
+    "${APP_DIR}" \
+    "${OUTPUT_DIR}/${NUITKA_STEM}.build" \
+    "${OUTPUT_DIR}/${NUITKA_STEM}.dist" \
+    "${OUTPUT_DIR}/${NUITKA_STEM}.onefile-build"
 mkdir -p "${VENDOR_DIR}"
 cp -f "${MPV_LIBRARY}" "${VENDORED_MPV_LIBRARY}"
 chmod u+rw "${VENDORED_MPV_LIBRARY}"
@@ -64,6 +67,8 @@ xattr -c "${VENDORED_MPV_LIBRARY}" 2>/dev/null || true
     --output-dir="${OUTPUT_DIR}" \
     --output-filename="${APP_NAME}" \
     tools/nuitka_entry.py
+
+mv "${BUILT_APP_DIR}" "${APP_DIR}"
 
 "${VENV_PYTHON}" tools/bundle_macos_dylibs.py \
     --root-library "${VENDORED_MPV_LIBRARY}" \
