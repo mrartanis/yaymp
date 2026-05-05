@@ -3,7 +3,7 @@ from __future__ import annotations
 from random import Random
 
 from PySide6.QtCore import QSize, Qt, QTimer
-from PySide6.QtGui import QColor, QPainter
+from PySide6.QtGui import QPainter, QPalette
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -19,18 +19,17 @@ from app.domain.playback import PlaybackStatus, QueueItem
 class NowPlayingIndicator(QWidget):
     def __init__(
         self,
-        color: str,
         *,
         animated: bool,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self._color = QColor(color)
         self._rng = Random(id(self))
         self._levels = [0.5, 0.78, 0.6, 0.88]
         self._timer = QTimer(self)
         self._timer.setInterval(80)
         self._timer.timeout.connect(self._advance)
+        self.setObjectName("queue-now-playing")
         self.setFixedSize(18, 14)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.set_animated(animated)
@@ -62,7 +61,7 @@ class NowPlayingIndicator(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(self._color)
+        painter.setBrush(self.palette().color(QPalette.ColorRole.WindowText))
         bar_width = 3
         gap = 1
         baseline = self.height() - 1
@@ -227,12 +226,8 @@ class MainWindowQueueMixin:
         text_layout.addWidget(subtitle)
         layout.addWidget(text_container, 1)
         if is_active:
-            indicator_color = (
-                self._accent_text_color() if is_selected else self._accent_color
-            )
             layout.addWidget(
                 NowPlayingIndicator(
-                    indicator_color,
                     animated=playback_status is PlaybackStatus.PLAYING,
                 ),
                 0,

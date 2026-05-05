@@ -212,6 +212,12 @@ def build_main_window_stylesheet(
             QWidget#queue-row-selected QLabel#queue-duration {{
                 color: {accent_text};
             }}
+            QWidget#queue-now-playing {{
+                color: {accent};
+            }}
+            QWidget#queue-row-selected QWidget#queue-now-playing {{
+                color: {accent_text};
+            }}
             QWidget#queue-row {{
                 background: transparent;
             }}
