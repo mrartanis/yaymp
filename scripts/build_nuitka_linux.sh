@@ -5,10 +5,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 VENV_PYTHON="${PROJECT_ROOT}/.venv/bin/python"
 OUTPUT_DIR="${PROJECT_ROOT}/build/nuitka"
-APPDIR="${OUTPUT_DIR}/YAYMP.AppDir"
+APP_NAME="YaYmp"
+APPDIR="${OUTPUT_DIR}/${APP_NAME}.AppDir"
 APP_LIB_DIR="${APPDIR}/usr/lib"
 MPV_LIBRARY="${YAYMP_MPV_LIBRARY:-}"
 MPV_LIBRARY_NAME=""
+APP_ICON="${PROJECT_ROOT}/icon.png"
 
 cd "${PROJECT_ROOT}"
 
@@ -34,13 +36,18 @@ if [[ -z "${MPV_LIBRARY}" || ! -f "${MPV_LIBRARY}" ]]; then
     exit 1
 fi
 
+if [[ ! -f "${APP_ICON}" ]]; then
+    echo "Missing app icon: ${APP_ICON}"
+    exit 1
+fi
+
 MPV_LIBRARY_NAME="$(basename "${MPV_LIBRARY}")"
 
 mkdir -p "${OUTPUT_DIR}"
 rm -rf \
-    "${OUTPUT_DIR}/nuitka_entry.build" \
-    "${OUTPUT_DIR}/nuitka_entry.dist" \
-    "${OUTPUT_DIR}/nuitka_entry.onefile-build" \
+    "${OUTPUT_DIR}/${APP_NAME}.build" \
+    "${OUTPUT_DIR}/${APP_NAME}.dist" \
+    "${OUTPUT_DIR}/${APP_NAME}.onefile-build" \
     "${APPDIR}"
 
 "${VENV_PYTHON}" -m nuitka \
@@ -50,11 +57,15 @@ rm -rf \
     --include-package-data=app.presentation.qt \
     --include-data-files="${MPV_LIBRARY}=lib/${MPV_LIBRARY_NAME}" \
     --output-dir="${OUTPUT_DIR}" \
-    --output-filename=yaymp \
+    --output-filename="${APP_NAME}" \
     tools/nuitka_entry.py
 
-mkdir -p "${APPDIR}/usr/bin" "${APPDIR}/usr/lib" "${APPDIR}/usr/share/applications"
-cp -a "${OUTPUT_DIR}/nuitka_entry.dist/." "${APPDIR}/usr/bin/"
+mkdir -p \
+    "${APPDIR}/usr/bin" \
+    "${APPDIR}/usr/lib" \
+    "${APPDIR}/usr/share/applications" \
+    "${APPDIR}/usr/share/icons/hicolor/256x256/apps"
+cp -a "${OUTPUT_DIR}/${APP_NAME}.dist/." "${APPDIR}/usr/bin/"
 cp -f "${MPV_LIBRARY}" "${APP_LIB_DIR}/${MPV_LIBRARY_NAME}"
 chmod u+rw "${APP_LIB_DIR}/${MPV_LIBRARY_NAME}"
 "${VENV_PYTHON}" tools/bundle_linux_libs.py \
@@ -66,21 +77,22 @@ cat >"${APPDIR}/AppRun" <<'EOF'
 set -euo pipefail
 APPDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export LD_LIBRARY_PATH="${APPDIR}/usr/lib:${APPDIR}/usr/bin/lib:${LD_LIBRARY_PATH:-}"
-exec "${APPDIR}/usr/bin/yaymp" "$@"
+exec "${APPDIR}/usr/bin/YaYmp" "$@"
 EOF
 chmod +x "${APPDIR}/AppRun"
 
 cat >"${APPDIR}/yaymp.desktop" <<'EOF'
 [Desktop Entry]
 Type=Application
-Name=YAYMP
-Exec=yaymp
+Name=YaYmp
+Exec=YaYmp
 Icon=yaymp
 Categories=AudioVideo;Audio;Player;
 Terminal=false
 EOF
 cp "${APPDIR}/yaymp.desktop" "${APPDIR}/usr/share/applications/yaymp.desktop"
-cp "${PROJECT_ROOT}/src/app/presentation/qt/icons_svg/play.svg" "${APPDIR}/yaymp.svg"
+cp "${APP_ICON}" "${APPDIR}/yaymp.png"
+cp "${APP_ICON}" "${APPDIR}/usr/share/icons/hicolor/256x256/apps/yaymp.png"
 
-echo "Built: ${OUTPUT_DIR}/nuitka_entry.dist"
+echo "Built: ${OUTPUT_DIR}/${APP_NAME}.dist"
 echo "Built AppDir: ${APPDIR}"

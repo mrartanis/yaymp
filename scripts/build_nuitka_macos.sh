@@ -7,9 +7,11 @@ VENV_PYTHON="${PROJECT_ROOT}/.venv/bin/python"
 OUTPUT_DIR="${PROJECT_ROOT}/build/nuitka"
 VENDOR_DIR="${OUTPUT_DIR}/vendor"
 VENDORED_MPV_LIBRARY="${VENDOR_DIR}/libmpv.2.dylib"
-APP_DIR="${OUTPUT_DIR}/nuitka_entry.app"
+APP_NAME="YaYmp"
+APP_DIR="${OUTPUT_DIR}/${APP_NAME}.app"
 APP_LIB_DIR="${APP_DIR}/Contents/MacOS/lib"
 MPV_LIBRARY="${YAYMP_MPV_LIBRARY:-/opt/homebrew/lib/libmpv.2.dylib}"
+APP_ICON="${PROJECT_ROOT}/icon.png"
 
 cd "${PROJECT_ROOT}"
 
@@ -32,14 +34,19 @@ if [[ ! -f "${MPV_LIBRARY}" ]]; then
     exit 1
 fi
 
+if [[ ! -f "${APP_ICON}" ]]; then
+    echo "Missing app icon: ${APP_ICON}"
+    exit 1
+fi
+
 MPV_LIBRARY="$(realpath "${MPV_LIBRARY}")"
 
 mkdir -p "${OUTPUT_DIR}"
 rm -rf \
-    "${OUTPUT_DIR}/nuitka_entry.app" \
-    "${OUTPUT_DIR}/nuitka_entry.build" \
-    "${OUTPUT_DIR}/nuitka_entry.dist" \
-    "${OUTPUT_DIR}/nuitka_entry.onefile-build"
+    "${OUTPUT_DIR}/${APP_NAME}.app" \
+    "${OUTPUT_DIR}/${APP_NAME}.build" \
+    "${OUTPUT_DIR}/${APP_NAME}.dist" \
+    "${OUTPUT_DIR}/${APP_NAME}.onefile-build"
 mkdir -p "${VENDOR_DIR}"
 cp -f "${MPV_LIBRARY}" "${VENDORED_MPV_LIBRARY}"
 chmod u+rw "${VENDORED_MPV_LIBRARY}"
@@ -48,14 +55,14 @@ xattr -c "${VENDORED_MPV_LIBRARY}" 2>/dev/null || true
 "${VENV_PYTHON}" -m nuitka \
     --standalone \
     --macos-create-app-bundle \
-    --macos-app-name=YAYMP \
-    --macos-app-icon=none \
+    --macos-app-name="${APP_NAME}" \
+    --macos-app-icon="${APP_ICON}" \
     --plugin-enable=pyside6 \
     --include-package=app \
     --include-package-data=app.presentation.qt \
     --include-data-files="${VENDORED_MPV_LIBRARY}=lib/libmpv.2.dylib" \
     --output-dir="${OUTPUT_DIR}" \
-    --output-filename=yaymp \
+    --output-filename="${APP_NAME}" \
     tools/nuitka_entry.py
 
 "${VENV_PYTHON}" tools/bundle_macos_dylibs.py \
