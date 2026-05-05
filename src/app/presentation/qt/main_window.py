@@ -291,6 +291,8 @@ class MainWindow(
 
         self._sidebar_panel = self._build_nav_panel()
         self._sidebar_panel.installEventFilter(self)
+        if self._sidebar_host_layout is not None:
+            self._sidebar_host_layout.addWidget(self._sidebar_panel)
         self._build_sidebar_popup()
         self._browser_panel = self._build_browser_panel()
         self._browser_panel.installEventFilter(self)
@@ -377,12 +379,21 @@ class MainWindow(
         self._search_input.returnPressed.connect(self._run_search)
         self._recent_searches_combo.activated.connect(self._apply_recent_search)
         self._search_nav_button.clicked.connect(self._show_search)
+        self._popup_search_nav_button.clicked.connect(self._show_search)
         self._liked_nav_button.clicked.connect(self._library_controller.load_liked_tracks)
+        self._popup_liked_nav_button.clicked.connect(self._library_controller.load_liked_tracks)
         self._liked_albums_nav_button.clicked.connect(self._library_controller.load_liked_albums)
+        self._popup_liked_albums_nav_button.clicked.connect(
+            self._library_controller.load_liked_albums
+        )
         self._liked_artists_nav_button.clicked.connect(
             self._library_controller.load_liked_artists
         )
+        self._popup_liked_artists_nav_button.clicked.connect(
+            self._library_controller.load_liked_artists
+        )
         self._playlists_nav_button.clicked.connect(self._library_controller.load_playlists)
+        self._popup_playlists_nav_button.clicked.connect(self._library_controller.load_playlists)
         self._my_wave_top_button.clicked.connect(self._start_my_wave)
         self._settings_button.clicked.connect(self._show_settings_popup)
         self._like_track_button.clicked.connect(self._toggle_current_track_like)
@@ -623,6 +634,7 @@ class MainWindow(
             Qt.AlignmentFlag.AlignRight if align_right else Qt.AlignmentFlag.AlignLeft
         )
         return label
+
 
     def _icon_button(self, icon_name: str, tooltip: str) -> QPushButton:
         button = QPushButton()

@@ -255,50 +255,69 @@ class MainWindowLayoutMixin:
         self._configure_player_right_layout(wide=False)
         return frame
 
-    def _build_nav_panel(self) -> QFrame:
+    def _build_nav_panel(self, *, primary: bool = True) -> QFrame:
         frame = self._panel_frame("Navigation")
         frame.setObjectName("sidebar")
+        frame.setFrameShape(QFrame.Shape.NoFrame)
+        frame.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         frame.setMinimumWidth(170)
         frame.setMaximumWidth(210)
         frame.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         layout = frame.layout()
         assert layout is not None
-        self._search_nav_button = QPushButton("Search")
-        self._liked_nav_button = QPushButton("My Tracks")
-        self._liked_albums_nav_button = QPushButton("My Albums")
-        self._liked_artists_nav_button = QPushButton("My Artists")
-        self._playlists_nav_button = QPushButton("Playlists")
+        search_button = QPushButton("Search")
+        liked_button = QPushButton("My Tracks")
+        liked_albums_button = QPushButton("My Albums")
+        liked_artists_button = QPushButton("My Artists")
+        playlists_button = QPushButton("Playlists")
+        if primary:
+            self._search_nav_button = search_button
+            self._liked_nav_button = liked_button
+            self._liked_albums_nav_button = liked_albums_button
+            self._liked_artists_nav_button = liked_artists_button
+            self._playlists_nav_button = playlists_button
+        else:
+            self._popup_search_nav_button = search_button
+            self._popup_liked_nav_button = liked_button
+            self._popup_liked_albums_nav_button = liked_albums_button
+            self._popup_liked_artists_nav_button = liked_artists_button
+            self._popup_playlists_nav_button = playlists_button
         library_label = QLabel("Library")
         library_label.setObjectName("nav-section")
         layout.addWidget(library_label)
         for button in (
-            self._liked_nav_button,
-            self._liked_albums_nav_button,
-            self._liked_artists_nav_button,
-            self._playlists_nav_button,
+            liked_button,
+            liked_albums_button,
+            liked_artists_button,
+            playlists_button,
         ):
             layout.addWidget(button)
         layout.addSpacing(8)
         discovery_label = QLabel("Discovery")
         discovery_label.setObjectName("nav-section")
         layout.addWidget(discovery_label)
-        layout.addWidget(self._search_nav_button)
+        layout.addWidget(search_button)
         layout.addStretch(1)
         return frame
 
     def _build_sidebar_popup(self) -> None:
-        self._sidebar_popup = self._sidebar_panel
-        if self._sidebar_popup is None:
-            return
-        layout = self._sidebar_popup.layout()
-        if layout is not None:
-            layout.setContentsMargins(8, 10, 8, 10)
-        self._sidebar_popup.setParent(self)
-        self._sidebar_popup.setWindowFlags(Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
-        self._sidebar_popup.adjustSize()
-        self._sidebar_popup.hide()
-        self._sidebar_popup.move(self.mapToGlobal(QPoint(14, 54)))
-        self._sidebar_popup.raise_()
+        popup_shell = QWidget(
+            None,
+            Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint,
+        )
+        popup_shell.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        popup_layout = QVBoxLayout(popup_shell)
+        popup_layout.setContentsMargins(0, 0, 0, 0)
+        popup_layout.setSpacing(0)
+        popup_panel = self._build_nav_panel(primary=False)
+        popup_layout.addWidget(popup_panel)
+        popup_shell.adjustSize()
+        popup_shell.hide()
+        popup_shell.move(self.mapToGlobal(QPoint(14, 54)))
+        popup_shell.raise_()
+        popup_shell.setStyleSheet(self.styleSheet())
+        self._sidebar_popup = popup_shell
+        self._sidebar_popup_panel = popup_panel
 
     def _toggle_sidebar(self) -> None:
         if self._sidebar_popup is None:
@@ -308,11 +327,14 @@ class MainWindowLayoutMixin:
         if self._sidebar_popup.isVisible():
             self._sidebar_popup.hide()
             return
+        if self._sidebar_panel is not None:
+            self._sidebar_panel.show()
         position = self._sidebar_toggle_button.mapTo(
             self,
             QPoint(0, self._sidebar_toggle_button.height() + 6),
         )
         self._sidebar_popup.move(self.mapToGlobal(position))
+        self._sidebar_popup.adjustSize()
         self._sidebar_popup.show()
         self._sidebar_popup.raise_()
 
@@ -332,7 +354,6 @@ class MainWindowLayoutMixin:
             layout = self._sidebar_panel.layout()
             if layout is not None:
                 layout.setContentsMargins(8, 0, 8, 2)
-            self._sidebar_panel.setWindowFlags(Qt.WindowType.Widget)
             self._move_widget_to_layout(self._sidebar_panel, self._sidebar_host_layout)
             if self._sidebar_host_layout is not None:
                 self._sidebar_host_layout.setAlignment(
@@ -356,8 +377,6 @@ class MainWindowLayoutMixin:
         layout = self._sidebar_panel.layout()
         if layout is not None:
             layout.setContentsMargins(8, 10, 8, 10)
-        self._sidebar_panel.setParent(self)
-        self._sidebar_panel.setWindowFlags(Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
         self._sidebar_panel.hide()
         self._sidebar_toggle_button.show()
         self._update_wide_zone_balance()

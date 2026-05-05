@@ -4,7 +4,15 @@ from os import environ
 
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QCursor
-from PySide6.QtWidgets import QApplication, QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import (
+    QApplication,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 from app.application.error_presenter import user_facing_error_message
 from app.domain import AudioQuality, PlaybackStatus
@@ -16,13 +24,24 @@ from app.presentation.qt.main_window_styles import build_main_window_stylesheet
 
 class MainWindowPreferencesMixin:
     def _build_settings_popup(self) -> None:
-        self._settings_popup = QFrame(
+        popup_shell = QWidget(
             None,
             Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint,
         )
-        self._settings_popup.setObjectName("settings-popup")
-        self._settings_popup.installEventFilter(self)
-        layout = QVBoxLayout(self._settings_popup)
+        popup_shell.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        popup_shell.installEventFilter(self)
+        shell_layout = QVBoxLayout(popup_shell)
+        shell_layout.setContentsMargins(0, 0, 0, 0)
+        shell_layout.setSpacing(0)
+
+        frame = QFrame()
+        frame.setObjectName("settings-popup")
+        frame.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        shell_layout.addWidget(frame)
+
+        self._settings_popup = popup_shell
+        self._settings_popup_frame = frame
+        layout = QVBoxLayout(frame)
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(6)
 
@@ -92,7 +111,7 @@ class MainWindowPreferencesMixin:
         self._logout_button.setObjectName("settings-action")
         self._logout_button.clicked.connect(self._logout)
         layout.addWidget(self._logout_button)
-        self._settings_popup.hide()
+        popup_shell.hide()
 
     def _build_volume_popup(self) -> None:
         self._volume_popup = QFrame(
@@ -100,6 +119,8 @@ class MainWindowPreferencesMixin:
             Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint,
         )
         self._volume_popup.setObjectName("volume-popup")
+        self._volume_popup.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self._volume_popup.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         layout = QVBoxLayout(self._volume_popup)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.addWidget(self._volume_slider, 0, Qt.AlignmentFlag.AlignCenter)
@@ -247,6 +268,8 @@ class MainWindowPreferencesMixin:
         self._refresh_theme_icons()
         if self._browser_dialog is not None:
             self._browser_dialog.setStyleSheet(self.styleSheet())
+        if getattr(self, "_sidebar_popup", None) is not None:
+            self._sidebar_popup.setStyleSheet(self.styleSheet())
         if self._settings_popup is not None:
             self._settings_popup.setStyleSheet(self.styleSheet())
         if self._volume_popup is not None:
