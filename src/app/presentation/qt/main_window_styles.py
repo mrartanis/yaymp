@@ -40,24 +40,61 @@ class ThemePalette:
     my_wave_trailing: str
 
 
-def build_main_window_stylesheet(*, accent: str, accent_text: str, theme: str) -> str:
+def build_main_window_stylesheet(
+    *,
+    accent: str,
+    accent_text: str,
+    theme: str,
+    corner_style: str,
+) -> str:
     palette = _palette_for_theme(theme)
     active_row_bg = _rgba(accent, 0.18 if theme == "light" else 0.22)
+    rounded = corner_style == "rounded"
+    window_radius = 18 if rounded else 0
+    top_bar_radius = 10 if rounded else 0
+    panel_radius = 14 if rounded else 0
+    art_radius = 16 if rounded else 0
+    thumb_radius = 6 if rounded else 0
+    row_radius = 8 if rounded else 0
+    settings_popup_radius = 12 if rounded else 0
+    volume_popup_radius = 14 if rounded else 0
+    button_radius = 9 if rounded else 0
+    play_button_radius = 16 if rounded else 0
+    icon_button_radius = 10 if rounded else 0
+    input_radius = 8 if rounded else 0
+    list_radius = 10 if rounded else 0
+    list_item_radius = 7 if rounded else 0
+    tab_radius = 9 if rounded else 0
+    slider_radius = 3 if rounded else 0
+    slider_handle_radius = 7 if rounded else 0
+    volume_track_radius = 4 if rounded else 0
+    volume_handle_radius = 9 if rounded else 0
 
     return f"""
-            QMainWindow, QWidget {{
+            QMainWindow {{
+                background: transparent;
+                color: {palette.text_primary};
+                font-family: "Avenir Next", "Segoe UI", sans-serif;
+                font-size: 12px;
+            }}
+            QWidget {{
                 background: {palette.window_bg};
                 color: {palette.text_primary};
                 font-family: "Avenir Next", "Segoe UI", sans-serif;
                 font-size: 12px;
             }}
+            QWidget#window-root {{
+                background: {palette.window_bg};
+                border-radius: {window_radius}px;
+            }}
             QDialog {{
                 background: {palette.dialog_bg};
+                border-radius: {window_radius}px;
             }}
             QFrame#top-bar {{
                 background: {palette.top_bar_bg};
                 border: 0;
-                border-radius: 10px;
+                border-radius: {top_bar_radius}px;
             }}
             QWidget#title-drag-handle {{
                 background: transparent;
@@ -69,7 +106,7 @@ def build_main_window_stylesheet(*, accent: str, accent_text: str, theme: str) -
             }}
             QFrame#sidebar {{
                 background: {palette.sidebar_bg};
-                border-radius: 14px;
+                border-radius: {panel_radius}px;
             }}
             QLabel {{
                 border: 0;
@@ -135,12 +172,12 @@ def build_main_window_stylesheet(*, accent: str, accent_text: str, theme: str) -
             QLabel#album-art {{
                 background: {palette.album_art_bg};
                 border: 0;
-                border-radius: 16px;
+                border-radius: {art_radius}px;
                 color: {palette.album_art_text};
             }}
             QLabel#art-thumb {{
                 background: {palette.art_thumb_bg};
-                border-radius: 6px;
+                border-radius: {thumb_radius}px;
                 color: {palette.album_art_text};
             }}
             QLabel#queue-title, QLabel#browser-art-title {{
@@ -164,11 +201,11 @@ def build_main_window_stylesheet(*, accent: str, accent_text: str, theme: str) -
             }}
             QWidget#queue-row-active {{
                 background: {active_row_bg};
-                border-radius: 8px;
+                border-radius: {row_radius}px;
             }}
             QWidget#queue-row-selected {{
                 background: {accent};
-                border-radius: 8px;
+                border-radius: {row_radius}px;
             }}
             QWidget#queue-row-selected QLabel#queue-title,
             QWidget#queue-row-selected QLabel#queue-subtitle,
@@ -188,20 +225,20 @@ def build_main_window_stylesheet(*, accent: str, accent_text: str, theme: str) -
             QFrame#settings-popup, QFrame#volume-popup {{
                 background: {palette.popup_bg};
                 border: 0;
-                border-radius: 12px;
+                border-radius: {settings_popup_radius}px;
             }}
             QFrame#settings-popup {{
                 border: 1px solid {accent};
-                border-radius: 12px;
+                border-radius: {settings_popup_radius}px;
             }}
             QFrame#volume-popup {{
                 border: 1px solid {accent};
-                border-radius: 14px;
+                border-radius: {volume_popup_radius}px;
             }}
             QPushButton {{
                 background: {palette.button_bg};
                 border: 1px solid {palette.button_border};
-                border-radius: 9px;
+                border-radius: {button_radius}px;
                 color: {palette.button_text};
                 padding: 4px 8px;
                 font-weight: 650;
@@ -218,7 +255,7 @@ def build_main_window_stylesheet(*, accent: str, accent_text: str, theme: str) -
                 background: qradialgradient(cx:0.5, cy:0.45, radius:0.8,
                     fx:0.5, fy:0.4, stop:0 {accent}, stop:1 {palette.play_button_outer});
                 border: 1px solid {accent};
-                border-radius: 16px;
+                border-radius: {play_button_radius}px;
             }}
             QPushButton#my-wave-button {{
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
@@ -229,16 +266,18 @@ def build_main_window_stylesheet(*, accent: str, accent_text: str, theme: str) -
             }}
             QPushButton#panel-close-button {{
                 padding: 0;
-                border-radius: 10px;
+                border-radius: {icon_button_radius}px;
                 font-size: 18px;
             }}
-            QPushButton#window-control-button, QPushButton#window-close-button {{
+            QPushButton#window-control-button,
+            QPushButton#window-close-button,
+            QPushButton#settings-toggle-button {{
                 background: transparent;
                 border: 0;
-                border-radius: 9px;
+                border-radius: {button_radius}px;
                 padding: 0;
             }}
-            QPushButton#window-control-button:hover {{
+            QPushButton#window-control-button:hover, QPushButton#settings-toggle-button:hover {{
                 background: {palette.window_control_hover_bg};
                 border: 0;
             }}
@@ -248,7 +287,7 @@ def build_main_window_stylesheet(*, accent: str, accent_text: str, theme: str) -
             }}
             QPushButton#queue-icon-button {{
                 padding: 0;
-                border-radius: 10px;
+                border-radius: {icon_button_radius}px;
                 font-size: 16px;
             }}
             QPushButton#quality-option {{
@@ -256,7 +295,7 @@ def build_main_window_stylesheet(*, accent: str, accent_text: str, theme: str) -
                 border: 1px solid {palette.button_border};
                 color: {palette.button_text};
                 padding: 6px 11px;
-                border-radius: 10px;
+                border-radius: {icon_button_radius}px;
                 min-width: 38px;
             }}
             QPushButton#quality-option:hover {{
@@ -271,7 +310,7 @@ def build_main_window_stylesheet(*, accent: str, accent_text: str, theme: str) -
             QPushButton#settings-action {{
                 background: {palette.button_bg};
                 border: 1px solid {palette.button_border};
-                border-radius: 9px;
+                border-radius: {button_radius}px;
                 color: {palette.button_text};
                 padding: 6px 10px;
                 text-align: left;
@@ -286,19 +325,19 @@ def build_main_window_stylesheet(*, accent: str, accent_text: str, theme: str) -
             QLineEdit, QComboBox {{
                 background: {palette.input_bg};
                 border: 1px solid {palette.input_border};
-                border-radius: 8px;
+                border-radius: {input_radius}px;
                 color: {palette.text_primary};
                 padding: 4px 7px;
             }}
             QListWidget {{
                 background: {palette.list_bg};
                 border: 0;
-                border-radius: 10px;
+                border-radius: {list_radius}px;
                 alternate-background-color: {palette.list_alt_bg};
                 padding: 4px;
             }}
             QListWidget::item {{
-                border-radius: 7px;
+                border-radius: {list_item_radius}px;
                 padding: 5px;
             }}
             QListWidget#queue-list::item {{
@@ -310,14 +349,14 @@ def build_main_window_stylesheet(*, accent: str, accent_text: str, theme: str) -
             }}
             QTabWidget::pane {{
                 border: 0;
-                border-radius: 8px;
+                border-radius: {input_radius}px;
             }}
             QTabBar::tab {{
                 background: {palette.button_bg};
                 color: {palette.text_secondary};
                 padding: 5px 9px;
-                border-top-left-radius: 9px;
-                border-top-right-radius: 9px;
+                border-top-left-radius: {tab_radius}px;
+                border-top-right-radius: {tab_radius}px;
             }}
             QTabBar::tab:selected {{
                 color: {accent_text};
@@ -326,18 +365,18 @@ def build_main_window_stylesheet(*, accent: str, accent_text: str, theme: str) -
             QSlider::groove:horizontal {{
                 height: 6px;
                 background: {palette.slider_groove};
-                border-radius: 3px;
+                border-radius: {slider_radius}px;
             }}
             QSlider::sub-page:horizontal {{
                 background: {accent};
-                border-radius: 3px;
+                border-radius: {slider_radius}px;
             }}
             QSlider::handle:horizontal {{
                 background: {palette.slider_handle_bg};
                 border: 2px solid {accent};
                 width: 14px;
                 margin: -5px 0;
-                border-radius: 7px;
+                border-radius: {slider_handle_radius}px;
             }}
             QSlider#volume-slider {{
                 background: transparent;
@@ -350,22 +389,22 @@ def build_main_window_stylesheet(*, accent: str, accent_text: str, theme: str) -
             QSlider#volume-slider::groove:vertical {{
                 width: 8px;
                 background: {palette.volume_track_bg};
-                border-radius: 4px;
+                border-radius: {volume_track_radius}px;
             }}
             QSlider#volume-slider::sub-page:vertical {{
                 background: {palette.volume_track_bg};
-                border-radius: 4px;
+                border-radius: {volume_track_radius}px;
             }}
             QSlider#volume-slider::add-page:vertical {{
                 background: {accent};
-                border-radius: 4px;
+                border-radius: {volume_track_radius}px;
             }}
             QSlider#volume-slider::handle:vertical {{
                 background: {accent};
                 border: 2px solid {palette.window_bg};
                 height: 16px;
                 margin: 0 -7px;
-                border-radius: 9px;
+                border-radius: {volume_handle_radius}px;
             }}
             QSlider#volume-slider:focus {{
                 outline: 0;

@@ -65,6 +65,29 @@ class MainWindowPreferencesMixin:
             theme_row.addWidget(button)
         layout.addLayout(theme_row)
 
+        corner_label = QLabel("Corners")
+        corner_label.setObjectName("settings-section")
+        layout.addWidget(corner_label)
+        corner_row = QHBoxLayout()
+        corner_row.setContentsMargins(0, 0, 0, 0)
+        corner_row.setSpacing(6)
+        self._corner_style_buttons: dict[str, QPushButton] = {}
+        for corner_style, title in (
+            ("straight", "Straight"),
+            ("rounded", "Rounded"),
+        ):
+            button = QPushButton(title)
+            button.setObjectName("quality-option")
+            button.setCheckable(True)
+            button.clicked.connect(
+                lambda checked=False, selected=corner_style: self._set_corner_style_preference(
+                    selected
+                )
+            )
+            self._corner_style_buttons[corner_style] = button
+            corner_row.addWidget(button)
+        layout.addLayout(corner_row)
+
         self._logout_button = QPushButton("Logout")
         self._logout_button.setObjectName("settings-action")
         self._logout_button.clicked.connect(self._logout)
@@ -87,7 +110,12 @@ class MainWindowPreferencesMixin:
         if self._settings_popup is None:
             return
         self._settings_popup.adjustSize()
-        anchor = self._auth_label.mapToGlobal(QPoint(0, self._auth_label.height() + 6))
+        anchor_widget = (
+            self._settings_button
+            if hasattr(self, "_settings_button")
+            else self._auth_label
+        )
+        anchor = anchor_widget.mapToGlobal(QPoint(0, anchor_widget.height() + 6))
         screen = self.screen().availableGeometry()
         x = min(anchor.x(), screen.right() - self._settings_popup.width() - 8)
         x = max(screen.left() + 8, x)
@@ -137,9 +165,19 @@ class MainWindowPreferencesMixin:
         self._apply_theme()
         self._status_label.setText(f"Theme preference: {theme}")
 
+    def _set_corner_style_preference(self, corner_style: str) -> None:
+        self._container.services.settings_service.save_corner_style_preference(corner_style)
+        self._render_corner_style_preference(corner_style)
+        self._apply_theme()
+        self._status_label.setText(f"Corner style: {corner_style}")
+
     def _render_theme_preference(self, theme: str) -> None:
         for candidate, button in self._theme_buttons.items():
             button.setChecked(candidate == theme)
+
+    def _render_corner_style_preference(self, corner_style: str) -> None:
+        for candidate, button in self._corner_style_buttons.items():
+            button.setChecked(candidate == corner_style)
 
     def _logout(self) -> None:
         self._container.services.auth_service.clear_session()
@@ -158,6 +196,7 @@ class MainWindowPreferencesMixin:
         for candidate, button in self._quality_buttons.items():
             button.setChecked(candidate is quality)
         self._render_theme_preference(self._stored_theme_preference())
+        self._render_corner_style_preference(self._stored_corner_style_preference())
         self._apply_theme()
 
     def _maybe_start_auth_flow(self) -> None:
@@ -202,6 +241,7 @@ class MainWindowPreferencesMixin:
                 accent=self._accent_color,
                 accent_text=self._accent_text_color(),
                 theme=self._resolved_theme_mode(),
+                corner_style=self._stored_corner_style_preference(),
             )
         )
         self._refresh_theme_icons()
@@ -228,6 +268,9 @@ class MainWindowPreferencesMixin:
             else "dark"
         )
 
+    def _stored_corner_style_preference(self) -> str:
+        return self._container.services.settings_service.load_corner_style_preference()
+
     def _theme_icon_color(self) -> str:
         return "#1f2736" if self._resolved_theme_mode() == "light" else "#ffffff"
 
@@ -243,6 +286,8 @@ class MainWindowPreferencesMixin:
             self._window_close_button.setIcon(create_icon("window-close.svg", color=icon_color))
         if hasattr(self, "_volume_button"):
             self._volume_button.setIcon(create_icon("volume.svg", color=icon_color))
+        if hasattr(self, "_settings_button"):
+            self._settings_button.setIcon(create_icon("settings.svg", color=icon_color))
         if hasattr(self, "_previous_button"):
             self._previous_button.setIcon(create_icon("previous.svg", color=icon_color))
         if hasattr(self, "_next_button"):

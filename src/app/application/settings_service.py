@@ -8,6 +8,7 @@ class SettingsService:
     _VOLUME_KEY = "volume"
     _AUDIO_QUALITY_KEY = "audio_quality"
     _THEME_KEY = "theme"
+    _CORNER_STYLE_KEY = "corner_style"
 
     def __init__(self, *, settings_repo: SettingsRepo, logger: Logger) -> None:
         self._settings_repo = settings_repo
@@ -50,6 +51,23 @@ class SettingsService:
         if theme not in {"system", "light", "dark"}:
             theme = "system"
         self._save_value(self._THEME_KEY, theme)
+
+    def load_corner_style_preference(
+        self,
+        *,
+        default: str = "straight",
+    ) -> str:
+        value = self._load_value(self._CORNER_STYLE_KEY)
+        if not isinstance(value, str):
+            return default
+        if value not in {"straight", "rounded"}:
+            return default
+        return value
+
+    def save_corner_style_preference(self, corner_style: str) -> None:
+        if corner_style not in {"straight", "rounded"}:
+            corner_style = "straight"
+        self._save_value(self._CORNER_STYLE_KEY, corner_style)
 
     def _load_value(self, key: str) -> object | None:
         try:

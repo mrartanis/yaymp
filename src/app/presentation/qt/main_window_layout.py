@@ -127,6 +127,11 @@ class MainWindowLayoutMixin:
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
         )
         self._auth_label.installEventFilter(self)
+        self._settings_button = QPushButton()
+        self._settings_button.setObjectName("settings-toggle-button")
+        self._settings_button.setToolTip("Settings")
+        self._settings_button.setAccessibleName("Settings")
+        self._settings_button.setFixedSize(28, 28)
         self._volume_button = QPushButton()
         self._volume_button.setObjectName("volume-button")
         self._volume_button.setIcon(create_icon("volume.svg"))
@@ -141,6 +146,7 @@ class MainWindowLayoutMixin:
         top_row.addWidget(self._my_wave_top_button)
         top_row.addStretch(1)
         top_row.addWidget(self._auth_label, 0, Qt.AlignmentFlag.AlignVCenter)
+        top_row.addWidget(self._settings_button, 0, Qt.AlignmentFlag.AlignVCenter)
 
         layout.addLayout(top_row)
         layout.addSpacing(6)

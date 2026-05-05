@@ -65,6 +65,7 @@ class MainWindow(
     def __init__(self, *, container: AppContainer) -> None:
         super().__init__()
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self._container = container
         self._controller = PlaybackController(
             playback_service=container.services.playback_service,
@@ -155,6 +156,7 @@ class MainWindow(
 
     def _build_ui(self) -> None:
         root = QWidget(self)
+        root.setObjectName("window-root")
         root.installEventFilter(self)
         outer_layout = QVBoxLayout(root)
         outer_layout.setContentsMargins(10, 10, 10, 10)
@@ -382,6 +384,7 @@ class MainWindow(
         )
         self._playlists_nav_button.clicked.connect(self._library_controller.load_playlists)
         self._my_wave_top_button.clicked.connect(self._start_my_wave)
+        self._settings_button.clicked.connect(self._show_settings_popup)
         self._like_track_button.clicked.connect(self._toggle_current_track_like)
         self._play_all_button.clicked.connect(self._play_current_source)
         self._append_all_button.clicked.connect(self._append_current_source)
