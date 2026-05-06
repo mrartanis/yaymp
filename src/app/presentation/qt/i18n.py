@@ -45,7 +45,9 @@ _STRINGS: dict[str, dict[str, str]] = {
         "action.unlike": "Unlike",
         "action.volume": "Volume",
         "app.auth_dialog.status": (
-            "Sign in to Yandex Music. The app will capture the OAuth token automatically."
+            "Sign in to Yandex Music. The app will capture the OAuth token automatically. "
+            "If you see a passkey, fingerprint, or security key option, "
+            "use the password sign-in path instead."
         ),
         "app.auth_dialog.title": "Yandex Music Login",
         "app.title": "YAYMP",
@@ -171,7 +173,9 @@ _STRINGS: dict[str, dict[str, str]] = {
         "action.unlike": "Убрать лайк",
         "action.volume": "Громкость",
         "app.auth_dialog.status": (
-            "Войдите в Яндекс Музыку. Приложение автоматически перехватит OAuth-токен."
+            "Войдите в Яндекс Музыку. Приложение автоматически перехватит OAuth-токен. "
+            "Если видите вход по passkey, отпечатку или ключу безопасности, "
+            "используйте обычный вход по паролю."
         ),
         "app.auth_dialog.title": "Вход в Яндекс Музыку",
         "app.title": "YAYMP",
