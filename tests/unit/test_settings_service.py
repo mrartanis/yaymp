@@ -49,11 +49,13 @@ def test_settings_service_round_trips_volume_and_audio_quality() -> None:
     service.save_audio_quality(AudioQuality.SD)
     service.save_theme_preference("dark")
     service.save_corner_style_preference("rounded")
+    service.save_language_preference("ru")
 
     assert service.load_volume() == 42
     assert service.load_audio_quality() is AudioQuality.SD
     assert service.load_theme_preference() == "dark"
     assert service.load_corner_style_preference() == "rounded"
+    assert service.load_language_preference() == "ru"
 
 
 def test_settings_service_clamps_volume_and_defaults_invalid_quality() -> None:
@@ -64,6 +66,7 @@ def test_settings_service_clamps_volume_and_defaults_invalid_quality() -> None:
                 "audio_quality": "bad",
                 "theme": "neon",
                 "corner_style": "curvy",
+                "language": "de",
             }
         ),
         logger=RecordingLogger(),
@@ -73,6 +76,7 @@ def test_settings_service_clamps_volume_and_defaults_invalid_quality() -> None:
     assert service.load_audio_quality() is AudioQuality.HQ
     assert service.load_theme_preference() == "system"
     assert service.load_corner_style_preference() == "straight"
+    assert service.load_language_preference() == "system"
 
 
 def test_settings_service_logs_storage_failures_and_uses_defaults() -> None:

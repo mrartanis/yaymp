@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot
@@ -94,11 +95,13 @@ class LibraryController(QObject):
         search_service: SearchService,
         library_service: LibraryService,
         logger: Logger,
+        translate: Callable[..., str],
     ) -> None:
         super().__init__()
         self._search_service = search_service
         self._library_service = library_service
         self._logger = logger
+        self._t = translate
         self._last_search_query: str | None = None
         self._last_search_results: CatalogSearchResults | None = None
         self._active_search_tab = "tracks"
@@ -125,6 +128,99 @@ class LibraryController(QObject):
 
     def initialize(self) -> None:
         self._emit_content(self._empty_search_content(self._active_search_tab))
+
+    def refresh_localized_content(self) -> None:
+        page, payload = self._active_page
+        if page == "search":
+            if self._last_search_results is None or self._last_search_query is None:
+                self._emit_content(self._empty_search_content(self._active_search_tab))
+                return
+            self._emit_content(
+                self._search_content(
+                    self._last_search_query,
+                    tab=self._active_search_tab,
+                    refresh=False,
+                )
+            )
+            return
+        if page == "artist" and isinstance(payload, Artist):
+            self._execute(lambda: self._artist_content(payload, tab=self._active_artist_tab))
+            return
+        if page == "source" and isinstance(payload, Playlist):
+            self._execute(
+                lambda: self._source_content(
+                    title=payload.title,
+                    source_type="playlist",
+                    source_id=payload.id,
+                    tracks=self._library_service.load_playlist_tracks(
+                        payload.id,
+                        owner_id=payload.owner_id,
+                    ),
+                )
+            )
+            return
+        if page == "source" and isinstance(payload, Album):
+            self._execute(
+                lambda: self._source_content(
+                    title=payload.title,
+                    source_type="album",
+                    source_id=payload.id,
+                    tracks=self._library_service.load_album_tracks(payload.id),
+                )
+            )
+            return
+        if page == "source" and isinstance(payload, Station):
+            self._execute(
+                lambda: self._source_content(
+                    title=self._station_title(payload),
+                    source_type="station",
+                    source_id=payload.id,
+                    tracks=self._library_service.load_station_tracks(payload.id),
+                )
+            )
+            return
+        if page == "list":
+            if self._active_list_kind == "liked_tracks":
+                self._execute(lambda: self._liked_tracks_content(limit=self._liked_tracks_limit))
+                return
+            if self._active_list_kind == "liked_albums":
+                self._execute(
+                    lambda: BrowserContent(
+                        title=self._t("library.list.my_albums"),
+                        items=self._album_items(self._library_service.load_liked_albums()),
+                        recent_searches=self.recent_searches(),
+                    )
+                )
+                return
+            if self._active_list_kind == "liked_artists":
+                self._execute(
+                    lambda: BrowserContent(
+                        title=self._t("library.list.my_artists"),
+                        items=self._artist_items(self._library_service.load_liked_artists()),
+                        recent_searches=self.recent_searches(),
+                    )
+                )
+                return
+            if self._active_list_kind == "playlists":
+                self._execute(
+                    lambda: BrowserContent(
+                        title=self._t("library.list.playlists"),
+                        items=(
+                            *self._playlist_items(
+                                self._library_service.load_generated_playlists(),
+                                kind="generated_playlist",
+                            ),
+                            *self._playlist_items(
+                                self._unique_playlists(
+                                    self._library_service.load_liked_playlists(),
+                                    self._library_service.load_user_playlists(),
+                                ),
+                                kind="playlist",
+                            ),
+                        ),
+                        recent_searches=self.recent_searches(),
+                    )
+                )
 
     def shutdown(self) -> None:
         self._search_thread.quit()
@@ -200,7 +296,7 @@ class LibraryController(QObject):
         self._active_list_kind = "liked_albums"
         self._execute(
             lambda: BrowserContent(
-                title="My Albums",
+                title=self._t("library.list.my_albums"),
                 items=self._album_items(self._library_service.load_liked_albums()),
                 recent_searches=self.recent_searches(),
             )
@@ -212,7 +308,7 @@ class LibraryController(QObject):
         self._active_list_kind = "liked_artists"
         self._execute(
             lambda: BrowserContent(
-                title="My Artists",
+                title=self._t("library.list.my_artists"),
                 items=self._artist_items(self._library_service.load_liked_artists()),
                 recent_searches=self.recent_searches(),
             )
@@ -224,7 +320,7 @@ class LibraryController(QObject):
         self._active_list_kind = "playlists"
         self._execute(
             lambda: BrowserContent(
-                title="Playlists",
+                title=self._t("library.list.playlists"),
                 items=(
                     *self._playlist_items(
                         self._library_service.load_generated_playlists(),
@@ -243,7 +339,7 @@ class LibraryController(QObject):
         )
 
     def load_my_wave(self) -> None:
-        self.open_station(Station(id="user:onyourwave", title="My Wave"))
+        self.open_station(Station(id="user:onyourwave", title=self._t("nav.my_wave")))
 
     def open_playlist(self, playlist: Playlist) -> None:
         self._push_history()
@@ -449,7 +545,7 @@ class LibraryController(QObject):
             self._active_page = ("source", entry.payload)
             self._execute(
                 lambda: self._source_content(
-                    title=entry.payload.title,
+                    title=self._station_title(entry.payload),
                     source_type="station",
                     source_id=entry.payload.id,
                     tracks=self._library_service.load_station_tracks(entry.payload.id),
@@ -466,7 +562,7 @@ class LibraryController(QObject):
             if entry.list_kind == "liked_albums":
                 self._execute(
                     lambda: BrowserContent(
-                        title="My Albums",
+                        title=self._t("library.list.my_albums"),
                         items=self._album_items(self._library_service.load_liked_albums()),
                         recent_searches=self.recent_searches(),
                     )
@@ -475,7 +571,7 @@ class LibraryController(QObject):
             if entry.list_kind == "liked_artists":
                 self._execute(
                     lambda: BrowserContent(
-                        title="My Artists",
+                        title=self._t("library.list.my_artists"),
                         items=self._artist_items(self._library_service.load_liked_artists()),
                         recent_searches=self.recent_searches(),
                     )
@@ -484,7 +580,7 @@ class LibraryController(QObject):
             if entry.list_kind == "playlists":
                 self._execute(
                     lambda: BrowserContent(
-                        title="Playlists",
+                        title=self._t("library.list.playlists"),
                         items=(
                             *self._playlist_items(
                                 self._library_service.load_generated_playlists(),
@@ -509,7 +605,11 @@ class LibraryController(QObject):
             self._last_search_results = self._search_service.search_catalog(normalized_query)
 
         results = self._last_search_results or CatalogSearchResults()
-        title = f"Search: {normalized_query}" if normalized_query else "Search"
+        title = (
+            self._t("library.search_title", query=normalized_query)
+            if normalized_query
+            else self._t("library.search")
+        )
         return BrowserContent(
             title=f"{title} | {self._search_tab_title(tab)}",
             items=self._search_tab_items(results, tab=tab, query=normalized_query),
@@ -521,7 +621,7 @@ class LibraryController(QObject):
 
     def _empty_search_content(self, tab: str) -> BrowserContent:
         return BrowserContent(
-            title=f"Search | {self._search_tab_title(tab)}",
+            title=f"{self._t('library.search')} | {self._search_tab_title(tab)}",
             items=(),
             recent_searches=self.recent_searches(),
             tabs=self._search_tabs(),
@@ -531,7 +631,11 @@ class LibraryController(QObject):
 
     def _loading_search_content(self, query: str, tab: str) -> BrowserContent:
         normalized_query = query.strip()
-        title = f"Search: {normalized_query}" if normalized_query else "Search"
+        title = (
+            self._t("library.search_title", query=normalized_query)
+            if normalized_query
+            else self._t("library.search")
+        )
         return BrowserContent(
             title=f"{title} | {self._search_tab_title(tab)}",
             items=(),
@@ -580,7 +684,7 @@ class LibraryController(QObject):
         if tab == "playlists":
             artist_radio = self._artist_radio_items((artist,))
             return BrowserContent(
-                title=f"Artist: {artist.name} | Playlists",
+                title=self._t("library.artist_playlists_title", name=artist.name),
                 items=artist_radio
                 + self._playlist_items(
                     self._library_service.load_artist_playlists(artist.id),
@@ -592,7 +696,7 @@ class LibraryController(QObject):
             )
         if tab == "albums":
             return BrowserContent(
-                title=f"Artist: {artist.name} | Albums",
+                title=self._t("library.artist_albums_title", name=artist.name),
                 items=self._album_items(self._artist_albums(artist.id, release_type=None)),
                 recent_searches=self.recent_searches(),
                 tabs=self._artist_tabs(),
@@ -600,7 +704,7 @@ class LibraryController(QObject):
             )
         if tab == "singles":
             return BrowserContent(
-                title=f"Artist: {artist.name} | Singles",
+                title=self._t("library.artist_singles_title", name=artist.name),
                 items=self._album_items(self._artist_albums(artist.id, release_type="single")),
                 recent_searches=self.recent_searches(),
                 tabs=self._artist_tabs(),
@@ -608,7 +712,7 @@ class LibraryController(QObject):
             )
         if tab == "compilations":
             return BrowserContent(
-                title=f"Artist: {artist.name} | Compilations",
+                title=self._t("library.artist_compilations_title", name=artist.name),
                 items=self._album_items(
                     self._library_service.load_artist_compilation_albums(artist.id)
                 ),
@@ -618,7 +722,7 @@ class LibraryController(QObject):
             )
         tracks = self._library_service.load_artist_tracks(artist.id)
         return BrowserContent(
-            title=f"Artist: {artist.name} | Top Tracks",
+            title=self._t("library.artist_top_tracks_title", name=artist.name),
             items=self._track_items(
                 tracks,
                 source_type="artist",
@@ -658,7 +762,7 @@ class LibraryController(QObject):
     def _liked_tracks_content(self, *, limit: int) -> BrowserContent:
         tracks = self._library_service.load_liked_tracks(limit=limit)
         return BrowserContent(
-            title="My Tracks",
+            title=self._t("library.list.my_tracks"),
             items=self._track_items(tracks),
             recent_searches=self.recent_searches(),
             list_key="liked_tracks",
@@ -710,33 +814,33 @@ class LibraryController(QObject):
 
     def _search_tab_title(self, tab: str) -> str:
         return {
-            "albums": "Albums",
-            "singles": "Singles",
-            "compilations": "Compilations",
-            "playlists": "Playlists",
-            "artists": "Artists",
-            "artist_radio": "Artist Radio",
-            "tracks": "Tracks",
-        }.get(tab, "Tracks")
+            "albums": self._t("library.tab.albums"),
+            "singles": self._t("library.tab.singles"),
+            "compilations": self._t("library.tab.compilations"),
+            "playlists": self._t("library.tab.playlists"),
+            "artists": self._t("library.tab.artists"),
+            "artist_radio": self._t("library.tab.artist_radio"),
+            "tracks": self._t("library.tab.tracks"),
+        }.get(tab, self._t("library.tab.tracks"))
 
     def _search_tabs(self) -> tuple[BrowserTab, ...]:
         return (
-            BrowserTab("tracks", "Tracks"),
-            BrowserTab("playlists", "Playlists"),
-            BrowserTab("albums", "Albums"),
-            BrowserTab("singles", "Singles"),
-            BrowserTab("compilations", "Compilations"),
-            BrowserTab("artists", "Artists"),
-            BrowserTab("artist_radio", "Artist Radio"),
+            BrowserTab("tracks", self._t("library.tab.tracks")),
+            BrowserTab("playlists", self._t("library.tab.playlists")),
+            BrowserTab("albums", self._t("library.tab.albums")),
+            BrowserTab("singles", self._t("library.tab.singles")),
+            BrowserTab("compilations", self._t("library.tab.compilations")),
+            BrowserTab("artists", self._t("library.tab.artists")),
+            BrowserTab("artist_radio", self._t("library.tab.artist_radio")),
         )
 
     def _artist_tabs(self) -> tuple[BrowserTab, ...]:
         return (
-            BrowserTab("top_tracks", "Top Tracks"),
-            BrowserTab("playlists", "Playlists"),
-            BrowserTab("albums", "Albums"),
-            BrowserTab("singles", "Singles"),
-            BrowserTab("compilations", "Compilations"),
+            BrowserTab("top_tracks", self._t("library.tab.top_tracks")),
+            BrowserTab("playlists", self._t("library.tab.playlists")),
+            BrowserTab("albums", self._t("library.tab.albums")),
+            BrowserTab("singles", self._t("library.tab.singles")),
+            BrowserTab("compilations", self._t("library.tab.compilations")),
         )
 
     def _artist_albums(self, artist_id: str, *, release_type: str | None) -> tuple[Album, ...]:
@@ -761,7 +865,7 @@ class LibraryController(QObject):
             BrowserItem(
                 kind="artist",
                 title=artist.name,
-                subtitle="Artist",
+                subtitle=self._t("library.artist"),
                 payload=artist,
             )
             for artist in artists
@@ -771,9 +875,12 @@ class LibraryController(QObject):
         return tuple(
             BrowserItem(
                 kind="artist_radio",
-                title=f"{artist.name} Radio",
-                subtitle="Artist radio",
-                payload=Station(id=f"artist:{artist.id}", title=f"{artist.name} Radio"),
+                title=self._t("library.artist_radio_item", name=artist.name),
+                subtitle=self._t("library.artist_radio_subtitle"),
+                payload=Station(
+                    id=f"artist:{artist.id}",
+                    title=self._t("library.artist_radio_item", name=artist.name),
+                ),
             )
             for artist in artists
         )
@@ -817,6 +924,11 @@ class LibraryController(QObject):
             for station in stations
         )
 
+    def _station_title(self, station: Station) -> str:
+        if station.id == "user:onyourwave":
+            return self._t("nav.my_wave")
+        return station.title
+
     def _track_subtitle(self, track: Track, *, source_type: str | None) -> str:
         parts: list[str] = []
         artists = ", ".join(track.artists)
@@ -825,13 +937,13 @@ class LibraryController(QObject):
         if track.album_title:
             parts.append(track.album_title)
         elif source_type == "station":
-            parts.append("Radio")
-        return " | ".join(parts) or "Track"
+            parts.append(self._t("library.radio"))
+        return " | ".join(parts) or self._t("library.track")
 
     def _album_subtitle(self, album: Album) -> str | None:
         parts = [", ".join(album.artists)]
         if album.year is not None:
             parts.append(str(album.year))
         if album.track_count is not None:
-            parts.append(f"{album.track_count} tracks")
+            parts.append(self._t("library.track_count", count=album.track_count))
         return " | ".join(part for part in parts if part) or None

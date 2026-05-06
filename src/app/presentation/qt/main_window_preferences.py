@@ -45,9 +45,9 @@ class MainWindowPreferencesMixin:
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(6)
 
-        quality_label = QLabel("Quality")
-        quality_label.setObjectName("settings-section")
-        layout.addWidget(quality_label)
+        self._settings_quality_label = QLabel(self._t("settings.quality"))
+        self._settings_quality_label.setObjectName("settings-section")
+        layout.addWidget(self._settings_quality_label)
         quality_row = QHBoxLayout()
         quality_row.setContentsMargins(0, 0, 0, 0)
         quality_row.setSpacing(6)
@@ -63,16 +63,17 @@ class MainWindowPreferencesMixin:
             quality_row.addWidget(button)
         layout.addLayout(quality_row)
 
-        theme_label = QLabel("Theme")
-        theme_label.setObjectName("settings-section")
-        layout.addWidget(theme_label)
+        self._settings_theme_label = QLabel(self._t("settings.section.theme"))
+        self._settings_theme_label.setObjectName("settings-section")
+        layout.addWidget(self._settings_theme_label)
         theme_row = QHBoxLayout()
         theme_row.setContentsMargins(0, 0, 0, 0)
         theme_row.setSpacing(6)
+        self._theme_button_labels: dict[str, str] = {}
         for theme_id, title in (
-            ("system", "System"),
-            ("light", "Light"),
-            ("dark", "Dark"),
+            ("system", self._t("settings.option.theme.system")),
+            ("light", self._t("settings.option.theme.light")),
+            ("dark", self._t("settings.option.theme.dark")),
         ):
             button = QPushButton(title)
             button.setObjectName("quality-option")
@@ -81,19 +82,21 @@ class MainWindowPreferencesMixin:
                 lambda checked=False, selected=theme_id: self._set_theme_preference(selected)
             )
             self._theme_buttons[theme_id] = button
+            self._theme_button_labels[theme_id] = title
             theme_row.addWidget(button)
         layout.addLayout(theme_row)
 
-        corner_label = QLabel("Corners")
-        corner_label.setObjectName("settings-section")
-        layout.addWidget(corner_label)
+        self._settings_corner_label = QLabel(self._t("settings.section.corners"))
+        self._settings_corner_label.setObjectName("settings-section")
+        layout.addWidget(self._settings_corner_label)
         corner_row = QHBoxLayout()
         corner_row.setContentsMargins(0, 0, 0, 0)
         corner_row.setSpacing(6)
         self._corner_style_buttons: dict[str, QPushButton] = {}
+        self._corner_button_labels: dict[str, str] = {}
         for corner_style, title in (
-            ("straight", "Straight"),
-            ("rounded", "Rounded"),
+            ("straight", self._t("settings.option.corner.straight")),
+            ("rounded", self._t("settings.option.corner.rounded")),
         ):
             button = QPushButton(title)
             button.setObjectName("quality-option")
@@ -104,10 +107,35 @@ class MainWindowPreferencesMixin:
                 )
             )
             self._corner_style_buttons[corner_style] = button
+            self._corner_button_labels[corner_style] = title
             corner_row.addWidget(button)
         layout.addLayout(corner_row)
 
-        self._logout_button = QPushButton("Logout")
+        self._settings_language_label = QLabel(self._t("settings.section.language"))
+        self._settings_language_label.setObjectName("settings-section")
+        layout.addWidget(self._settings_language_label)
+        language_row = QHBoxLayout()
+        language_row.setContentsMargins(0, 0, 0, 0)
+        language_row.setSpacing(6)
+        self._language_buttons: dict[str, QPushButton] = {}
+        self._language_button_labels: dict[str, str] = {}
+        for language, title in (
+            ("system", self._t("settings.option.language.system")),
+            ("en", self._t("settings.option.language.en")),
+            ("ru", self._t("settings.option.language.ru")),
+        ):
+            button = QPushButton(title)
+            button.setObjectName("quality-option")
+            button.setCheckable(True)
+            button.clicked.connect(
+                lambda checked=False, selected=language: self._set_language_preference(selected)
+            )
+            self._language_buttons[language] = button
+            self._language_button_labels[language] = title
+            language_row.addWidget(button)
+        layout.addLayout(language_row)
+
+        self._logout_button = QPushButton(self._t("action.logout"))
         self._logout_button.setObjectName("settings-action")
         self._logout_button.clicked.connect(self._logout)
         layout.addWidget(self._logout_button)
@@ -175,7 +203,7 @@ class MainWindowPreferencesMixin:
     def _set_audio_quality(self, quality: AudioQuality) -> None:
         self._container.services.music_service.set_audio_quality(quality)
         self._container.services.settings_service.save_audio_quality(quality)
-        self._status_label.setText(f"Audio quality: {quality.name}")
+        self._status_label.setText(self._t("status.audio_quality", value=quality.name))
         self._quality_combo.setCurrentIndex(self._quality_combo.findData(quality.value))
         for candidate, button in self._quality_buttons.items():
             button.setChecked(candidate is quality)
@@ -184,13 +212,31 @@ class MainWindowPreferencesMixin:
         self._container.services.settings_service.save_theme_preference(theme)
         self._render_theme_preference(theme)
         self._apply_theme()
-        self._status_label.setText(f"Theme preference: {theme}")
+        self._status_label.setText(
+            self._t("settings.theme", value=self._t(f"settings.option.theme.{theme}"))
+        )
 
     def _set_corner_style_preference(self, corner_style: str) -> None:
         self._container.services.settings_service.save_corner_style_preference(corner_style)
         self._render_corner_style_preference(corner_style)
         self._apply_theme()
-        self._status_label.setText(f"Corner style: {corner_style}")
+        self._status_label.setText(
+            self._t(
+                "settings.corner_style",
+                value=self._t(f"settings.option.corner.{corner_style}"),
+            )
+        )
+
+    def _set_language_preference(self, language: str) -> None:
+        self._container.services.settings_service.save_language_preference(language)
+        self._render_language_preference(language)
+        self._refresh_localized_texts()
+        self._status_label.setText(
+            self._t(
+                "settings.language_preference",
+                value=self._t(f"settings.option.language.{language}"),
+            )
+        )
 
     def _render_theme_preference(self, theme: str) -> None:
         for candidate, button in self._theme_buttons.items():
@@ -200,13 +246,17 @@ class MainWindowPreferencesMixin:
         for candidate, button in self._corner_style_buttons.items():
             button.setChecked(candidate == corner_style)
 
+    def _render_language_preference(self, language: str) -> None:
+        for candidate, button in self._language_buttons.items():
+            button.setChecked(candidate == language)
+
     def _logout(self) -> None:
         self._container.services.auth_service.clear_session()
         self._container.services.music_service.clear_auth_session()
         if self._settings_popup is not None:
             self._settings_popup.hide()
         self._render_auth_state()
-        self._status_label.setText("Logged out")
+        self._status_label.setText(self._t("status.logged_out"))
         self._maybe_start_auth_flow()
 
     def _apply_saved_settings_to_ui(self) -> None:
@@ -218,6 +268,8 @@ class MainWindowPreferencesMixin:
             button.setChecked(candidate is quality)
         self._render_theme_preference(self._stored_theme_preference())
         self._render_corner_style_preference(self._stored_corner_style_preference())
+        self._render_language_preference(self._stored_language_preference())
+        self._refresh_localized_texts()
         self._apply_theme()
 
     def _maybe_start_auth_flow(self) -> None:
@@ -226,7 +278,11 @@ class MainWindowPreferencesMixin:
         if self._is_headless_test_run():
             return
 
-        self._auth_dialog = AuthDialog(parent=self)
+        self._auth_dialog = AuthDialog(
+            parent=self,
+            window_title=self._t("app.auth_dialog.title"),
+            status_text=self._t("app.auth_dialog.status"),
+        )
         self._auth_dialog.token_captured.connect(self._complete_auth_flow)
         self._auth_dialog.finished.connect(self._clear_auth_dialog)
         self._auth_dialog.open()
@@ -240,11 +296,13 @@ class MainWindowPreferencesMixin:
             )
         except DomainError as exc:
             self._container.logger.warning("Auth flow failed: %s", exc)
-            self._status_label.setText(f"Auth error: {user_facing_error_message(exc)}")
+            self._status_label.setText(
+                self._t("status.auth_error", message=user_facing_error_message(exc))
+            )
             return
 
         username = session.display_name or session.user_id
-        self._status_label.setText(f"Authenticated as {username}")
+        self._status_label.setText(self._t("status.authenticated_as", username=username))
         self._render_auth_state()
 
     def _clear_auth_dialog(self) -> None:
@@ -294,6 +352,9 @@ class MainWindowPreferencesMixin:
     def _stored_corner_style_preference(self) -> str:
         return self._container.services.settings_service.load_corner_style_preference()
 
+    def _stored_language_preference(self) -> str:
+        return self._container.services.settings_service.load_language_preference()
+
     def _theme_icon_color(self) -> str:
         return "#1f2736" if self._resolved_theme_mode() == "light" else "#ffffff"
 
@@ -333,6 +394,39 @@ class MainWindowPreferencesMixin:
                 self._current_track.is_liked if self._current_track else False
             )
 
+    def _refresh_localized_texts(self) -> None:
+        self.setWindowTitle(self._t("app.title"))
+        if hasattr(self, "_settings_quality_label"):
+            self._settings_quality_label.setText(self._t("settings.quality"))
+        if hasattr(self, "_settings_theme_label"):
+            self._settings_theme_label.setText(self._t("settings.section.theme"))
+        if hasattr(self, "_settings_corner_label"):
+            self._settings_corner_label.setText(self._t("settings.section.corners"))
+        if hasattr(self, "_settings_language_label"):
+            self._settings_language_label.setText(self._t("settings.section.language"))
+        if hasattr(self, "_logout_button"):
+            self._logout_button.setText(self._t("action.logout"))
+        for theme_id, button in getattr(self, "_theme_buttons", {}).items():
+            button.setText(self._t(f"settings.option.theme.{theme_id}"))
+        for corner_style, button in getattr(self, "_corner_style_buttons", {}).items():
+            button.setText(self._t(f"settings.option.corner.{corner_style}"))
+        for language, button in getattr(self, "_language_buttons", {}).items():
+            button.setText(self._t(f"settings.option.language.{language}"))
+        if getattr(self, "_auth_dialog", None) is not None:
+            self._auth_dialog.apply_texts(
+                window_title=self._t("app.auth_dialog.title"),
+                status_text=self._t("app.auth_dialog.status"),
+            )
+        refresh_main = getattr(self, "_refresh_main_window_texts", None)
+        if callable(refresh_main):
+            refresh_main()
+        auto_open_enabled = self._browser_auto_open_enabled
+        self._browser_auto_open_enabled = False
+        try:
+            self._library_controller.refresh_localized_content()
+        finally:
+            self._browser_auto_open_enabled = auto_open_enabled
+
     def _refresh_window_maximize_button(self) -> None:
         if not hasattr(self, "_window_maximize_button"):
             return
@@ -344,16 +438,16 @@ class MainWindowPreferencesMixin:
                 create_icon("window-maximize.svg", color=icon_color)
             )
             self._window_maximize_button.setToolTip(
-                "Restore" if self.isMaximized() else "Maximize"
+                self._t("action.restore") if self.isMaximized() else self._t("action.maximize")
             )
             return
         if self.isFullScreen():
             self._window_maximize_button.setIcon(
                 create_icon("window-maximize.svg", color=icon_color)
             )
-            self._window_maximize_button.setToolTip("Exit Full Screen")
+            self._window_maximize_button.setToolTip(self._t("action.exit_full_screen"))
             return
         self._window_maximize_button.setIcon(
             create_icon("window-maximize.svg", color=icon_color)
         )
-        self._window_maximize_button.setToolTip("Full Screen")
+        self._window_maximize_button.setToolTip(self._t("action.full_screen"))

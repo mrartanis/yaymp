@@ -54,7 +54,7 @@ class MainWindowLayoutMixin:
         self._volume_slider.setValue(100)
         self._volume_slider.setObjectName("volume-slider")
         self._volume_slider.setFixedSize(26, 118)
-        self._volume_label = self._panel_label("Volume 100%")
+        self._volume_label = self._panel_label("100%")
         self._quality_combo = QComboBox()
         self._quality_combo.setObjectName("quality-combo")
         self._quality_combo.setFixedWidth(58)
@@ -62,7 +62,7 @@ class MainWindowLayoutMixin:
         self._quality_combo.addItem("SD", AudioQuality.SD.value)
         self._quality_combo.addItem("LQ", AudioQuality.LQ.value)
         self._quality_combo.setCurrentIndex(0)
-        self._track_title_label = self._panel_label("Starter Signal")
+        self._track_title_label = self._panel_label(self._t("label.starter_signal"))
         self._track_title_label.setObjectName("track-title")
         self._track_title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._track_title_label.setWordWrap(True)
@@ -71,7 +71,7 @@ class MainWindowLayoutMixin:
             QSizePolicy.Policy.Preferred,
         )
         self._track_title_label.setMaximumHeight(108)
-        self._track_meta_label = self._panel_label("Artist metadata will appear here")
+        self._track_meta_label = self._panel_label(self._t("label.artist_metadata"))
         self._track_meta_label.setObjectName("track-artist")
         self._track_meta_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._track_meta_label.setSizePolicy(
@@ -80,7 +80,7 @@ class MainWindowLayoutMixin:
         )
         self._track_meta_label.setMaximumHeight(72)
         self._track_meta_label.setWordWrap(True)
-        self._track_album_label = self._panel_label("Album")
+        self._track_album_label = self._panel_label(self._t("label.album"))
         self._track_album_label.setObjectName("track-album")
         self._track_album_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._track_album_label.setWordWrap(True)
@@ -97,14 +97,14 @@ class MainWindowLayoutMixin:
         self._track_technical_label = self._panel_label("")
         self._track_technical_label.setObjectName("track-tech")
         self._track_technical_label.setVisible(False)
-        self._playback_state_label = self._panel_label("Stopped")
+        self._playback_state_label = self._panel_label(self._t("label.playback_state.stopped"))
         self._playback_state_label.setObjectName("playback-state")
         self._status_label = self._panel_label("")
         self._status_label.setObjectName("inline-status")
         self._status_label.setVisible(False)
-        self._queue_status_label = self._panel_label("Queue idle", align_right=True)
+        self._queue_status_label = self._panel_label(self._t("label.queue_idle"), align_right=True)
         self._queue_status_label.setObjectName("queue-summary")
-        self._artwork_label = QLabel("No cover")
+        self._artwork_label = QLabel(self._t("label.no_cover"))
         self._artwork_label.setObjectName("album-art")
         self._artwork_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._artwork_label.setFixedSize(self._COMPACT_ARTWORK_SIZE, self._COMPACT_ARTWORK_SIZE)
@@ -115,12 +115,12 @@ class MainWindowLayoutMixin:
         self._artwork_label.installEventFilter(self)
         self._sidebar_toggle_button = QPushButton("≡")
         self._sidebar_toggle_button.setObjectName("sidebar-toggle")
-        self._sidebar_toggle_button.setToolTip("Toggle navigation")
+        self._sidebar_toggle_button.setToolTip(self._t("action.toggle_navigation"))
         self._sidebar_toggle_button.setFixedSize(30, 28)
-        self._my_wave_top_button = QPushButton("My Wave")
+        self._my_wave_top_button = QPushButton(self._t("nav.my_wave"))
         self._my_wave_top_button.setObjectName("my-wave-button")
         self._my_wave_top_button.setFixedHeight(28)
-        self._auth_label = self._panel_label("Login required", align_right=True)
+        self._auth_label = self._panel_label(self._t("label.login_required"), align_right=True)
         self._auth_label.setObjectName("auth-label")
         self._auth_label.setFixedHeight(28)
         self._auth_label.setAlignment(
@@ -129,13 +129,13 @@ class MainWindowLayoutMixin:
         self._auth_label.installEventFilter(self)
         self._settings_button = QPushButton()
         self._settings_button.setObjectName("settings-toggle-button")
-        self._settings_button.setToolTip("Settings")
-        self._settings_button.setAccessibleName("Settings")
+        self._settings_button.setToolTip(self._t("action.settings"))
+        self._settings_button.setAccessibleName(self._t("action.settings"))
         self._settings_button.setFixedSize(28, 28)
         self._volume_button = QPushButton()
         self._volume_button.setObjectName("volume-button")
         self._volume_button.setIcon(create_icon("volume.svg"))
-        self._volume_button.setToolTip("Volume")
+        self._volume_button.setToolTip(self._t("action.volume"))
         self._volume_button.setFixedSize(34, 32)
         self._volume_button.installEventFilter(self)
 
@@ -265,11 +265,11 @@ class MainWindowLayoutMixin:
         frame.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         layout = frame.layout()
         assert layout is not None
-        search_button = QPushButton("Search")
-        liked_button = QPushButton("My Tracks")
-        liked_albums_button = QPushButton("My Albums")
-        liked_artists_button = QPushButton("My Artists")
-        playlists_button = QPushButton("Playlists")
+        search_button = QPushButton(self._t("action.search"))
+        liked_button = QPushButton(self._t("nav.my_tracks"))
+        liked_albums_button = QPushButton(self._t("nav.my_albums"))
+        liked_artists_button = QPushButton(self._t("nav.my_artists"))
+        playlists_button = QPushButton(self._t("nav.playlists"))
         if primary:
             self._search_nav_button = search_button
             self._liked_nav_button = liked_button
@@ -282,8 +282,12 @@ class MainWindowLayoutMixin:
             self._popup_liked_albums_nav_button = liked_albums_button
             self._popup_liked_artists_nav_button = liked_artists_button
             self._popup_playlists_nav_button = playlists_button
-        library_label = QLabel("Library")
+        library_label = QLabel(self._t("label.library"))
         library_label.setObjectName("nav-section")
+        if primary:
+            self._nav_library_label = library_label
+        else:
+            self._popup_nav_library_label = library_label
         layout.addWidget(library_label)
         for button in (
             liked_button,
@@ -293,8 +297,12 @@ class MainWindowLayoutMixin:
         ):
             layout.addWidget(button)
         layout.addSpacing(8)
-        discovery_label = QLabel("Discovery")
+        discovery_label = QLabel(self._t("label.discovery"))
         discovery_label.setObjectName("nav-section")
+        if primary:
+            self._nav_discovery_label = discovery_label
+        else:
+            self._popup_nav_discovery_label = discovery_label
         layout.addWidget(discovery_label)
         layout.addWidget(search_button)
         layout.addStretch(1)

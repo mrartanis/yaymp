@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 from app.bootstrap.container import AppContainer
 from app.domain import PlaybackStatus, Track
 from app.presentation.qt.auth_dialog import AuthDialog
+from app.presentation.qt.i18n import UiTextCatalog
 from app.presentation.qt.icon_utils import create_icon
 from app.presentation.qt.library_controller import BrowserContent, LibraryController
 from app.presentation.qt.main_window_artwork import MainWindowArtworkMixin
@@ -72,6 +73,9 @@ class MainWindow(
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self._container = container
+        self._ui_text_catalog = UiTextCatalog(
+            settings_service=container.services.settings_service
+        )
         self._controller = PlaybackController(
             playback_service=container.services.playback_service,
             logger=container.logger,
@@ -80,6 +84,7 @@ class MainWindow(
             search_service=container.services.search_service,
             library_service=container.services.library_service,
             logger=container.logger,
+            translate=self._t,
         )
         self._current_track: Track | None = None
         self._current_browser_content: BrowserContent | None = None
@@ -138,7 +143,7 @@ class MainWindow(
         self._system_media_timer.timeout.connect(self._flush_system_media_update)
         self._playback_poll_timer = QTimer(self)
         self._playback_poll_timer.setInterval(1000)
-        self.setWindowTitle("YAYMP")
+        self.setWindowTitle(self._t("app.title"))
         self._build_ui()
         self._system_media = build_system_media_integration(
             playback_controller=self._controller,
@@ -182,11 +187,17 @@ class MainWindow(
         layout = QHBoxLayout(frame)
         layout.setContentsMargins(2, 0, 0, 0)
         layout.setSpacing(6)
-        self._window_minimize_button = self._icon_button("window-minimize.svg", "Minimize")
+        self._window_minimize_button = self._icon_button(
+            "window-minimize.svg",
+            self._t("action.minimize"),
+        )
         self._window_minimize_button.setObjectName("window-control-button")
-        self._window_maximize_button = self._icon_button("window-maximize.svg", "Maximize")
+        self._window_maximize_button = self._icon_button(
+            "window-maximize.svg",
+            self._t("action.maximize"),
+        )
         self._window_maximize_button.setObjectName("window-control-button")
-        self._window_close_button = self._icon_button("window-close.svg", "Close")
+        self._window_close_button = self._icon_button("window-close.svg", self._t("action.close"))
         self._window_close_button.setObjectName("window-close-button")
         window_buttons = (
             self._window_close_button,
@@ -212,15 +223,15 @@ class MainWindow(
     def _build_transport_bar(self) -> QHBoxLayout:
         layout = QHBoxLayout()
         layout.setSpacing(8)
-        self._previous_button = self._icon_button("previous.svg", "Previous")
-        self._play_pause_button = self._icon_button("play.svg", "Play")
+        self._previous_button = self._icon_button("previous.svg", self._t("action.previous"))
+        self._play_pause_button = self._icon_button("play.svg", self._t("action.play"))
         self._play_pause_button.setObjectName("play-button")
         self._play_pause_button.setFixedSize(52, 44)
-        self._next_button = self._icon_button("next.svg", "Next")
+        self._next_button = self._icon_button("next.svg", self._t("action.next"))
         self._like_track_button = QPushButton()
         self._like_track_button.setObjectName("like-current-button")
         self._like_track_button.setIcon(create_icon("heart_outline.svg"))
-        self._like_track_button.setToolTip("Like current track")
+        self._like_track_button.setToolTip(self._t("track.tooltip.like"))
         self._like_track_button.setFixedSize(34, 32)
         for button in (
             self._previous_button,
@@ -335,13 +346,13 @@ class MainWindow(
         footer.addStretch(1)
         self._queue_shuffle_button = QPushButton()
         self._queue_shuffle_button.setObjectName("queue-icon-button")
-        self._queue_shuffle_button.setToolTip("Shuffle queue")
+        self._queue_shuffle_button.setToolTip(self._t("action.shuffle_queue"))
         self._queue_shuffle_button.setFixedSize(34, 32)
         self._queue_shuffle_button.setCheckable(True)
         self._queue_shuffle_button.setIcon(create_icon("shuffle_playlist.svg"))
         self._clear_queue_button = QPushButton()
         self._clear_queue_button.setObjectName("queue-icon-button")
-        self._clear_queue_button.setToolTip("Clear queue")
+        self._clear_queue_button.setToolTip(self._t("action.clear_queue"))
         self._clear_queue_button.setFixedSize(34, 32)
         self._clear_queue_button.setIcon(create_icon("clear_playlist.svg"))
         footer.addWidget(self._queue_shuffle_button)
@@ -443,7 +454,7 @@ class MainWindow(
 
     def _toggle_current_track_like(self) -> None:
         if self._current_track is None:
-            self._status_label.setText("Select or play a track first")
+            self._status_label.setText(self._t("status.prompt_select_track"))
             return
         self._toggle_track_like(self._current_track)
 
@@ -502,7 +513,7 @@ class MainWindow(
             )
             self._track_title_label.setText(current_track.title)
             self._track_title_label.setToolTip(current_track.title)
-            self._track_meta_label.setText(artists or "Unknown artist")
+            self._track_meta_label.setText(artists or self._t("label.unknown_artist"))
             self._track_meta_label.setToolTip(artists)
             self._track_album_label.setText(
                 album_text
@@ -513,8 +524,8 @@ class MainWindow(
             self._defer_artwork_render(current_track)
         else:
             self._current_track = None
-            self._track_title_label.setText("No track selected")
-            self._track_meta_label.setText("Choose music from My Wave, library, or search")
+            self._track_title_label.setText(self._t("label.no_track_selected"))
+            self._track_meta_label.setText(self._t("track.choose_music"))
             self._track_album_label.setText("")
             self._fit_track_text_labels()
             self._render_current_track_like_button(False)
@@ -539,7 +550,11 @@ class MainWindow(
         self._queue_shuffle_button.setChecked(state.shuffle_enabled)
         self._queue_shuffle_button.blockSignals(False)
         self._queue_status_label.setText(
-            f"{len(queue)} tracks | {self._format_ms(self._queue_duration_ms(queue))}"
+            self._t(
+                "status.queue_summary",
+                count=len(queue),
+                duration=self._format_ms(self._queue_duration_ms(queue)),
+            )
         )
         self._audio_info_label.setText(
             self._format_audio_info(state.audio_codec, state.audio_bitrate)
@@ -584,9 +599,9 @@ class MainWindow(
             if is_liked
             else create_icon("heart_outline.svg", color=self._theme_icon_color())
         )
-        self._like_track_button.setToolTip(
-            "Unlike current track" if is_liked else "Like current track"
-        )
+        tooltip = self._t("track.tooltip.unlike") if is_liked else self._t("track.tooltip.like")
+        self._like_track_button.setToolTip(tooltip)
+        self._like_track_button.setAccessibleName(tooltip)
 
     def _render_play_pause_button(self, status: PlaybackStatus) -> None:
         self._play_pause_button.setProperty("playback_status", status.value)
@@ -594,20 +609,20 @@ class MainWindow(
             self._play_pause_button.setIcon(
                 create_icon("pause.svg", color=self._accent_text_color())
             )
-            self._play_pause_button.setToolTip("Pause")
-            self._play_pause_button.setAccessibleName("Pause")
+            self._play_pause_button.setToolTip(self._t("action.pause"))
+            self._play_pause_button.setAccessibleName(self._t("action.pause"))
             return
         self._play_pause_button.setIcon(create_icon("play.svg", color=self._accent_text_color()))
-        self._play_pause_button.setToolTip("Play")
-        self._play_pause_button.setAccessibleName("Play")
+        self._play_pause_button.setToolTip(self._t("action.play"))
+        self._play_pause_button.setAccessibleName(self._t("action.play"))
 
     def _render_error(self, message: str) -> None:
-        self._status_label.setText(f"Playback error: {message}")
+        self._status_label.setText(self._t("status.playback_error", message=message))
 
     def _render_auth_state(self) -> None:
         session = self._container.services.auth_service.current_session()
         if session is None:
-            self._auth_label.setText("Login required")
+            self._auth_label.setText(self._t("label.login_required"))
             if hasattr(self, "_logout_button"):
                 self._logout_button.setEnabled(False)
             return
@@ -615,6 +630,53 @@ class MainWindow(
         self._auth_label.setText(username)
         if hasattr(self, "_logout_button"):
             self._logout_button.setEnabled(True)
+
+    def _t(self, key: str, **params: object) -> str:
+        return self._ui_text_catalog.text(key, **params)
+
+    def _refresh_main_window_texts(self) -> None:
+        self._window_minimize_button.setToolTip(self._t("action.minimize"))
+        self._window_minimize_button.setAccessibleName(self._t("action.minimize"))
+        self._window_close_button.setToolTip(self._t("action.close"))
+        self._window_close_button.setAccessibleName(self._t("action.close"))
+        self._previous_button.setToolTip(self._t("action.previous"))
+        self._previous_button.setAccessibleName(self._t("action.previous"))
+        self._next_button.setToolTip(self._t("action.next"))
+        self._next_button.setAccessibleName(self._t("action.next"))
+        self._sidebar_toggle_button.setToolTip(self._t("action.toggle_navigation"))
+        self._my_wave_top_button.setText(self._t("nav.my_wave"))
+        self._settings_button.setToolTip(self._t("action.settings"))
+        self._settings_button.setAccessibleName(self._t("action.settings"))
+        self._volume_button.setToolTip(self._t("action.volume"))
+        self._queue_shuffle_button.setToolTip(self._t("action.shuffle_queue"))
+        self._clear_queue_button.setToolTip(self._t("action.clear_queue"))
+        self._search_button.setText(self._t("action.search"))
+        self._play_all_button.setText(self._t("action.play_all"))
+        self._append_all_button.setText(self._t("action.append_all"))
+        self._search_input.setPlaceholderText(self._t("browser.placeholder.search"))
+        self._recent_searches_combo.setPlaceholderText(
+            self._t("browser.placeholder.recent_searches")
+        )
+        self._browser_back_button.setToolTip(self._t("action.back"))
+        self._browser_close_button.setToolTip(self._t("action.close"))
+        self._browser_dialog.setWindowTitle(self._t("window.search_library"))
+        self._search_nav_button.setText(self._t("action.search"))
+        self._liked_nav_button.setText(self._t("nav.my_tracks"))
+        self._liked_albums_nav_button.setText(self._t("nav.my_albums"))
+        self._liked_artists_nav_button.setText(self._t("nav.my_artists"))
+        self._playlists_nav_button.setText(self._t("nav.playlists"))
+        self._nav_library_label.setText(self._t("label.library"))
+        self._nav_discovery_label.setText(self._t("label.discovery"))
+        self._popup_search_nav_button.setText(self._t("action.search"))
+        self._popup_liked_nav_button.setText(self._t("nav.my_tracks"))
+        self._popup_liked_albums_nav_button.setText(self._t("nav.my_albums"))
+        self._popup_liked_artists_nav_button.setText(self._t("nav.my_artists"))
+        self._popup_playlists_nav_button.setText(self._t("nav.playlists"))
+        self._popup_nav_library_label.setText(self._t("label.library"))
+        self._popup_nav_discovery_label.setText(self._t("label.discovery"))
+        self._render_auth_state()
+        self._refresh_window_maximize_button()
+        self._render_snapshot(self._container.services.playback_service.snapshot())
 
 
     def _plain_frame(self, name: str) -> QFrame:

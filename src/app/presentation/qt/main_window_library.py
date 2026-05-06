@@ -13,7 +13,7 @@ from app.presentation.qt.library_controller import BrowserItem
 
 class MainWindowLibraryMixin:
     def _render_library_error(self, message: str) -> None:
-        self._status_label.setText(f"Library error: {message}")
+        self._status_label.setText(self._t("status.library_error", message=message))
 
     def _render_track_liked(self, track: Track) -> None:
         self._track_like_overrides[track.id] = True
@@ -22,7 +22,7 @@ class MainWindowLibraryMixin:
             self._render_current_track_like_button(True)
         self._replace_content_track(track)
         self._update_queue_track_like(track)
-        self._status_label.setText(f"Liked: {track.title}")
+        self._status_label.setText(self._t("status.track.like", title=track.title))
 
     def _render_track_unliked(self, track: Track) -> None:
         self._track_like_overrides[track.id] = False
@@ -31,43 +31,43 @@ class MainWindowLibraryMixin:
             self._render_current_track_like_button(False)
         self._replace_content_track(track)
         self._update_queue_track_like(track)
-        self._status_label.setText(f"Unliked: {track.title}")
+        self._status_label.setText(self._t("status.track.unlike", title=track.title))
 
     def _render_album_liked(self, album: Album) -> None:
         self._replace_content_entity(album)
-        self._status_label.setText(f"Liked album: {album.title}")
+        self._status_label.setText(self._t("status.album.like", title=album.title))
 
     def _render_album_unliked(self, album: Album) -> None:
         self._replace_content_entity(album)
-        self._status_label.setText(f"Unliked album: {album.title}")
+        self._status_label.setText(self._t("status.album.unlike", title=album.title))
 
     def _render_artist_liked(self, artist: Artist) -> None:
         self._replace_content_entity(artist)
-        self._status_label.setText(f"Liked artist: {artist.name}")
+        self._status_label.setText(self._t("status.artist.like", name=artist.name))
 
     def _render_artist_unliked(self, artist: Artist) -> None:
         self._replace_content_entity(artist)
-        self._status_label.setText(f"Unliked artist: {artist.name}")
+        self._status_label.setText(self._t("status.artist.unlike", name=artist.name))
 
     def _render_playlist_liked(self, playlist: Playlist) -> None:
         self._replace_content_entity(playlist)
-        self._status_label.setText(f"Liked playlist: {playlist.title}")
+        self._status_label.setText(self._t("status.playlist.like", title=playlist.title))
 
     def _render_playlist_unliked(self, playlist: Playlist) -> None:
         self._replace_content_entity(playlist)
-        self._status_label.setText(f"Unliked playlist: {playlist.title}")
+        self._status_label.setText(self._t("status.playlist.unlike", title=playlist.title))
 
     def _like_selected_or_current_track(self) -> None:
         track = self._selected_or_current_track()
         if track is None:
-            self._status_label.setText("Library error: select or play a track first")
+            self._status_label.setText(self._t("status.library_select_track"))
             return
         self._library_controller.like_track(track)
 
     def _unlike_selected_or_current_track(self) -> None:
         track = self._selected_or_current_track()
         if track is None:
-            self._status_label.setText("Library error: select or play a track first")
+            self._status_label.setText(self._t("status.library_select_track"))
             return
         self._library_controller.unlike_track(track)
 
@@ -246,14 +246,14 @@ class MainWindowLibraryMixin:
         include_queue_actions: bool = True,
     ) -> bool:
         self._add_copy_share_link_action(menu, self._track_share_link(track))
-        action_text = "Unlike" if track.is_liked else "Like"
+        action_text = self._t("action.unlike") if track.is_liked else self._t("action.like")
         toggle_like = QAction(action_text, self)
         toggle_like.triggered.connect(
             lambda checked=False, selected_track=track: self._toggle_track_like(selected_track)
         )
         menu.addAction(toggle_like)
         if include_queue_actions:
-            add_to_queue = QAction("Add to queue", self)
+            add_to_queue = QAction(self._t("action.add_to_queue"), self)
             add_to_queue.triggered.connect(
                 lambda checked=False, selected_track=track: self._controller.append_tracks(
                     (selected_track,),
@@ -262,7 +262,7 @@ class MainWindowLibraryMixin:
                 )
             )
             menu.addAction(add_to_queue)
-            play_next = QAction("Play next", self)
+            play_next = QAction(self._t("action.play_next"), self)
             play_next.triggered.connect(
                 lambda checked=False, selected_track=track: self._controller.play_track_next(
                     selected_track,
@@ -274,7 +274,7 @@ class MainWindowLibraryMixin:
         self._add_track_radio_action(menu, track)
         self._add_go_to_artist_actions(menu, track.artist_ids, track.artists)
         if track.album_id:
-            go_to_album = QAction("Go to album", self)
+            go_to_album = QAction(self._t("action.go_to_album"), self)
             album_id = track.album_id
             go_to_album.triggered.connect(
                 lambda checked=False, selected_album_id=album_id: (
@@ -291,12 +291,12 @@ class MainWindowLibraryMixin:
         queue_index: int,
     ) -> bool:
         self._populate_track_menu(menu, queue_item.track, include_queue_actions=False)
-        play_next = QAction("Play next", self)
+        play_next = QAction(self._t("action.play_next"), self)
         play_next.triggered.connect(
             lambda checked=False, index=queue_index: self._controller.move_queue_item_next(index)
         )
         menu.addAction(play_next)
-        remove_action = QAction("Remove from queue", self)
+        remove_action = QAction(self._t("action.remove_from_queue"), self)
         remove_action.triggered.connect(
             lambda checked=False, index=queue_index: self._controller.remove_queue_index(index)
         )
@@ -310,21 +310,30 @@ class MainWindowLibraryMixin:
         self._library_controller.like_track(track)
 
     def _add_album_like_action(self, menu: QMenu, album: Album) -> None:
-        action = QAction("Unlike" if album.is_liked else "Like", self)
+        action = QAction(
+            self._t("action.unlike") if album.is_liked else self._t("action.like"),
+            self,
+        )
         action.triggered.connect(
             lambda checked=False, selected_album=album: self._toggle_album_like(selected_album)
         )
         menu.addAction(action)
 
     def _add_artist_like_action(self, menu: QMenu, artist: Artist) -> None:
-        action = QAction("Unlike" if artist.is_liked else "Like", self)
+        action = QAction(
+            self._t("action.unlike") if artist.is_liked else self._t("action.like"),
+            self,
+        )
         action.triggered.connect(
             lambda checked=False, selected_artist=artist: self._toggle_artist_like(selected_artist)
         )
         menu.addAction(action)
 
     def _add_playlist_like_action(self, menu: QMenu, playlist: Playlist) -> None:
-        action = QAction("Unlike" if playlist.is_liked else "Like", self)
+        action = QAction(
+            self._t("action.unlike") if playlist.is_liked else self._t("action.like"),
+            self,
+        )
         action.triggered.connect(
             lambda checked=False, selected_playlist=playlist: self._toggle_playlist_like(
                 selected_playlist
@@ -353,35 +362,44 @@ class MainWindowLibraryMixin:
     def _add_copy_share_link_action(self, menu: QMenu, link: str | None) -> None:
         if not link:
             return
-        action = QAction("Copy share link", self)
+        action = QAction(self._t("action.copy_share_link"), self)
         action.triggered.connect(
             lambda checked=False, share_link=link: self._copy_share_link(share_link)
         )
         menu.addAction(action)
 
     def _add_track_radio_action(self, menu: QMenu, track: Track) -> None:
-        action = QAction("Start track radio", self)
+        action = QAction(self._t("action.start_track_radio"), self)
         action.triggered.connect(
             lambda checked=False, selected_track=track: self._open_and_play_station(
-                Station(id=f"track:{selected_track.id}", title=f"{selected_track.title} Radio")
+                Station(
+                    id=f"track:{selected_track.id}",
+                    title=self._t("library.radio_item", name=selected_track.title),
+                )
             )
         )
         menu.addAction(action)
 
     def _add_album_radio_action(self, menu: QMenu, album: Album) -> None:
-        action = QAction("Start album radio", self)
+        action = QAction(self._t("action.start_album_radio"), self)
         action.triggered.connect(
             lambda checked=False, selected_album=album: self._open_and_play_station(
-                Station(id=f"album:{selected_album.id}", title=f"{selected_album.title} Radio")
+                Station(
+                    id=f"album:{selected_album.id}",
+                    title=self._t("library.radio_item", name=selected_album.title),
+                )
             )
         )
         menu.addAction(action)
 
     def _add_artist_radio_action(self, menu: QMenu, artist: Artist) -> None:
-        action = QAction("Start artist radio", self)
+        action = QAction(self._t("action.start_artist_radio"), self)
         action.triggered.connect(
             lambda checked=False, selected_artist=artist: self._open_and_play_station(
-                Station(id=f"artist:{selected_artist.id}", title=f"{selected_artist.name} Radio")
+                Station(
+                    id=f"artist:{selected_artist.id}",
+                    title=self._t("library.radio_item", name=selected_artist.name),
+                )
             )
         )
         menu.addAction(action)
@@ -400,7 +418,7 @@ class MainWindowLibraryMixin:
             return
         if len(artists) == 1:
             artist = artists[0]
-            action = QAction("Go to artist", self)
+            action = QAction(self._t("action.go_to_artist"), self)
             action.triggered.connect(
                 lambda checked=False, selected_artist=artist: self._library_controller.open_artist(
                     selected_artist
@@ -408,7 +426,7 @@ class MainWindowLibraryMixin:
             )
             menu.addAction(action)
             return
-        submenu = menu.addMenu("Go to artist")
+        submenu = menu.addMenu(self._t("action.go_to_artist"))
         for artist in artists:
             action = QAction(artist.name, self)
             action.triggered.connect(
@@ -424,7 +442,7 @@ class MainWindowLibraryMixin:
     def _copy_share_link(self, link: str) -> None:
         clipboard = QApplication.clipboard()
         clipboard.setText(link)
-        self._status_label.setText(f"Copied share link: {link}")
+        self._status_label.setText(self._t("status.copied_share_link", link=link))
 
     def _track_share_link(self, track: Track) -> str | None:
         if track.album_id:

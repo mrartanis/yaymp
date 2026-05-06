@@ -16,15 +16,19 @@ YANDEX_MUSIC_OAUTH_URL = (
 class AuthDialog(QDialog):
     token_captured = Signal(str, object)
 
-    def __init__(self, *, parent=None) -> None:
+    def __init__(
+        self,
+        *,
+        parent=None,
+        window_title: str,
+        status_text: str,
+    ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Yandex Music Login")
+        self.setWindowTitle(window_title)
         self.resize(920, 720)
 
         layout = QVBoxLayout(self)
-        self._status_label = QLabel(
-            "Sign in to Yandex Music. The app will capture the OAuth token automatically."
-        )
+        self._status_label = QLabel(status_text)
         self._status_label.setWordWrap(True)
         layout.addWidget(self._status_label)
 
@@ -32,6 +36,10 @@ class AuthDialog(QDialog):
         self._web_view.urlChanged.connect(self._handle_url_changed)
         layout.addWidget(self._web_view, 1)
         self._web_view.load(QUrl(YANDEX_MUSIC_OAUTH_URL))
+
+    def apply_texts(self, *, window_title: str, status_text: str) -> None:
+        self.setWindowTitle(window_title)
+        self._status_label.setText(status_text)
 
     def _handle_url_changed(self, url: QUrl) -> None:
         parsed = urlparse(url.toString())
