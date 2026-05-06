@@ -15,6 +15,9 @@ from app.domain import (
 
 
 class LibraryService:
+    _BULK_LIKED_TRACK_LIMIT = 100_000
+    _BULK_ARTIST_TRACK_LIMIT = 1_000
+
     def __init__(
         self,
         *,
@@ -80,6 +83,62 @@ class LibraryService:
         if liked_tracks is not None:
             self._library_cache_repo.save_liked_track_ids(liked_tracks)
         self._logger.info("Loaded %s liked tracks", len(tracks))
+        return tracks
+
+    def load_all_liked_tracks(self) -> tuple[Track, ...]:
+        user_id = self._current_user_id()
+        cached_snapshot = (
+            self._library_cache_repo.load_liked_track_snapshot(user_id)
+            if user_id is not None
+            else None
+        )
+        cached_liked_ids = (
+            self._library_cache_repo.load_liked_track_ids(user_id)
+            if user_id is not None
+            else None
+        )
+        current_revision = cached_snapshot.revision if cached_snapshot is not None else 0
+
+        if user_id is None:
+            tracks = tuple(self._music_service.get_liked_tracks(limit=self._BULK_LIKED_TRACK_LIMIT))
+            self._cache_tracks(tracks)
+            self._logger.info("Loaded %s liked tracks for bulk playback", len(tracks))
+            return tracks
+
+        liked_tracks = self._music_service.get_liked_track_ids(
+            if_modified_since_revision=current_revision
+        )
+        if (
+            liked_tracks is None
+            and cached_snapshot is not None
+            and cached_liked_ids is not None
+            and len(cached_snapshot.tracks) >= len(cached_liked_ids.track_ids)
+        ):
+            self._logger.info(
+                "Loaded %s liked tracks from cache for bulk playback at revision %s",
+                len(cached_snapshot.tracks),
+                current_revision,
+            )
+            return cached_snapshot.tracks
+
+        total_tracks = len(liked_tracks.track_ids) if liked_tracks is not None else 0
+        tracks = tuple(
+            self._music_service.get_liked_tracks(
+                limit=max(total_tracks, self._BULK_LIKED_TRACK_LIMIT),
+            )
+        )
+        self._cache_tracks(tracks)
+        snapshot_revision = liked_tracks.revision if liked_tracks is not None else current_revision
+        self._library_cache_repo.save_liked_track_snapshot(
+            LikedTrackSnapshot(
+                user_id=user_id,
+                revision=snapshot_revision,
+                tracks=tracks,
+            )
+        )
+        if liked_tracks is not None:
+            self._library_cache_repo.save_liked_track_ids(liked_tracks)
+        self._logger.info("Loaded %s liked tracks for bulk playback", len(tracks))
         return tracks
 
     def refresh_liked_track_index(self, *, force: bool = False) -> None:
@@ -194,6 +253,14 @@ class LibraryService:
         self._logger.info("Loaded %s tracks for playlist %s", len(tracks), playlist_id)
         return tracks
 
+    def load_all_playlist_tracks(
+        self,
+        playlist_id: str,
+        *,
+        owner_id: str | None = None,
+    ) -> tuple[Track, ...]:
+        return self.load_playlist_tracks(playlist_id, owner_id=owner_id)
+
     def load_album(self, album_id: str) -> Album:
         album = self._music_service.get_album(album_id)
         self._logger.info("Loaded album %s", album_id)
@@ -208,6 +275,9 @@ class LibraryService:
         self._cache_tracks(tracks)
         self._logger.info("Loaded %s tracks for album %s", len(tracks), album_id)
         return tracks
+
+    def load_all_album_tracks(self, album_id: str) -> tuple[Track, ...]:
+        return self.load_album_tracks(album_id)
 
     def load_station_tracks(self, station_id: str, *, limit: int = 25) -> tuple[Track, ...]:
         tracks = merge_cached_liked_states(
@@ -228,6 +298,9 @@ class LibraryService:
         self._cache_tracks(tracks)
         self._logger.info("Loaded %s artist tracks for %s", len(tracks), artist_id)
         return tracks
+
+    def load_all_artist_tracks(self, artist_id: str) -> tuple[Track, ...]:
+        return self.load_artist_tracks(artist_id, limit=self._BULK_ARTIST_TRACK_LIMIT)
 
     def load_artist_direct_albums(
         self,

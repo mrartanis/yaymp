@@ -335,21 +335,21 @@ def build_main_window_stylesheet(
                 color: {palette.text_primary};
                 padding: 4px 7px;
             }}
-            QListWidget {{
+            QListWidget, QListView {{
                 background: {palette.list_bg};
                 border: 0;
                 border-radius: {list_radius}px;
                 alternate-background-color: {palette.list_alt_bg};
                 padding: 4px;
             }}
-            QListWidget::item {{
+            QListWidget::item, QListView::item {{
                 border-radius: {list_item_radius}px;
                 padding: 5px;
             }}
-            QListWidget#queue-list::item {{
+            QListWidget#queue-list::item, QListView#queue-list::item {{
                 padding: 0px;
             }}
-            QListWidget::item:selected {{
+            QListWidget::item:selected, QListView::item:selected {{
                 background: {accent};
                 color: {accent_text};
             }}

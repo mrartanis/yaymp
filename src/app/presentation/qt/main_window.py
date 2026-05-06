@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 from dataclasses import replace
 from os import environ
 from pathlib import Path
 from time import monotonic
 
-from PySide6.QtCore import QEvent, QPoint, Qt, QTimer
+from PySide6.QtCore import QEvent, QModelIndex, QPoint, Qt, QTimer
+from PySide6.QtGui import QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager
 from PySide6.QtWidgets import (
     QApplication,
@@ -14,8 +16,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QListWidget,
-    QListWidgetItem,
+    QListView,
     QMainWindow,
     QPushButton,
     QSizePolicy,
@@ -35,6 +36,7 @@ from app.presentation.qt.main_window_layout import MainWindowLayoutMixin
 from app.presentation.qt.main_window_library import MainWindowLibraryMixin
 from app.presentation.qt.main_window_preferences import MainWindowPreferencesMixin
 from app.presentation.qt.main_window_queue import MainWindowQueueMixin
+from app.presentation.qt.main_window_queue_view import QueueListModel, QueueRowDelegate
 from app.presentation.qt.main_window_windowing import MainWindowWindowingMixin
 from app.presentation.qt.playback_controller import PlaybackController
 from app.presentation.qt.system_media import build_system_media_integration
@@ -91,9 +93,12 @@ class MainWindow(
         self._artwork_manager = QNetworkAccessManager(self)
         self._pending_artwork_track_id: str | None = None
         self._pending_thumb_labels: dict[str, list[QLabel]] = {}
+        self._pending_thumb_callbacks: dict[str, list[Callable[[], None]]] = {}
         self._queued_thumb_downloads: list[tuple[str, Path]] = []
         self._active_thumb_downloads = 0
         self._max_active_thumb_downloads = 4
+        self._thumb_source_pixmap_cache: dict[str, QPixmap] = {}
+        self._thumb_scaled_pixmap_cache: dict[tuple[str, int], QPixmap] = {}
         self._auth_dialog: AuthDialog | None = None
         self._auth_flow_checked = False
         self._browser_tab_ids: tuple[str, ...] = ()
@@ -326,7 +331,7 @@ class MainWindow(
         self._queue_separator.setObjectName("queue-separator")
         self._queue_separator.setFixedHeight(1)
         layout.addWidget(self._queue_separator)
-        self._queue_list = QListWidget()
+        self._queue_list = QListView()
         self._queue_list.setObjectName("queue-list")
         self._queue_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._queue_list.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
@@ -334,6 +339,19 @@ class MainWindow(
         self._queue_list.viewport().installEventFilter(self)
         self._queue_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._queue_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._queue_model = QueueListModel(self._queue_list)
+        self._queue_delegate = QueueRowDelegate(
+            parent=self._queue_list,
+            thumb_provider=self._thumb_pixmap_for_artwork_ref,
+            thumb_requester=self._request_thumb_for_queue_row,
+            format_ms=self._format_ms,
+            accent_provider=lambda: self._accent_color,
+            accent_text_provider=self._accent_text_color,
+            theme_provider=self._resolved_theme_mode,
+            corner_style_provider=self._stored_corner_style_preference,
+        )
+        self._queue_list.setModel(self._queue_model)
+        self._queue_list.setItemDelegate(self._queue_delegate)
         footer = QHBoxLayout()
         footer.setSpacing(8)
         footer.setContentsMargins(0, 0, 0, 0)
@@ -380,9 +398,10 @@ class MainWindow(
         self._next_button.clicked.connect(self._controller.next)
         self._seek_slider.sliderReleased.connect(self._apply_seek)
         self._volume_slider.valueChanged.connect(self._apply_volume)
-        self._queue_list.itemClicked.connect(self._select_queue_highlight)
-        self._queue_list.itemDoubleClicked.connect(self._select_queue_item)
-        self._queue_list.currentRowChanged.connect(self._select_queue_highlight_row)
+        self._queue_list.doubleClicked.connect(self._select_queue_item)
+        selection_model = self._queue_list.selectionModel()
+        assert selection_model is not None
+        selection_model.currentChanged.connect(self._select_queue_highlight_row)
         self._clear_queue_button.clicked.connect(self._controller.clear_queue)
         self._queue_shuffle_button.toggled.connect(self._controller.set_shuffle_enabled)
         self._browser_back_button.clicked.connect(self._library_controller.go_back)
@@ -462,29 +481,25 @@ class MainWindow(
         self._controller.set_volume(volume)
         self._container.services.settings_service.save_volume(volume)
 
-    def _select_queue_item(self, item: QListWidgetItem) -> None:
+    def _select_queue_item(self, index: QModelIndex) -> None:
+        if not index.isValid():
+            return
         self._mark_queue_user_interaction()
-        self._select_queue_highlight(item)
-        row = self._queue_list.row(item)
-        self._controller.select_index(row)
+        self._set_queue_selected_index(index.row())
+        self._controller.select_index(index.row())
 
-    def _select_queue_highlight(self, item: QListWidgetItem) -> None:
+    def _select_queue_highlight(self, index: QModelIndex) -> None:
+        if not index.isValid():
+            return
         self._mark_queue_user_interaction()
-        self._queue_selected_index = self._queue_list.row(item)
-        self._update_queue_active_row(
-            self._rendered_active_index,
-            self._rendered_playback_status,
-        )
+        self._set_queue_selected_index(index.row())
 
-    def _select_queue_highlight_row(self, row: int) -> None:
+    def _select_queue_highlight_row(self, current: QModelIndex, previous: QModelIndex) -> None:
+        del previous
         if not self._queue_list.hasFocus():
             return
         self._mark_queue_user_interaction()
-        self._queue_selected_index = row if row >= 0 else None
-        self._update_queue_active_row(
-            self._rendered_active_index,
-            self._rendered_playback_status,
-        )
+        self._set_queue_selected_index(current.row() if current.isValid() else None)
 
     def _mark_queue_user_interaction(self) -> None:
         self._queue_last_interaction_at = monotonic()

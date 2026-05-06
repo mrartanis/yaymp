@@ -14,6 +14,77 @@ from app.domain.playback import QueueItem
 
 
 class MainWindowArtworkMixin:
+    def _thumb_pixmap_for_artwork_ref(
+        self,
+        artwork_ref: str | None,
+        size: int,
+    ) -> QPixmap | None:
+        if not artwork_ref:
+            return None
+        artwork_url = self._container.services.artwork_cache.normalize_url(artwork_ref)
+        if artwork_url is None:
+            return None
+        return self._thumb_pixmap_for_url(artwork_url, size=size)
+
+    def _request_thumb_for_queue_row(
+        self,
+        artwork_ref: str | None,
+        size: int,
+        row: int,
+    ) -> None:
+        if not artwork_ref:
+            return
+        artwork_url = self._container.services.artwork_cache.normalize_url(artwork_ref)
+        if artwork_url is None:
+            return
+        cache_path = self._container.services.artwork_cache.cache_path_for_url(artwork_url)
+        if cache_path.exists():
+            return
+        self._queue_thumb_download(
+            artwork_url,
+            cache_path,
+            on_ready=lambda: self._queue_delegate.update_row(row),
+        )
+
+    def _thumb_pixmap_for_url(self, artwork_url: str, *, size: int) -> QPixmap | None:
+        cache_key = (artwork_url, size)
+        cached_scaled = self._thumb_scaled_pixmap_cache.get(cache_key)
+        if cached_scaled is not None:
+            return cached_scaled
+        source_pixmap = self._thumb_source_pixmap(artwork_url)
+        if source_pixmap is None:
+            return None
+        scaled = source_pixmap.scaled(
+            size,
+            size,
+            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        self._thumb_scaled_pixmap_cache[cache_key] = scaled
+        return scaled
+
+    def _thumb_source_pixmap(self, artwork_url: str) -> QPixmap | None:
+        cached_source = self._thumb_source_pixmap_cache.get(artwork_url)
+        if cached_source is not None:
+            return cached_source
+        cache_path = self._container.services.artwork_cache.cache_path_for_url(artwork_url)
+        if not cache_path.exists():
+            return None
+        pixmap = QPixmap(str(cache_path))
+        if pixmap.isNull():
+            return None
+        self._thumb_source_pixmap_cache[artwork_url] = pixmap
+        return pixmap
+
+    def _store_thumb_source_pixmap(self, artwork_url: str, pixmap: QPixmap) -> None:
+        self._thumb_source_pixmap_cache[artwork_url] = pixmap
+        stale_keys = [
+            key for key in self._thumb_scaled_pixmap_cache
+            if key[0] == artwork_url
+        ]
+        for key in stale_keys:
+            del self._thumb_scaled_pixmap_cache[key]
+
     def _render_artwork(self, track: Track) -> None:
         if not track.artwork_ref:
             self._clear_artwork()
@@ -69,6 +140,7 @@ class MainWindowArtworkMixin:
     def _handle_thumb_downloaded(self, reply: QNetworkReply, artwork_url: str) -> None:
         cache_path = Path(str(reply.property("cache_path")))
         labels = self._pending_thumb_labels.pop(artwork_url, [])
+        callbacks = self._pending_thumb_callbacks.pop(artwork_url, [])
         self._active_thumb_downloads = max(0, self._active_thumb_downloads - 1)
         if reply.error() != QNetworkReply.NetworkError.NoError:
             reply.deleteLater()
@@ -89,9 +161,12 @@ class MainWindowArtworkMixin:
         if pixmap.isNull():
             self._start_next_thumb_downloads()
             return
+        self._store_thumb_source_pixmap(artwork_url, pixmap)
         for label in labels:
             if shiboken6.isValid(label):
                 self._set_thumb_pixmap(label, pixmap)
+        for callback in callbacks:
+            callback()
         self._start_next_thumb_downloads()
 
     def _set_artwork_pixmap(self, path: Path) -> None:

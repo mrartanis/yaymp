@@ -41,6 +41,7 @@ class BrowserContent:
     source_type: str | None = None
     source_id: str | None = None
     source_tracks: tuple[Track, ...] = ()
+    bulk_mode: str = "loaded_only"
     list_key: str | None = None
     has_more: bool = False
     is_loading: bool = False
@@ -228,6 +229,41 @@ class LibraryController(QObject):
 
     def recent_searches(self) -> tuple[str, ...]:
         return self._search_service.load_recent_searches()
+
+    def load_full_current_source_tracks(self) -> tuple[tuple[Track, ...], str, str] | None:
+        page, payload = self._active_page
+        if page == "list" and self._active_list_kind == "liked_tracks":
+            return (
+                self._library_service.load_all_liked_tracks(),
+                "collection",
+                "liked_tracks",
+            )
+        if page == "source" and isinstance(payload, Playlist):
+            return (
+                self._library_service.load_all_playlist_tracks(
+                    payload.id,
+                    owner_id=payload.owner_id,
+                ),
+                "playlist",
+                payload.id,
+            )
+        if page == "source" and isinstance(payload, Album):
+            return (
+                self._library_service.load_all_album_tracks(payload.id),
+                "album",
+                payload.id,
+            )
+        if (
+            page == "artist"
+            and isinstance(payload, Artist)
+            and self._active_artist_tab == "top_tracks"
+        ):
+            return (
+                self._library_service.load_all_artist_tracks(payload.id),
+                "artist",
+                payload.id,
+            )
+        return None
 
     def show_search_page(self) -> None:
         if self._active_page != ("search", None):
@@ -622,6 +658,7 @@ class LibraryController(QObject):
             source_type="search" if is_track_tab and results.tracks else None,
             source_id=track_source_id if is_track_tab and results.tracks else None,
             source_tracks=results.tracks if is_track_tab else (),
+            bulk_mode="loaded_only",
         )
 
     def _empty_search_content(self, tab: str) -> BrowserContent:
@@ -632,6 +669,7 @@ class LibraryController(QObject):
             tabs=self._search_tabs(),
             active_tab=tab,
             search_query=self._last_search_query,
+            bulk_mode="loaded_only",
         )
 
     def _loading_search_content(self, query: str, tab: str) -> BrowserContent:
@@ -648,6 +686,7 @@ class LibraryController(QObject):
             tabs=self._search_tabs(),
             active_tab=tab,
             search_query=normalized_query,
+            bulk_mode="loaded_only",
             is_loading=True,
         )
 
@@ -698,6 +737,7 @@ class LibraryController(QObject):
                 recent_searches=self.recent_searches(),
                 tabs=self._artist_tabs(),
                 active_tab=tab,
+                bulk_mode="loaded_only",
             )
         if tab == "albums":
             return BrowserContent(
@@ -706,6 +746,7 @@ class LibraryController(QObject):
                 recent_searches=self.recent_searches(),
                 tabs=self._artist_tabs(),
                 active_tab=tab,
+                bulk_mode="loaded_only",
             )
         if tab == "singles":
             return BrowserContent(
@@ -714,6 +755,7 @@ class LibraryController(QObject):
                 recent_searches=self.recent_searches(),
                 tabs=self._artist_tabs(),
                 active_tab=tab,
+                bulk_mode="loaded_only",
             )
         if tab == "compilations":
             return BrowserContent(
@@ -724,6 +766,7 @@ class LibraryController(QObject):
                 recent_searches=self.recent_searches(),
                 tabs=self._artist_tabs(),
                 active_tab=tab,
+                bulk_mode="loaded_only",
             )
         tracks = self._library_service.load_artist_tracks(artist.id)
         return BrowserContent(
@@ -740,6 +783,7 @@ class LibraryController(QObject):
             source_type="artist",
             source_id=artist.id,
             source_tracks=tracks,
+            bulk_mode="load_all",
         )
 
     def _source_content(
@@ -750,6 +794,7 @@ class LibraryController(QObject):
         source_id: str,
         tracks: tuple[Track, ...],
     ) -> BrowserContent:
+        bulk_mode = "loaded_only" if source_type == "station" else "load_all"
         return BrowserContent(
             title=title,
             items=self._track_items(
@@ -762,6 +807,7 @@ class LibraryController(QObject):
             source_type=source_type,
             source_id=source_id,
             source_tracks=tracks,
+            bulk_mode=bulk_mode,
         )
 
     def _liked_tracks_content(self, *, limit: int) -> BrowserContent:
@@ -778,6 +824,7 @@ class LibraryController(QObject):
             source_type="collection",
             source_id="liked_tracks",
             source_tracks=tracks,
+            bulk_mode="load_all",
             list_key="liked_tracks",
             has_more=len(tracks) >= limit,
         )

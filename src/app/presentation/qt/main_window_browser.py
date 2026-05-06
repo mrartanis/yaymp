@@ -236,9 +236,12 @@ class MainWindowBrowserMixin:
                 self._content_list.setItemWidget(widget_item, widget)
         self._content_list.blockSignals(False)
         can_play_source = bool(
-            content.source_tracks
-            and content.source_type
+            content.source_type
             and content.source_id
+            and (
+                content.bulk_mode == "load_all"
+                or bool(content.source_tracks)
+            )
         )
         self._play_all_button.setEnabled(can_play_source)
         self._append_all_button.setEnabled(can_play_source)
@@ -291,22 +294,31 @@ class MainWindowBrowserMixin:
         if artwork_url is None:
             label.setText("♪")
             return label
-        cache_path = self._container.services.artwork_cache.cache_path_for_url(artwork_url)
-        if not cache_path.exists():
+        pixmap = self._thumb_pixmap_for_url(artwork_url, size=size)
+        if pixmap is None:
             label.setText("♪")
+            cache_path = self._container.services.artwork_cache.cache_path_for_url(artwork_url)
             self._queue_thumb_download(artwork_url, cache_path, label)
             return label
-        pixmap = QPixmap(str(cache_path))
-        if pixmap.isNull():
-            label.setText("♪")
-            return label
-        self._set_thumb_pixmap(label, pixmap)
+        label.setText("")
+        label.setPixmap(pixmap)
         return label
 
-    def _queue_thumb_download(self, artwork_url: str, cache_path: Path, label: QLabel) -> None:
+    def _queue_thumb_download(
+        self,
+        artwork_url: str,
+        cache_path: Path,
+        label: QLabel | None = None,
+        *,
+        on_ready=None,
+    ) -> None:
         labels = self._pending_thumb_labels.setdefault(artwork_url, [])
-        labels.append(label)
-        if len(labels) > 1:
+        if label is not None:
+            labels.append(label)
+        callbacks = self._pending_thumb_callbacks.setdefault(artwork_url, [])
+        if on_ready is not None:
+            callbacks.append(on_ready)
+        if len(labels) + len(callbacks) > 1:
             return
         self._queued_thumb_downloads.append((artwork_url, cache_path))
         self._start_next_thumb_downloads()

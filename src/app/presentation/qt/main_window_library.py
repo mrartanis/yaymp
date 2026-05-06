@@ -80,35 +80,38 @@ class MainWindowLibraryMixin:
         return self._current_track
 
     def _play_current_source(self) -> None:
-        content = self._current_browser_content
-        if (
-            content is None
-            or not content.source_tracks
-            or not content.source_type
-            or not content.source_id
-        ):
+        bulk_request = self._resolve_current_source_bulk_request()
+        if bulk_request is None:
             return
+        tracks, source_type, source_id = bulk_request
         self._controller.play_tracks(
-            content.source_tracks,
+            tracks,
             start_index=0,
-            source_type=content.source_type,
-            source_id=content.source_id,
+            source_type=source_type,
+            source_id=source_id,
         )
 
     def _append_current_source(self) -> None:
-        content = self._current_browser_content
-        if (
-            content is None
-            or not content.source_tracks
-            or not content.source_type
-            or not content.source_id
-        ):
+        bulk_request = self._resolve_current_source_bulk_request()
+        if bulk_request is None:
             return
+        tracks, source_type, source_id = bulk_request
         self._controller.append_tracks(
-            content.source_tracks,
-            source_type=content.source_type,
-            source_id=content.source_id,
+            tracks,
+            source_type=source_type,
+            source_id=source_id,
         )
+
+    def _resolve_current_source_bulk_request(self) -> tuple[tuple[Track, ...], str, str] | None:
+        content = self._current_browser_content
+        if content is None or not content.source_type or not content.source_id:
+            return None
+        if content.bulk_mode == "load_all":
+            self._status_label.setText(self._t("status.loading_full_source"))
+            return self._library_controller.load_full_current_source_tracks()
+        if not content.source_tracks:
+            return None
+        return content.source_tracks, content.source_type, content.source_id
 
     def _replace_content_track(self, track: Track) -> None:
         for index in range(self._content_list.count()):
@@ -144,21 +147,16 @@ class MainWindowLibraryMixin:
             break
 
     def _update_queue_track_like(self, track: Track) -> None:
-        for index in range(self._queue_list.count()):
-            item = self._queue_list.item(index)
-            queue_item = item.data(Qt.ItemDataRole.UserRole)
+        for index in range(self._queue_model.rowCount()):
+            queue_item = self._queue_model.queue_item_at(index)
             if not isinstance(queue_item, QueueItem):
                 continue
             if queue_item.track.id != track.id:
                 continue
-            item.setData(
-                Qt.ItemDataRole.UserRole,
+            self._queue_model.replace_queue_item(
+                index,
                 replace(queue_item, track=track),
             )
-        self._update_queue_active_row(
-            self._rendered_active_index,
-            self._rendered_playback_status,
-        )
 
     def _replace_content_entity(self, entity: Album | Artist | Playlist) -> None:
         for index in range(self._content_list.count()):
@@ -200,17 +198,16 @@ class MainWindowLibraryMixin:
         menu.exec(self._content_list.viewport().mapToGlobal(position))
 
     def _show_queue_context_menu(self, position: QPoint) -> None:
-        item = self._queue_list.itemAt(position)
-        if item is None:
+        index = self._queue_list.indexAt(position)
+        if not index.isValid():
             return
-        self._queue_list.setCurrentItem(item)
-        self._select_queue_highlight(item)
-        queue_item = item.data(Qt.ItemDataRole.UserRole)
+        self._queue_list.setCurrentIndex(index)
+        self._select_queue_highlight(index)
+        queue_item = self._queue_model.queue_item_at(index.row())
         if not isinstance(queue_item, QueueItem):
             return
         menu = QMenu(self)
-        queue_index = self._queue_list.row(item)
-        if not self._populate_queue_item_menu(menu, queue_item, queue_index):
+        if not self._populate_queue_item_menu(menu, queue_item, index.row()):
             return
         menu.exec(self._queue_list.viewport().mapToGlobal(position))
 
