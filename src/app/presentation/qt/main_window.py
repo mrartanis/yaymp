@@ -50,11 +50,16 @@ class MainWindow(
     QMainWindow,
 ):
     _RESIZE_MARGIN = 8
-    _SIDEBAR_DOCK_BREAKPOINT = 1180
-    _BROWSER_DOCK_BREAKPOINT = 1580
+    _SIDEBAR_DOCK_BREAKPOINT = 1360
+    _BROWSER_DOCK_BREAKPOINT = 1820
     _PLAYER_MIN_WIDTH = 560
     _PLAYER_MAX_WIDTH = 700
-    _PLAYER_QUEUE_WIDE_BREAKPOINT = 1700
+    _PLAYER_QUEUE_WIDE_BREAKPOINT = 1180
+    _WIDE_SIDE_ZONE_MAX_WIDTH = 920
+    _BROWSER_ZONE_MIN_WIDTH = 460
+    _BROWSER_ZONE_MAX_WIDTH = 920
+    _SIDEBAR_ZONE_MIN_WIDTH = 170
+    _SIDEBAR_ZONE_MAX_WIDTH = 210
     _COMPACT_ARTWORK_SIZE = 300
     _WIDE_ARTWORK_SIZE = 420
     _PLAYER_PANEL_COMPACT_HEIGHT = 434
@@ -239,8 +244,8 @@ class MainWindow(
         self._left_zone_layout.setContentsMargins(0, 0, 0, 0)
         self._left_zone_layout.setSpacing(8)
         self._sidebar_host = QWidget()
-        self._sidebar_host.setMinimumWidth(170)
-        self._sidebar_host.setMaximumWidth(210)
+        self._sidebar_host.setMinimumWidth(self._SIDEBAR_ZONE_MIN_WIDTH)
+        self._sidebar_host.setMaximumWidth(self._SIDEBAR_ZONE_MAX_WIDTH)
         self._sidebar_host.installEventFilter(self)
         self._sidebar_host_layout = QVBoxLayout(self._sidebar_host)
         self._sidebar_host_layout.setContentsMargins(0, 0, 0, 0)
@@ -273,8 +278,8 @@ class MainWindow(
         self._main_column_layout.addWidget(self._build_queue_panel(), 1)
         layout.addWidget(self._main_column_widget, 0)
         self._browser_host = QWidget()
-        self._browser_host.setMinimumWidth(460)
-        self._browser_host.setMaximumWidth(920)
+        self._browser_host.setMinimumWidth(self._BROWSER_ZONE_MIN_WIDTH)
+        self._browser_host.setMaximumWidth(self._BROWSER_ZONE_MAX_WIDTH)
         self._browser_host.installEventFilter(self)
         self._browser_host.setSizePolicy(
             QSizePolicy.Policy.Expanding,

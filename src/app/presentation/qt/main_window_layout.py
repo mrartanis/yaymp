@@ -260,8 +260,8 @@ class MainWindowLayoutMixin:
         frame.setObjectName("sidebar")
         frame.setFrameShape(QFrame.Shape.NoFrame)
         frame.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        frame.setMinimumWidth(170)
-        frame.setMaximumWidth(210)
+        frame.setMinimumWidth(self._SIDEBAR_ZONE_MIN_WIDTH)
+        frame.setMaximumWidth(self._SIDEBAR_ZONE_MAX_WIDTH)
         frame.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         layout = frame.layout()
         assert layout is not None
@@ -339,9 +339,9 @@ class MainWindowLayoutMixin:
         self._sidebar_popup.raise_()
 
     def _update_responsive_layout(self) -> None:
+        self._set_player_queue_wide(self.width() >= self._PLAYER_QUEUE_WIDE_BREAKPOINT)
         self._set_sidebar_docked(self.width() >= self._SIDEBAR_DOCK_BREAKPOINT)
         self._set_browser_docked(self.width() >= self._BROWSER_DOCK_BREAKPOINT)
-        self._set_player_queue_wide(self.width() >= self._PLAYER_QUEUE_WIDE_BREAKPOINT)
         self._update_wide_zone_balance()
 
     def _set_sidebar_docked(self, docked: bool) -> None:
@@ -458,9 +458,18 @@ class MainWindowLayoutMixin:
         if not right_visible:
             self._browser_host.hide()
         self._left_zone.setMinimumWidth(0)
-        self._left_zone.setMaximumWidth(16_777_215)
-        self._browser_host.setMinimumWidth(460)
-        self._browser_host.setMaximumWidth(920)
+        self._left_zone.setMaximumWidth(
+            self._WIDE_SIDE_ZONE_MAX_WIDTH if left_visible else 16_777_215
+        )
+        self._browser_host.setMinimumWidth(self._BROWSER_ZONE_MIN_WIDTH)
+        self._browser_host.setMaximumWidth(self._BROWSER_ZONE_MAX_WIDTH)
+        if self._queue_host is not None:
+            queue_host_max_width = self._WIDE_SIDE_ZONE_MAX_WIDTH
+            if self._sidebar_docked and self._sidebar_host is not None:
+                queue_host_max_width -= (
+                    self._SIDEBAR_ZONE_MAX_WIDTH + self._left_zone_layout.spacing()
+                )
+            self._queue_host.setMaximumWidth(max(0, queue_host_max_width))
         if not self._player_queue_wide or not left_visible or not right_visible:
             self._player_left_spacer.setMinimumWidth(0)
             self._player_left_spacer.setMaximumWidth(16_777_215)
