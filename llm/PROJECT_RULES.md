@@ -136,6 +136,7 @@ Rules:
 - No API calls from widgets or view models.
 - No persistence calls from widgets.
 - Main window should support classic player composition: controls, seek, volume, track info, library/navigation, content panel, queue/status area.
+- Prefer model/delegate rendering for large Qt lists; avoid `QListWidget + setItemWidget()` for queue-scale views.
 
 ## Concurrency Rules
 
@@ -200,6 +201,7 @@ Storage targets:
 - settings
 - auth/session
 - playback preferences such as volume, repeat, shuffle
+- UI preferences such as theme, corner style, and language
 - window geometry
 - cache index
 - recent entities
@@ -252,6 +254,7 @@ Rules:
 - Infrastructure converts low-level exceptions into project-specific errors.
 - Application decides whether errors are recoverable and how state changes.
 - Presentation shows user-safe messages only.
+- Localized user-facing strings should be resolved in presentation/application adapters, not in domain/infrastructure code.
 
 Expected error categories:
 
