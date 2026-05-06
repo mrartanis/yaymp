@@ -279,13 +279,15 @@ class MainWindowPreferencesMixin:
             return
 
         self._auth_dialog = AuthDialog(
-            parent=self,
+            parent=None,
             window_title=self._t("app.auth_dialog.title"),
             status_text=self._t("app.auth_dialog.status"),
         )
         self._auth_dialog.token_captured.connect(self._complete_auth_flow)
         self._auth_dialog.finished.connect(self._clear_auth_dialog)
-        self._auth_dialog.open()
+        self._auth_dialog.show()
+        self._auth_dialog.raise_()
+        self._auth_dialog.activateWindow()
 
     def _complete_auth_flow(self, token: str, expires_in: int | None) -> None:
         try:
@@ -306,6 +308,11 @@ class MainWindowPreferencesMixin:
         self._render_auth_state()
 
     def _clear_auth_dialog(self) -> None:
+        if (
+            self._container.services.auth_service.current_session() is None
+            and not self._is_headless_test_run()
+        ):
+            QApplication.quit()
         self._auth_dialog = None
 
     def _is_headless_test_run(self) -> bool:
