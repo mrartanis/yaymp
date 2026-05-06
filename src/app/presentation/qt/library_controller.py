@@ -605,6 +605,8 @@ class LibraryController(QObject):
             self._last_search_results = self._search_service.search_catalog(normalized_query)
 
         results = self._last_search_results or CatalogSearchResults()
+        is_track_tab = tab == "tracks"
+        track_source_id = normalized_query or "search"
         title = (
             self._t("library.search_title", query=normalized_query)
             if normalized_query
@@ -617,6 +619,9 @@ class LibraryController(QObject):
             tabs=self._search_tabs(),
             active_tab=tab,
             search_query=normalized_query,
+            source_type="search" if is_track_tab and results.tracks else None,
+            source_id=track_source_id if is_track_tab and results.tracks else None,
+            source_tracks=results.tracks if is_track_tab else (),
         )
 
     def _empty_search_content(self, tab: str) -> BrowserContent:
@@ -763,8 +768,16 @@ class LibraryController(QObject):
         tracks = self._library_service.load_liked_tracks(limit=limit)
         return BrowserContent(
             title=self._t("library.list.my_tracks"),
-            items=self._track_items(tracks),
+            items=self._track_items(
+                tracks,
+                source_type="collection",
+                source_id="liked_tracks",
+                source_tracks=tracks,
+            ),
             recent_searches=self.recent_searches(),
+            source_type="collection",
+            source_id="liked_tracks",
+            source_tracks=tracks,
             list_key="liked_tracks",
             has_more=len(tracks) >= limit,
         )
@@ -810,7 +823,12 @@ class LibraryController(QObject):
             return self._artist_items(results.artists)
         if tab == "artist_radio":
             return self._artist_radio_items(results.artists)
-        return self._track_items(results.tracks)
+        return self._track_items(
+            results.tracks,
+            source_type="search",
+            source_id=query or "search",
+            source_tracks=results.tracks,
+        )
 
     def _search_tab_title(self, tab: str) -> str:
         return {

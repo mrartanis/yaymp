@@ -237,7 +237,7 @@ class MainWindowBrowserMixin:
         self._content_list.blockSignals(False)
         can_play_source = bool(
             content.source_tracks
-            and content.source_type in {"album", "artist", "playlist"}
+            and content.source_type
             and content.source_id
         )
         self._play_all_button.setEnabled(can_play_source)
