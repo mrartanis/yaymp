@@ -93,6 +93,7 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
                     raw_track.get("stream_ref_cached_at")
                 ),
                 artwork_ref=self._optional_str(raw_track.get("artwork_ref")),
+                accent_color=self._optional_str(raw_track.get("accent_color")),
                 available=bool(raw_track.get("available", True)),
                 is_liked=bool(raw_track.get("is_liked", False)),
             )
@@ -120,6 +121,7 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
                 else None
             ),
             "artwork_ref": track.artwork_ref,
+            "accent_color": track.accent_color,
             "available": track.available,
             "is_liked": track.is_liked,
             "cached_at": self._now_iso(),
@@ -437,6 +439,7 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
                 else None
             ),
             "artwork_ref": track.artwork_ref,
+            "accent_color": track.accent_color,
             "available": track.available,
             "is_liked": track.is_liked,
         }
@@ -461,6 +464,7 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
                     raw_track.get("stream_ref_cached_at")
                 ),
                 artwork_ref=self._optional_str(raw_track.get("artwork_ref")),
+                accent_color=self._optional_str(raw_track.get("accent_color")),
                 available=bool(raw_track.get("available", True)),
                 is_liked=bool(raw_track.get("is_liked", False)),
             )

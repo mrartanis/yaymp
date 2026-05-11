@@ -346,6 +346,7 @@ class LibraryService:
             stream_ref=track.stream_ref,
             stream_ref_cached_at=track.stream_ref_cached_at,
             artwork_ref=track.artwork_ref,
+            accent_color=track.accent_color,
             available=track.available,
             is_liked=True,
         )
@@ -370,6 +371,7 @@ class LibraryService:
             stream_ref=track.stream_ref,
             stream_ref_cached_at=track.stream_ref_cached_at,
             artwork_ref=track.artwork_ref,
+            accent_color=track.accent_color,
             available=track.available,
             is_liked=False,
         )

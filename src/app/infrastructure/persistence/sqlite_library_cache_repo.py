@@ -133,6 +133,7 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                 stream_ref=row["stream_ref"],
                 stream_ref_cached_at=self._optional_datetime(row["stream_ref_cached_at"]),
                 artwork_ref=row["artwork_ref"],
+                accent_color=row["accent_color"],
                 available=bool(row["available"]),
                 is_liked=bool(row["is_liked"]),
             )
@@ -425,6 +426,7 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                         stream_ref text,
                         stream_ref_cached_at text,
                         artwork_ref text,
+                        accent_color text,
                         available integer not null,
                         is_liked integer not null,
                         cached_at text not null
@@ -496,6 +498,12 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                     column="stream_ref_cached_at",
                     definition="text",
                 )
+                self._ensure_column(
+                    connection,
+                    table="tracks",
+                    column="accent_color",
+                    definition="text",
+                )
         except (OSError, sqlite3.Error) as exc:
             raise StorageError("Failed to initialize library cache database") from exc
 
@@ -550,8 +558,9 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                 "insert into tracks("
                 "id, title, artists_json, artist_ids_json, album_id, album_title, "
                 "album_year, duration_ms, "
-                "stream_ref, stream_ref_cached_at, artwork_ref, available, is_liked, cached_at"
-                ") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "stream_ref, stream_ref_cached_at, artwork_ref, accent_color, available, "
+                "is_liked, cached_at"
+                ") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 "on conflict(id) do update set "
                 "title = excluded.title, "
                 "artists_json = excluded.artists_json, "
@@ -563,6 +572,7 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                 "stream_ref = excluded.stream_ref, "
                 "stream_ref_cached_at = excluded.stream_ref_cached_at, "
                 "artwork_ref = excluded.artwork_ref, "
+                "accent_color = excluded.accent_color, "
                 "available = excluded.available, "
                 "is_liked = excluded.is_liked, "
                 "cached_at = excluded.cached_at"
@@ -583,6 +593,7 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                     else None
                 ),
                 track.artwork_ref,
+                track.accent_color,
                 int(track.available),
                 int(track.is_liked),
                 self._now_iso(),
@@ -808,6 +819,7 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                 else None
             ),
             "artwork_ref": track.artwork_ref,
+            "accent_color": track.accent_color,
             "available": track.available,
             "is_liked": track.is_liked,
         }
@@ -832,6 +844,7 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                     raw_track.get("stream_ref_cached_at")
                 ),
                 artwork_ref=self._optional_str(raw_track.get("artwork_ref")),
+                accent_color=self._optional_str(raw_track.get("accent_color")),
                 available=bool(raw_track.get("available", True)),
                 is_liked=bool(raw_track.get("is_liked", False)),
             )

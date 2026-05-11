@@ -17,6 +17,7 @@ class Track:
     stream_ref: str | None = None
     stream_ref_cached_at: datetime | None = None
     artwork_ref: str | None = None
+    accent_color: str | None = None
     available: bool = True
     is_liked: bool = False
 

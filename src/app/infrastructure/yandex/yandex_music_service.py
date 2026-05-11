@@ -563,6 +563,7 @@ class YandexMusicService(MusicService):
             album_year=int(album_year) if album_year else None,
             duration_ms=duration_ms,
             artwork_ref=getattr(raw_track, "cover_uri", None),
+            accent_color=self._extract_track_accent_color(raw_track),
             available=available,
             is_liked=is_liked,
         )
@@ -676,6 +677,16 @@ class YandexMusicService(MusicService):
             if isinstance(artwork_ref, str) and artwork_ref:
                 return artwork_ref
 
+        return None
+
+    def _extract_track_accent_color(self, raw_track: Any) -> str | None:
+        derived_colors = getattr(raw_track, "derived_colors", None)
+        accent = getattr(derived_colors, "accent", None)
+        if not isinstance(accent, str):
+            return None
+        value = accent.strip()
+        if len(value) == 7 and value.startswith("#"):
+            return value.lower()
         return None
 
     def _map_station(self, raw_result: Any) -> Station:

@@ -553,6 +553,7 @@ class PlaybackService:
                 stream_ref=stream_ref,
                 stream_ref_cached_at=stream_ref_cached_at,
                 artwork_ref=item.track.artwork_ref,
+                accent_color=item.track.accent_color,
                 available=item.track.available,
                 is_liked=item.track.is_liked,
             ),

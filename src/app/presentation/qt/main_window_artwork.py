@@ -98,11 +98,13 @@ class MainWindowArtworkMixin:
             return
 
         cache_path = self._container.services.artwork_cache.cache_path_for_url(artwork_url)
+        if track.accent_color and self._has_usable_accent_contrast(track.accent_color):
+            self._set_accent_color(track.accent_color)
         cached_accent = self._container.services.artwork_cache.load_accent_color(cache_path)
         if cached_accent:
             self._set_accent_color(cached_accent)
         if cache_path.exists():
-            self._set_artwork_pixmap(cache_path)
+            self._set_artwork_pixmap(cache_path, preferred_accent=track.accent_color)
             return
 
         self._pending_artwork_track_id = track.id
@@ -112,6 +114,7 @@ class MainWindowArtworkMixin:
         reply = self._artwork_manager.get(request)
         reply.setProperty("track_id", track.id)
         reply.setProperty("cache_path", str(cache_path))
+        reply.setProperty("preferred_accent", track.accent_color)
 
     def _handle_artwork_downloaded(self, reply: QNetworkReply) -> None:
         thumb_artwork_url = reply.property("thumb_artwork_url")
@@ -121,6 +124,7 @@ class MainWindowArtworkMixin:
 
         track_id = reply.property("track_id")
         cache_path = Path(str(reply.property("cache_path")))
+        preferred_accent = reply.property("preferred_accent")
         if reply.error() != QNetworkReply.NetworkError.NoError:
             reply.deleteLater()
             return
@@ -135,7 +139,10 @@ class MainWindowArtworkMixin:
             self._container.logger.warning("Artwork cache write failed: %s", exc)
             return
         if track_id == self._pending_artwork_track_id:
-            self._set_artwork_pixmap(cache_path)
+            self._set_artwork_pixmap(
+                cache_path,
+                preferred_accent=preferred_accent if isinstance(preferred_accent, str) else None,
+            )
 
     def _handle_thumb_downloaded(self, reply: QNetworkReply, artwork_url: str) -> None:
         cache_path = Path(str(reply.property("cache_path")))
@@ -169,14 +176,22 @@ class MainWindowArtworkMixin:
             callback()
         self._start_next_thumb_downloads()
 
-    def _set_artwork_pixmap(self, path: Path) -> None:
+    def _set_artwork_pixmap(self, path: Path, *, preferred_accent: str | None = None) -> None:
         pixmap = QPixmap(str(path))
         if pixmap.isNull():
             self._clear_artwork()
             return
         accent = self._container.services.artwork_cache.load_accent_color(path)
         if accent is None:
-            accent = self._extract_accent_color(pixmap)
+            if preferred_accent and self._has_usable_accent_contrast(preferred_accent):
+                accent = preferred_accent
+            else:
+                accent = self._extract_accent_color(pixmap)
+                self._container.logger.info(
+                    "Computed artwork accent from pixels: image=%s color=%s",
+                    path.name,
+                    accent,
+                )
             try:
                 self._container.services.artwork_cache.save_accent_color(path, accent)
             except DomainError as exc:
