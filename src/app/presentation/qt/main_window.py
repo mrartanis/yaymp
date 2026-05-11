@@ -16,7 +16,6 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QListView,
     QMainWindow,
     QPushButton,
     QSizePolicy,
@@ -36,7 +35,11 @@ from app.presentation.qt.main_window_layout import MainWindowLayoutMixin
 from app.presentation.qt.main_window_library import MainWindowLibraryMixin
 from app.presentation.qt.main_window_preferences import MainWindowPreferencesMixin
 from app.presentation.qt.main_window_queue import MainWindowQueueMixin
-from app.presentation.qt.main_window_queue_view import QueueListModel, QueueRowDelegate
+from app.presentation.qt.main_window_queue_view import (
+    QueueListModel,
+    QueueListView,
+    QueueRowDelegate,
+)
 from app.presentation.qt.main_window_windowing import MainWindowWindowingMixin
 from app.presentation.qt.playback_controller import PlaybackController
 from app.presentation.qt.system_media import build_system_media_integration
@@ -331,7 +334,7 @@ class MainWindow(
         self._queue_separator.setObjectName("queue-separator")
         self._queue_separator.setFixedHeight(1)
         layout.addWidget(self._queue_separator)
-        self._queue_list = QListView()
+        self._queue_list = QueueListView()
         self._queue_list.setObjectName("queue-list")
         self._queue_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._queue_list.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
@@ -399,6 +402,7 @@ class MainWindow(
         self._seek_slider.sliderReleased.connect(self._apply_seek)
         self._volume_slider.valueChanged.connect(self._apply_volume)
         self._queue_list.doubleClicked.connect(self._select_queue_item)
+        self._queue_list.reorder_requested.connect(self._reorder_queue_item)
         selection_model = self._queue_list.selectionModel()
         assert selection_model is not None
         selection_model.currentChanged.connect(self._select_queue_highlight_row)
@@ -500,6 +504,11 @@ class MainWindow(
             return
         self._mark_queue_user_interaction()
         self._set_queue_selected_index(current.row() if current.isValid() else None)
+
+    def _reorder_queue_item(self, source_row: int, target_row: int) -> None:
+        self._mark_queue_user_interaction()
+        self._set_queue_selected_index(target_row)
+        self._controller.move_queue_item(source_row, target_row)
 
     def _mark_queue_user_interaction(self) -> None:
         self._queue_last_interaction_at = monotonic()

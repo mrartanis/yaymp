@@ -424,6 +424,29 @@ class PlaybackService:
         self._persist_playback_queue(position_ms=self._current_position_ms())
         return self.snapshot()
 
+    def move_queue_item(self, source_index: int, target_index: int) -> PlaybackSnapshot:
+        if source_index < 0 or source_index >= len(self._queue):
+            raise PlaybackBackendError("Queue index is out of range")
+        if target_index < 0 or target_index >= len(self._queue):
+            raise PlaybackBackendError("Queue target index is out of range")
+        if source_index == target_index:
+            return self.snapshot()
+
+        item = self._queue.pop(source_index)
+        self._queue.insert(target_index, item)
+
+        if self._active_index == source_index:
+            self._active_index = target_index
+        elif self._active_index is not None:
+            if source_index < self._active_index <= target_index:
+                self._active_index -= 1
+            elif target_index <= self._active_index < source_index:
+                self._active_index += 1
+
+        self._rebuild_play_order(anchor_index=self._active_index)
+        self._persist_playback_queue(position_ms=self._current_position_ms())
+        return self.snapshot()
+
     def remove_queue_index(self, index: int) -> PlaybackSnapshot:
         if index < 0 or index >= len(self._queue):
             raise PlaybackBackendError("Queue index is out of range")

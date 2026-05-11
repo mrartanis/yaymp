@@ -167,6 +167,9 @@ class PlaybackController(QObject):
     def move_queue_item_next(self, index: int) -> None:
         self._dispatch(lambda: self._playback_service.move_queue_item_next(index))
 
+    def move_queue_item(self, source_index: int, target_index: int) -> None:
+        self._dispatch(lambda: self._playback_service.move_queue_item(source_index, target_index))
+
     def remove_queue_index(self, index: int) -> None:
         self._dispatch(lambda: self._playback_service.remove_queue_index(index))
 

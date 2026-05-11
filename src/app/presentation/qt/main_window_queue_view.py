@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from random import Random
 
-from PySide6.QtCore import QAbstractListModel, QModelIndex, QRect, QSize, Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QPainter
-from PySide6.QtWidgets import QStyledItemDelegate, QStyleOptionViewItem, QWidget
+from PySide6.QtCore import QAbstractListModel, QModelIndex, QRect, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QDragEnterEvent, QDropEvent, QFont, QPainter
+from PySide6.QtWidgets import QListView, QStyledItemDelegate, QStyleOptionViewItem, QWidget
 
 from app.domain.playback import PlaybackStatus, QueueItem
 from app.presentation.qt.main_window_styles import _palette_for_theme
@@ -43,6 +43,18 @@ class QueueListModel(QAbstractListModel):
         if role == self.PlaybackStatusRole:
             return self._playback_status
         return None
+
+    def flags(self, index: QModelIndex) -> Qt.ItemFlag:
+        base_flags = super().flags(index)
+        if not index.isValid():
+            return base_flags | Qt.ItemFlag.ItemIsDropEnabled
+        return (
+            base_flags
+            | Qt.ItemFlag.ItemIsSelectable
+            | Qt.ItemFlag.ItemIsEnabled
+            | Qt.ItemFlag.ItemIsDragEnabled
+            | Qt.ItemFlag.ItemIsDropEnabled
+        )
 
     def set_queue(self, items: tuple[QueueItem, ...]) -> None:
         self.beginResetModel()
@@ -411,6 +423,9 @@ class QueueRowDelegate(QStyledItemDelegate):
                 return PlaybackStatus.STOPPED
         return PlaybackStatus.STOPPED
 
+    def update_row(self, row: int) -> None:
+        self._update_row(row)
+
     def _update_row(self, row: int) -> None:
         parent = self.parent()
         if not isinstance(parent, QWidget):
@@ -425,3 +440,50 @@ class QueueRowDelegate(QStyledItemDelegate):
         if not index.isValid():
             return
         view.viewport().update(view.visualRect(index))
+
+
+class QueueListView(QListView):
+    reorder_requested = Signal(int, int)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.setDropIndicatorShown(True)
+        self.setDragDropMode(QListView.DragDropMode.DragDrop)
+        self.setDefaultDropAction(Qt.DropAction.MoveAction)
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        event.acceptProposedAction()
+        super().dragEnterEvent(event)
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        source_row = self.currentIndex().row()
+        if source_row < 0:
+            event.ignore()
+            return
+
+        target_row = self._target_row_for_event(event)
+        row_count = self.model().rowCount() if self.model() is not None else 0
+        if row_count <= 0:
+            event.ignore()
+            return
+        target_row = max(0, min(target_row, row_count))
+        final_row = target_row - 1 if target_row > source_row else target_row
+        if final_row == source_row:
+            event.acceptProposedAction()
+            return
+
+        self.reorder_requested.emit(source_row, final_row)
+        event.acceptProposedAction()
+
+    def _target_row_for_event(self, event: QDropEvent) -> int:
+        position = event.position().toPoint()
+        index = self.indexAt(position)
+        if not index.isValid():
+            model = self.model()
+            return model.rowCount() if model is not None else 0
+        rect = self.visualRect(index)
+        if position.y() > rect.center().y():
+            return index.row() + 1
+        return index.row()
