@@ -58,12 +58,14 @@ def build_main_window_stylesheet(
     row_radius = 8 if rounded else 0
     settings_popup_radius = 12 if rounded else 0
     volume_popup_radius = 14 if rounded else 0
+    menu_radius = 12 if rounded else 0
     button_radius = 9 if rounded else 0
     play_button_radius = 16 if rounded else 0
     icon_button_radius = 10 if rounded else 0
     input_radius = 8 if rounded else 0
     list_radius = 10 if rounded else 0
     list_item_radius = 7 if rounded else 0
+    menu_item_radius = 8 if rounded else 0
     tab_radius = 9 if rounded else 0
     slider_radius = 3 if rounded else 0
     slider_handle_radius = 7 if rounded else 0
@@ -241,6 +243,31 @@ def build_main_window_stylesheet(
                 border: 1px solid {accent};
                 border-radius: {volume_popup_radius}px;
             }}
+            QMenu {{
+                background: {palette.popup_bg};
+                border: 1px solid {accent};
+                border-radius: {menu_radius}px;
+                padding: 6px;
+            }}
+            QMenu::item {{
+                background: transparent;
+                color: {palette.text_primary};
+                border-radius: {menu_item_radius}px;
+                padding: 6px 10px;
+                margin: 1px 0;
+            }}
+            QMenu::item:selected {{
+                background: {accent};
+                color: {accent_text};
+            }}
+            QMenu::item:disabled {{
+                color: {palette.button_disabled_text};
+            }}
+            QMenu::separator {{
+                height: 1px;
+                background: {palette.queue_separator};
+                margin: 6px 4px;
+            }}
             QPushButton {{
                 background: {palette.button_bg};
                 border: 1px solid {palette.button_border};
@@ -334,6 +361,15 @@ def build_main_window_stylesheet(
                 border-radius: {input_radius}px;
                 color: {palette.text_primary};
                 padding: 4px 7px;
+            }}
+            QComboBox QAbstractItemView {{
+                background: {palette.popup_bg};
+                border: 1px solid {accent};
+                border-radius: {menu_radius}px;
+                padding: 4px;
+                outline: 0;
+                selection-background-color: {accent};
+                selection-color: {accent_text};
             }}
             QListWidget, QListView {{
                 background: {palette.list_bg};
