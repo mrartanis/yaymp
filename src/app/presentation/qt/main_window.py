@@ -376,6 +376,7 @@ class MainWindow(
         self._clear_queue_button.setToolTip(self._t("action.clear_queue"))
         self._clear_queue_button.setFixedSize(34, 32)
         self._clear_queue_button.setIcon(create_icon("clear_playlist.svg"))
+        self._clear_queue_button.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         footer.addWidget(self._queue_shuffle_button)
         footer.addWidget(self._clear_queue_button)
         layout.addWidget(self._queue_list)
@@ -407,6 +408,9 @@ class MainWindow(
         assert selection_model is not None
         selection_model.currentChanged.connect(self._select_queue_highlight_row)
         self._clear_queue_button.clicked.connect(self._controller.clear_queue)
+        self._clear_queue_button.customContextMenuRequested.connect(
+            self._show_clear_queue_context_menu
+        )
         self._queue_shuffle_button.toggled.connect(self._controller.set_shuffle_enabled)
         self._browser_back_button.clicked.connect(self._library_controller.go_back)
         self._browser_close_button.clicked.connect(self._hide_browser_panel)

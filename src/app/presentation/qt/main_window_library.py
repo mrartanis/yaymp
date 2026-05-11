@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import csv
+import json
 from dataclasses import replace
+from datetime import datetime
+from io import StringIO
+from pathlib import Path
 
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QPoint, QStandardPaths, Qt
 from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QApplication, QMenu
+from PySide6.QtWidgets import QApplication, QFileDialog, QMenu
 
 from app.domain import Album, Artist, Playlist, Station, Track
 from app.domain.playback import QueueItem
@@ -211,6 +216,15 @@ class MainWindowLibraryMixin:
             return
         menu.exec(self._queue_list.viewport().mapToGlobal(position))
 
+    def _show_clear_queue_context_menu(self, position: QPoint) -> None:
+        if self._queue_model.rowCount() <= 0:
+            return
+        menu = QMenu(self)
+        self._add_export_queue_action(menu)
+        if menu.isEmpty():
+            return
+        menu.exec(self._clear_queue_button.mapToGlobal(position))
+
     def _populate_browser_item_menu(self, menu: QMenu, browser_item: BrowserItem) -> bool:
         payload = browser_item.payload
         if isinstance(payload, Track):
@@ -299,6 +313,15 @@ class MainWindowLibraryMixin:
         )
         menu.addAction(remove_action)
         return not menu.isEmpty()
+
+    def _add_export_queue_action(self, menu: QMenu) -> None:
+        if self._queue_model.rowCount() <= 0:
+            return
+        if not menu.isEmpty():
+            menu.addSeparator()
+        action = QAction(self._t("action.export_playlist"), self)
+        action.triggered.connect(self._export_queue_playlist)
+        menu.addAction(action)
 
     def _toggle_track_like(self, track: Track) -> None:
         if track.is_liked:
@@ -440,6 +463,107 @@ class MainWindowLibraryMixin:
         clipboard = QApplication.clipboard()
         clipboard.setText(link)
         self._status_label.setText(self._t("status.copied_share_link", link=link))
+
+    def _export_queue_playlist(self) -> None:
+        queue_items = tuple(
+            queue_item
+            for row in range(self._queue_model.rowCount())
+            if isinstance((queue_item := self._queue_model.queue_item_at(row)), QueueItem)
+        )
+        if not queue_items:
+            self._status_label.setText(self._t("status.export_playlist.empty"))
+            return
+
+        path, export_format = self._choose_queue_export_path()
+        if path is None or export_format is None:
+            return
+
+        try:
+            payload = self._serialize_queue_export(queue_items, export_format)
+            path.write_text(payload, encoding="utf-8")
+        except OSError as exc:
+            self._container.logger.warning("Queue export failed: %s", exc)
+            self._status_label.setText(self._t("status.export_playlist.error", message=str(exc)))
+            return
+
+        self._status_label.setText(
+            self._t("status.export_playlist.saved", path=str(path))
+        )
+
+    def _choose_queue_export_path(self) -> tuple[Path | None, str | None]:
+        documents_dir = QStandardPaths.writableLocation(
+            QStandardPaths.StandardLocation.DocumentsLocation
+        )
+        initial_dir = Path(documents_dir) if documents_dir else Path.home()
+        default_name = f"yaymp-playlist-{datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
+        filters = [
+            ("json", "JSON Files (*.json)"),
+            ("csv", "CSV Files (*.csv)"),
+            ("txt", "Text Files (*.txt)"),
+        ]
+        filter_string = ";;".join(label for _, label in filters)
+        path_str, selected_filter = QFileDialog.getSaveFileName(
+            self,
+            self._t("dialog.export_playlist.title"),
+            str(initial_dir / default_name),
+            filter_string,
+            filters[0][1],
+        )
+        if not path_str:
+            return None, None
+        chosen_format = next(
+            (
+                extension
+                for extension, label in filters
+                if label == selected_filter
+            ),
+            "json",
+        )
+        path = Path(path_str)
+        if path.suffix.lower() != f".{chosen_format}":
+            path = path.with_suffix(f".{chosen_format}")
+        return path, chosen_format
+
+    def _serialize_queue_export(
+        self,
+        queue_items: tuple[QueueItem, ...],
+        export_format: str,
+    ) -> str:
+        rows = [
+            {
+                "artist": ", ".join(queue_item.track.artists),
+                "album": queue_item.track.album_title or "",
+                "track": queue_item.track.title,
+                "link": self._track_share_link(queue_item.track) or "",
+            }
+            for queue_item in queue_items
+        ]
+        if export_format == "json":
+            return json.dumps(rows, ensure_ascii=False, indent=2)
+        if export_format == "csv":
+            output = StringIO()
+            writer = csv.DictWriter(
+                output,
+                fieldnames=["artist", "album", "track", "link"],
+            )
+            writer.writeheader()
+            writer.writerows(rows)
+            return output.getvalue()
+        if export_format == "txt":
+            header = "artist | album | track | link"
+            lines = [
+                " | ".join(
+                    (
+                        row["artist"],
+                        row["album"],
+                        row["track"],
+                        row["link"],
+                    )
+                )
+                for row in rows
+            ]
+            return "\n".join([header, *lines])
+        raise ValueError(f"Unsupported export format: {export_format}")
 
     def _track_share_link(self, track: Track) -> str | None:
         if track.album_id:
