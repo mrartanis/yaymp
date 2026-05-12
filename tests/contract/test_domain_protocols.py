@@ -22,6 +22,7 @@ from app.domain import (
     PlaybackState,
     PlaybackStateRepo,
     PlaybackStatus,
+    PlayEventReport,
     Playlist,
     QueueItem,
     RadioFeedbackType,
@@ -245,6 +246,14 @@ class FakeMusicService:
             total_played_seconds,
             end_position_seconds,
         )
+
+    def report_plays(
+        self,
+        events: Sequence[PlayEventReport],
+        *,
+        client_now: str,
+    ) -> None:
+        del events, client_now
 
     def report_station_radio_started(
         self,

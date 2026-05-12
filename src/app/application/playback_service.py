@@ -15,6 +15,7 @@ from app.domain import (
     PlaybackState,
     PlaybackStateRepo,
     PlaybackStatus,
+    PlayEventReport,
     QueueItem,
     RadioFeedbackType,
     RadioSession,
@@ -37,12 +38,25 @@ class _PlaybackTelemetrySession:
     track_id: str
     play_id: str
     origin: str
+    plays_start_timestamp_iso: str | None = None
+    plays_add_tracks_to_player_time: str | None = None
     started: bool = False
     terminal_reported: bool = False
     last_progress_report_seconds: int = 0
     accumulated_played_ms: int = 0
     last_known_position_ms: int = 0
     last_accounted_position_ms: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class _ScrobbleContext:
+    from_: str
+    context: str
+    context_item: str
+    album_id: str | None = None
+    playlist_id: str | None = None
+    radio_session_id: str | None = None
+    batch_id: str | None = None
 
 
 class PlaybackService:
@@ -53,6 +67,10 @@ class PlaybackService:
     _PLAY_ORIGIN_DESKTOP = "desktop_win-yaymp"
     _PLAY_ORIGIN_MY_WAVE = "desktop_win-radio-user-onyourwave"
     _PLAY_ORIGIN_STATION = "desktop_win-radio-station"
+    _SCROBBLE_ALBUM_FROM = "mobile-album-track-default"
+    _SCROBBLE_ARTIST_FROM = "mobile-artist-artist-default"
+    _SCROBBLE_PLAYLIST_FROM = "mobile-playlist-playlist-default"
+    _SCROBBLE_PLAYLIST_LIKES_KIND = "3"
     _STATION_QUEUE_REFILL_THRESHOLD = 3
     _STATION_QUEUE_BATCH_SIZE = 10
     _STATION_QUEUE_REFILL_MAX_ATTEMPTS = 3
@@ -964,6 +982,9 @@ class PlaybackService:
         current_item = self.current_item()
         if session is None or current_item is None or session.started:
             return
+        now_iso = self._utc_now_iso()
+        session.plays_start_timestamp_iso = now_iso
+        session.plays_add_tracks_to_player_time = now_iso
         session.started = True
         session.last_progress_report_seconds = 0
         self._report_play_audio(
@@ -973,6 +994,12 @@ class PlaybackService:
             track_length_seconds=0,
             total_played_seconds=0,
             end_position_seconds=0,
+        )
+        self._report_plays_event(
+            current_item,
+            timestamp_iso=now_iso,
+            total_played_seconds=0.0,
+            end_position_seconds=0.0,
         )
         if current_item.source_type == "station":
             self._report_radio_track_started(current_item)
@@ -1040,6 +1067,13 @@ class PlaybackService:
             total_played_seconds=played_seconds_int,
             end_position_seconds=terminal_position_seconds,
         )
+        self._report_plays_event(
+            current_item,
+            timestamp_iso=self._utc_now_iso(),
+            total_played_seconds=played_seconds,
+            end_position_seconds=float(terminal_position_seconds),
+            change_reason="finish" if natural_end else "skip",
+        )
         if current_item.source_type == "station":
             if self._should_treat_station_track_as_finished(
                 current_item.track,
@@ -1084,6 +1118,14 @@ class PlaybackService:
         if track.duration_ms is None:
             return 0
         return max(0, int(track.duration_ms // 1000))
+
+    def _track_length_seconds_float(self, track: Track) -> float:
+        if track.duration_ms is None:
+            return 0.0
+        return round(max(0.0, track.duration_ms / 1000.0), 3)
+
+    def _utc_now_iso(self) -> str:
+        return datetime.now(UTC).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
     def _debug_logging_enabled(self) -> bool:
         is_enabled_for = getattr(self._logger, "isEnabledFor", None)
@@ -1151,6 +1193,153 @@ class PlaybackService:
                 exc=exc,
             )
 
+    def _report_plays_event(
+        self,
+        current_item: QueueItem,
+        *,
+        timestamp_iso: str,
+        total_played_seconds: float,
+        end_position_seconds: float,
+        change_reason: str | None = None,
+    ) -> None:
+        if self._music_service is None or self._telemetry_session is None:
+            return
+        scrobble = self._scrobble_context_for_item(current_item)
+        if scrobble is None:
+            return
+        start_timestamp = self._telemetry_session.plays_start_timestamp_iso
+        add_tracks_to_player_time = self._telemetry_session.plays_add_tracks_to_player_time
+        if start_timestamp is None or add_tracks_to_player_time is None:
+            return
+        track_length_seconds = self._track_length_seconds_float(current_item.track)
+        report = PlayEventReport(
+            track_id=current_item.track.id,
+            from_=scrobble.from_,
+            play_id=self._telemetry_session.play_id,
+            timestamp=timestamp_iso,
+            start_timestamp=start_timestamp,
+            add_tracks_to_player_time=add_tracks_to_player_time,
+            track_length_seconds=track_length_seconds,
+            total_played_seconds=round(max(0.0, total_played_seconds), 3),
+            start_position_seconds=0.0,
+            end_position_seconds=round(max(0.0, end_position_seconds), 3),
+            context=scrobble.context,
+            context_item=scrobble.context_item,
+            album_id=scrobble.album_id,
+            playlist_id=scrobble.playlist_id,
+            radio_session_id=scrobble.radio_session_id,
+            batch_id=scrobble.batch_id,
+            change_reason=change_reason,
+        )
+        self._logger.debug(
+            (
+                "Sending /plays telemetry: track=%s context=%s context_item=%s "
+                "from=%s play_id=%s played=%.3f end=%.3f reason=%s"
+            ),
+            report.track_id,
+            report.context,
+            report.context_item,
+            report.from_,
+            report.play_id,
+            report.total_played_seconds,
+            report.end_position_seconds,
+            report.change_reason or "start",
+        )
+        try:
+            self._music_service.report_plays((report,), client_now=timestamp_iso)
+        except Exception as exc:
+            self._log_telemetry_failure(
+                "Playback telemetry /plays failed for %s",
+                current_item.track.id,
+                exc=exc,
+            )
+
+    def _scrobble_context_for_item(self, item: QueueItem) -> _ScrobbleContext | None:
+        user_id = self._current_user_id()
+        liked_playlist_id = (
+            f"{user_id}:{self._SCROBBLE_PLAYLIST_LIKES_KIND}" if user_id is not None else None
+        )
+        if item.source_type == "station" and item.source_id and item.radio_session_id:
+            return _ScrobbleContext(
+                from_=item.radio_origin or self._radio_scrobble_from(item.source_id),
+                context="radio",
+                context_item=item.source_id,
+                album_id=item.track.album_id,
+                radio_session_id=item.radio_session_id,
+                batch_id=item.station_batch_id,
+            )
+        if item.source_type == "playlist":
+            playlist_id = self._playlist_context_id(item.source_id, fallback_user_id=user_id)
+            if playlist_id is None:
+                return None
+            return _ScrobbleContext(
+                from_=self._SCROBBLE_PLAYLIST_FROM,
+                context="playlist",
+                context_item=playlist_id,
+                album_id=item.track.album_id,
+                playlist_id=playlist_id,
+            )
+        if item.source_type == "collection" and liked_playlist_id is not None:
+            return _ScrobbleContext(
+                from_=self._SCROBBLE_PLAYLIST_FROM,
+                context="playlist",
+                context_item=liked_playlist_id,
+                album_id=item.track.album_id,
+                playlist_id=liked_playlist_id,
+            )
+        if item.source_type == "artist":
+            artist_id = item.source_id or next(iter(item.track.artist_ids), None)
+            if artist_id is None:
+                return None
+            return _ScrobbleContext(
+                from_=self._SCROBBLE_ARTIST_FROM,
+                context="artist",
+                context_item=artist_id,
+                album_id=item.track.album_id,
+            )
+        if item.source_type == "album" and item.track.album_id is not None:
+            return _ScrobbleContext(
+                from_=self._SCROBBLE_ALBUM_FROM,
+                context="album",
+                context_item=item.track.album_id,
+                album_id=item.track.album_id,
+            )
+        if liked_playlist_id is not None:
+            return _ScrobbleContext(
+                from_=self._SCROBBLE_PLAYLIST_FROM,
+                context="playlist",
+                context_item=liked_playlist_id,
+                album_id=item.track.album_id,
+                playlist_id=liked_playlist_id,
+            )
+        if item.track.album_id is not None:
+            return _ScrobbleContext(
+                from_=self._SCROBBLE_ALBUM_FROM,
+                context="album",
+                context_item=item.track.album_id,
+                album_id=item.track.album_id,
+            )
+        return None
+
+    def _playlist_context_id(
+        self,
+        source_id: str | None,
+        *,
+        fallback_user_id: str | None,
+    ) -> str | None:
+        if source_id is None:
+            return None
+        if ":" in source_id:
+            return source_id
+        if fallback_user_id is None:
+            return None
+        return f"{fallback_user_id}:{source_id}"
+
+    def _radio_scrobble_from(self, station_id: str) -> str:
+        if station_id == "user:onyourwave":
+            return "radio-mobile-user-onyourwave-default"
+        return f"radio-mobile-{station_id.replace(':', '-')}-default"
+
     def _radio_session_from_item(self, item: QueueItem) -> RadioSession | None:
         if (
             item.source_type != "station"
@@ -1215,7 +1404,7 @@ class PlaybackService:
             self._music_service.report_radio_session_feedback(
                 session,
                 RadioFeedbackType.TRACK_STARTED,
-                track_id=current_item.track.id,
+                track_id=self._radio_feedback_track_id(current_item.track),
             )
         except Exception as exc:
             self._log_telemetry_failure(
@@ -1249,7 +1438,7 @@ class PlaybackService:
             self._music_service.report_radio_session_feedback(
                 session,
                 RadioFeedbackType.TRACK_FINISHED,
-                track_id=current_item.track.id,
+                track_id=self._radio_feedback_track_id(current_item.track),
                 total_played_seconds=played_seconds,
             )
         except Exception as exc:
@@ -1281,7 +1470,7 @@ class PlaybackService:
             self._music_service.report_radio_session_feedback(
                 session,
                 RadioFeedbackType.SKIP,
-                track_id=current_item.track.id,
+                track_id=self._radio_feedback_track_id(current_item.track),
                 total_played_seconds=played_seconds,
             )
         except Exception as exc:
@@ -1290,3 +1479,8 @@ class PlaybackService:
                 current_item.track.id,
                 exc=exc,
             )
+
+    def _radio_feedback_track_id(self, track: Track) -> str:
+        if track.album_id:
+            return f"{track.id}:{track.album_id}"
+        return track.id

@@ -7,7 +7,7 @@ from typing import Any, Protocol, runtime_checkable
 from app.domain.audio_quality import AudioQuality
 from app.domain.auth import AuthSession
 from app.domain.catalog import Album, Artist, CatalogSearchResults
-from app.domain.playback import PlaybackState, QueueItem, SavedPlaybackQueue
+from app.domain.playback import PlaybackState, PlayEventReport, QueueItem, SavedPlaybackQueue
 from app.domain.playlist import Playlist
 from app.domain.station import RadioFeedbackType, RadioSession, Station, StationTrackBatch
 from app.domain.track import LikedTrackIds, LikedTrackSnapshot, Track
@@ -133,6 +133,13 @@ class MusicService(Protocol):
         track_length_seconds: int,
         total_played_seconds: int,
         end_position_seconds: int,
+    ) -> None: ...
+
+    def report_plays(
+        self,
+        events: Sequence[PlayEventReport],
+        *,
+        client_now: str,
     ) -> None: ...
 
     def report_station_radio_started(

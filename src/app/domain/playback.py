@@ -32,6 +32,27 @@ class QueueItem:
 
 
 @dataclass(frozen=True, slots=True)
+class PlayEventReport:
+    track_id: str
+    from_: str
+    play_id: str
+    timestamp: str
+    start_timestamp: str
+    add_tracks_to_player_time: str
+    track_length_seconds: float
+    total_played_seconds: float
+    start_position_seconds: float
+    end_position_seconds: float
+    context: str
+    context_item: str
+    album_id: str | None = None
+    playlist_id: str | None = None
+    radio_session_id: str | None = None
+    batch_id: str | None = None
+    change_reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class SavedPlaybackQueue:
     queue: tuple[QueueItem, ...] = ()
     active_index: int | None = None

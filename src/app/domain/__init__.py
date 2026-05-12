@@ -14,6 +14,7 @@ from app.domain.errors import (
 from app.domain.playback import (
     PlaybackState,
     PlaybackStatus,
+    PlayEventReport,
     QueueItem,
     RepeatMode,
     SavedPlaybackQueue,
@@ -47,6 +48,7 @@ __all__ = [
     "Logger",
     "MusicService",
     "NetworkError",
+    "PlayEventReport",
     "PlaybackBackendError",
     "PlaybackEngine",
     "PlaybackState",

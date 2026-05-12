@@ -11,6 +11,7 @@ from app.domain import (
     LikedTrackSnapshot,
     PlaybackBackendError,
     PlaybackStatus,
+    PlayEventReport,
     QueueItem,
     RadioFeedbackType,
     RadioSession,
@@ -50,11 +51,13 @@ class FakeMusicService:
         self.station_requests: list[str] = []
         self.station_request_queues: list[str | None] = []
         self.play_audio_reports: list[dict[str, object]] = []
+        self.plays_reports: list[dict[str, object]] = []
         self.station_radio_started_reports: list[dict[str, object]] = []
         self.station_track_started_reports: list[dict[str, object]] = []
         self.station_track_finished_reports: list[dict[str, object]] = []
         self.station_track_skipped_reports: list[dict[str, object]] = []
         self.raise_on_play_audio = False
+        self.raise_on_plays = False
         self.raise_on_station_feedback = False
 
     def get_auth_session(self):
@@ -268,6 +271,21 @@ class FakeMusicService:
                 "track_length_seconds": track_length_seconds,
                 "total_played_seconds": total_played_seconds,
                 "end_position_seconds": end_position_seconds,
+            }
+        )
+
+    def report_plays(
+        self,
+        events: tuple[PlayEventReport, ...],
+        *,
+        client_now: str,
+    ) -> None:
+        if self.raise_on_plays:
+            raise RuntimeError("/plays failed")
+        self.plays_reports.append(
+            {
+                "client_now": client_now,
+                "events": events,
             }
         )
 
@@ -864,6 +882,11 @@ def test_playback_service_reports_play_audio_start_and_progress() -> None:
     assert music_service.play_audio_reports[0]["total_played_seconds"] == 0
     assert music_service.play_audio_reports[1]["total_played_seconds"] == 15
     assert music_service.play_audio_reports[1]["track_length_seconds"] == 120
+    start_event = music_service.plays_reports[0]["events"][0]
+    assert start_event.track_id == "one"
+    assert start_event.context == "playlist"
+    assert start_event.context_item == "user-1:3"
+    assert start_event.total_played_seconds == 0.0
 
 
 def test_playback_service_seek_does_not_count_as_listened_time() -> None:
@@ -894,6 +917,7 @@ def test_playback_service_seek_does_not_count_as_listened_time() -> None:
     assert music_service.play_audio_reports[1]["total_played_seconds"] == 15
     assert music_service.play_audio_reports[2]["total_played_seconds"] == 30
     assert music_service.play_audio_reports[2]["end_position_seconds"] == 220
+    assert music_service.plays_reports[0]["events"][0].end_position_seconds == 0.0
 
 
 def test_next_and_previous_move_inside_queue() -> None:
@@ -934,6 +958,14 @@ def test_refresh_auto_advances_when_active_track_finishes() -> None:
     assert music_service.play_audio_reports[-2]["end_position_seconds"] == 120
     assert music_service.play_audio_reports[-1]["track_id"] == "two"
     assert music_service.play_audio_reports[-1]["total_played_seconds"] == 0
+    terminal_event = music_service.plays_reports[-2]["events"][0]
+    assert terminal_event.track_id == "one"
+    assert terminal_event.change_reason == "finish"
+    assert terminal_event.total_played_seconds == 120.0
+    assert terminal_event.end_position_seconds == 120.0
+    next_start_event = music_service.plays_reports[-1]["events"][0]
+    assert next_start_event.track_id == "two"
+    assert next_start_event.total_played_seconds == 0.0
 
 
 def test_refresh_does_not_auto_advance_after_manual_stop() -> None:
@@ -1106,6 +1138,10 @@ def test_play_station_loads_initial_station_queue_and_starts_playback() -> None:
         "track_id": "w1",
         "batch_id": "user:onyourwave-batch-1",
     }
+    station_start_event = music_service.plays_reports[0]["events"][0]
+    assert station_start_event.context == "radio"
+    assert station_start_event.context_item == "user:onyourwave"
+    assert station_start_event.radio_session_id == "user:onyourwave-session"
 
 
 def test_play_station_preserves_cached_liked_state() -> None:
@@ -1199,12 +1235,18 @@ def test_station_skip_reports_feedback_when_user_skips_track() -> None:
     assert music_service.station_track_skipped_reports == [
         {
             "station_id": "user:onyourwave",
-            "track_id": "w1",
+            "track_id": "w1:album-1",
             "total_played_seconds": 10.0,
             "batch_id": "user:onyourwave-batch-1",
         }
     ]
     assert music_service.station_track_finished_reports == []
+    radio_skip_event = music_service.plays_reports[-2]["events"][0]
+    assert radio_skip_event.context == "radio"
+    assert radio_skip_event.context_item == "user:onyourwave"
+    assert radio_skip_event.radio_session_id == "user:onyourwave-session"
+    assert radio_skip_event.batch_id == "user:onyourwave-batch-1"
+    assert radio_skip_event.change_reason == "skip"
 
 
 def test_station_finish_reports_feedback_when_track_ends_naturally() -> None:
@@ -1243,16 +1285,21 @@ def test_station_finish_reports_feedback_when_track_ends_naturally() -> None:
     assert music_service.station_track_finished_reports == [
         {
             "station_id": "user:onyourwave",
-            "track_id": "w1",
+            "track_id": "w1:album-1",
             "total_played_seconds": 100.0,
             "batch_id": "user:onyourwave-batch-1",
         }
     ]
+    radio_finish_event = music_service.plays_reports[-2]["events"][0]
+    assert radio_finish_event.context == "radio"
+    assert radio_finish_event.change_reason == "finish"
+    assert radio_finish_event.total_played_seconds == 100.0
 
 
 def test_playback_service_ignores_telemetry_failures() -> None:
     music_service = FakeMusicService(stream_ref="resolved://one")
     music_service.raise_on_play_audio = True
+    music_service.raise_on_plays = True
     service = PlaybackService(
         playback_engine=FakePlaybackEngine(),
         logger=TestLogger(),

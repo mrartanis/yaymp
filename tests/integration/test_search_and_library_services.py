@@ -9,6 +9,7 @@ from app.domain import (
     CatalogSearchResults,
     LikedTrackIds,
     LikedTrackSnapshot,
+    PlayEventReport,
     Playlist,
     RadioFeedbackType,
     RadioSession,
@@ -389,6 +390,14 @@ class FakeMusicService:
             total_played_seconds,
             end_position_seconds,
         )
+
+    def report_plays(
+        self,
+        events: tuple[PlayEventReport, ...],
+        *,
+        client_now: str,
+    ) -> None:
+        del events, client_now
 
     def report_station_radio_started(
         self,

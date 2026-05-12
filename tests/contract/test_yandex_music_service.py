@@ -10,6 +10,7 @@ from app.domain import (
     AuthError,
     AuthSession,
     NetworkError,
+    PlayEventReport,
     RadioFeedbackType,
     RadioSession,
     Station,
@@ -228,6 +229,7 @@ class FakeYandexClient:
         self.playlist_requests: list[tuple[str, str | None]] = []
         self.station_track_queue: str | None = None
         self.play_audio_calls: list[dict[str, object]] = []
+        self.plays_calls: list[dict[str, object]] = []
         self.station_feedback_calls: list[dict[str, object]] = []
         self.radio_session_tracks_queue: list[str] = []
         self.radio_session_new_calls: list[dict[str, object]] = []
@@ -283,6 +285,9 @@ class FakeYandexClient:
                 payload = {"type": "session-feedback", **(json or {})}
                 self._client.station_feedback_calls.append(payload)
                 return {"status": "ok"}
+            if "/plays?client-now=" in url:
+                self._client.plays_calls.append({"url": url, "payload": json})
+                return "ok"
             raise AssertionError(url)
 
     def tracks(self, track_ids):
@@ -629,6 +634,27 @@ def test_yandex_music_service_reports_playback_telemetry() -> None:
         total_played_seconds=42,
         end_position_seconds=42,
     )
+    service.report_plays(
+        (
+            PlayEventReport(
+                track_id="track-1",
+                from_="mobile-album-track-default",
+                play_id="play-1",
+                timestamp="2026-05-12T14:00:00.000000Z",
+                start_timestamp="2026-05-12T14:00:00.000000Z",
+                add_tracks_to_player_time="2026-05-12T14:00:00.000000Z",
+                track_length_seconds=180.0,
+                total_played_seconds=42.0,
+                start_position_seconds=0.0,
+                end_position_seconds=42.0,
+                context="album",
+                context_item="album-1",
+                album_id="album-1",
+                change_reason="skip",
+            ),
+        ),
+        client_now="2026-05-12T14:00:42.000000Z",
+    )
     service.report_station_radio_started(
         station_id="user:onyourwave",
         from_="desktop_win-radio-user-onyourwave",
@@ -661,6 +687,32 @@ def test_yandex_music_service_reports_playback_telemetry() -> None:
             "track_length_seconds": 180,
             "total_played_seconds": 42,
             "end_position_seconds": 42,
+        }
+    ]
+    assert client.plays_calls == [
+        {
+            "url": "https://api.music.yandex.net/plays?client-now=2026-05-12T14:00:42.000000Z",
+            "payload": {
+                "plays": [
+                    {
+                        "trackId": "track-1",
+                        "from": "mobile-album-track-default",
+                        "fromCache": False,
+                        "playId": "play-1",
+                        "timestamp": "2026-05-12T14:00:00.000000Z",
+                        "startTimestamp": "2026-05-12T14:00:00.000000Z",
+                        "addTracksToPlayerTime": "2026-05-12T14:00:00.000000Z",
+                        "trackLengthSeconds": 180.0,
+                        "totalPlayedSeconds": 42.0,
+                        "startPositionSeconds": 0.0,
+                        "endPositionSeconds": 42.0,
+                        "context": "album",
+                        "contextItem": "album-1",
+                        "albumId": "album-1",
+                        "changeReason": "skip",
+                    }
+                ]
+            },
         }
     ]
     assert [call["type"] for call in client.station_feedback_calls] == [
@@ -727,9 +779,9 @@ def test_yandex_music_service_uses_radio_session_flow() -> None:
             "event": {
                 "type": "radioStarted",
                 "timestamp": client.station_feedback_calls[0]["event"]["timestamp"],
-                "from": "radio-mobile-user-onyourwave-default",
             },
             "batchId": "batch-1",
+            "from": "radio-mobile-user-onyourwave-default",
         },
         {
             "type": "session-feedback",
@@ -739,6 +791,7 @@ def test_yandex_music_service_uses_radio_session_flow() -> None:
                 "trackId": "track-1",
             },
             "batchId": "batch-1",
+            "from": "radio-mobile-user-onyourwave-default",
         },
         {
             "type": "session-feedback",
@@ -749,6 +802,7 @@ def test_yandex_music_service_uses_radio_session_flow() -> None:
                 "totalPlayedSeconds": 180.0,
             },
             "batchId": "batch-1",
+            "from": "radio-mobile-user-onyourwave-default",
         },
     ]
 

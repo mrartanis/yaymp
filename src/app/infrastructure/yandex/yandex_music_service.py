@@ -12,6 +12,7 @@ from app.domain import (
     CatalogSearchResults,
     LikedTrackIds,
     MusicService,
+    PlayEventReport,
     Playlist,
     RadioFeedbackType,
     RadioSession,
@@ -443,6 +444,22 @@ class YandexMusicService(MusicService):
                 f"Failed to report play_audio for {track.id}",
             ) from exc
 
+    def report_plays(
+        self,
+        events: Sequence[PlayEventReport],
+        *,
+        client_now: str,
+    ) -> None:
+        client = self._require_client()
+        payload = {"plays": [self._serialize_play_event(event) for event in events]}
+        try:
+            client.request.post(
+                f"{client.base_url}/plays?client-now={client_now}",
+                json=payload,
+            )
+        except Exception as exc:
+            raise self._map_client_error(exc, "Failed to report /plays events") from exc
+
     def report_station_radio_started(
         self,
         *,
@@ -540,8 +557,6 @@ class YandexMusicService(MusicService):
             "type": feedback_type.value,
             "timestamp": self._radio_timestamp(),
         }
-        if feedback_type is RadioFeedbackType.RADIO_STARTED:
-            event["from"] = session.feedback_from
         if track_id is not None:
             event["trackId"] = track_id
         if total_played_seconds is not None:
@@ -552,6 +567,7 @@ class YandexMusicService(MusicService):
                 json={
                     "event": event,
                     "batchId": session.batch_id,
+                    "from": session.feedback_from,
                 },
             )
         except Exception as exc:
@@ -559,6 +575,34 @@ class YandexMusicService(MusicService):
                 exc,
                 f"Failed to report {feedback_type.value} for {track_id or session.station_id}",
             ) from exc
+
+    def _serialize_play_event(self, event: PlayEventReport) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "trackId": event.track_id,
+            "from": event.from_,
+            "fromCache": False,
+            "playId": event.play_id,
+            "timestamp": event.timestamp,
+            "startTimestamp": event.start_timestamp,
+            "addTracksToPlayerTime": event.add_tracks_to_player_time,
+            "trackLengthSeconds": event.track_length_seconds,
+            "totalPlayedSeconds": event.total_played_seconds,
+            "startPositionSeconds": event.start_position_seconds,
+            "endPositionSeconds": event.end_position_seconds,
+            "context": event.context,
+            "contextItem": event.context_item,
+        }
+        if event.album_id is not None:
+            payload["albumId"] = event.album_id
+        if event.playlist_id is not None:
+            payload["playlistId"] = event.playlist_id
+        if event.radio_session_id is not None:
+            payload["radioSessionId"] = event.radio_session_id
+        if event.batch_id is not None:
+            payload["batchId"] = event.batch_id
+        if event.change_reason is not None:
+            payload["changeReason"] = event.change_reason
+        return payload
 
     def get_playlist(self, playlist_id: str, *, owner_id: str | None = None) -> Playlist:
         client = self._require_client()
