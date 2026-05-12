@@ -424,6 +424,9 @@ class YandexMusicService(MusicService):
         track_length_seconds: int,
         total_played_seconds: int,
         end_position_seconds: int,
+        playlist_id: str | None = None,
+        timestamp: str | None = None,
+        client_now: str | None = None,
     ) -> None:
         if track.album_id is None:
             raise NetworkError(f"Track {track.id} has no album id for play telemetry")
@@ -433,10 +436,13 @@ class YandexMusicService(MusicService):
                 track_id=track.id,
                 from_=from_,
                 album_id=track.album_id,
+                playlist_id=playlist_id,
                 play_id=play_id,
+                timestamp=timestamp,
                 track_length_seconds=track_length_seconds,
                 total_played_seconds=total_played_seconds,
                 end_position_seconds=end_position_seconds,
+                client_now=client_now,
             )
         except Exception as exc:
             raise self._map_client_error(

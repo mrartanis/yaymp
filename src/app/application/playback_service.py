@@ -994,6 +994,8 @@ class PlaybackService:
             track_length_seconds=0,
             total_played_seconds=0,
             end_position_seconds=0,
+            playlist_id=self._play_audio_playlist_id(current_item),
+            timestamp_iso=now_iso,
         )
         self._report_plays_event(
             current_item,
@@ -1029,6 +1031,8 @@ class PlaybackService:
             track_length_seconds=self._track_length_seconds(current_item.track),
             total_played_seconds=played_seconds,
             end_position_seconds=max(0, int(engine_state.position_ms // 1000)),
+            playlist_id=self._play_audio_playlist_id(current_item),
+            timestamp_iso=self._utc_now_iso(),
         )
 
     def _finalize_active_playback(
@@ -1066,6 +1070,8 @@ class PlaybackService:
             track_length_seconds=track_length_seconds,
             total_played_seconds=played_seconds_int,
             end_position_seconds=terminal_position_seconds,
+            playlist_id=self._play_audio_playlist_id(current_item),
+            timestamp_iso=self._utc_now_iso(),
         )
         self._report_plays_event(
             current_item,
@@ -1158,6 +1164,8 @@ class PlaybackService:
         track_length_seconds: int,
         total_played_seconds: int,
         end_position_seconds: int,
+        playlist_id: str | None = None,
+        timestamp_iso: str | None = None,
     ) -> None:
         if self._music_service is None:
             return
@@ -1185,6 +1193,9 @@ class PlaybackService:
                 track_length_seconds=track_length_seconds,
                 total_played_seconds=total_played_seconds,
                 end_position_seconds=end_position_seconds,
+                playlist_id=playlist_id,
+                timestamp=timestamp_iso,
+                client_now=timestamp_iso,
             )
         except Exception as exc:
             self._log_telemetry_failure(
@@ -1253,6 +1264,12 @@ class PlaybackService:
                 current_item.track.id,
                 exc=exc,
             )
+
+    def _play_audio_playlist_id(self, item: QueueItem) -> str | None:
+        scrobble = self._scrobble_context_for_item(item)
+        if scrobble is None:
+            return None
+        return scrobble.playlist_id
 
     def _scrobble_context_for_item(self, item: QueueItem) -> _ScrobbleContext | None:
         user_id = self._current_user_id()

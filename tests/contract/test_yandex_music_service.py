@@ -633,6 +633,9 @@ def test_yandex_music_service_reports_playback_telemetry() -> None:
         track_length_seconds=180,
         total_played_seconds=42,
         end_position_seconds=42,
+        playlist_id="user-1:3",
+        timestamp="2026-05-12T14:00:42.000000Z",
+        client_now="2026-05-12T14:00:42.000000Z",
     )
     service.report_plays(
         (
@@ -683,10 +686,13 @@ def test_yandex_music_service_reports_playback_telemetry() -> None:
             "track_id": "track-1",
             "from_": "desktop_win-yaymp",
             "album_id": "album-1",
+            "playlist_id": "user-1:3",
             "play_id": "play-1",
+            "timestamp": "2026-05-12T14:00:42.000000Z",
             "track_length_seconds": 180,
             "total_played_seconds": 42,
             "end_position_seconds": 42,
+            "client_now": "2026-05-12T14:00:42.000000Z",
         }
     ]
     assert client.plays_calls == [

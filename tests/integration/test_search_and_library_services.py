@@ -381,6 +381,9 @@ class FakeMusicService:
         track_length_seconds: int,
         total_played_seconds: int,
         end_position_seconds: int,
+        playlist_id: str | None = None,
+        timestamp: str | None = None,
+        client_now: str | None = None,
     ) -> None:
         del (
             track,
@@ -389,6 +392,9 @@ class FakeMusicService:
             track_length_seconds,
             total_played_seconds,
             end_position_seconds,
+            playlist_id,
+            timestamp,
+            client_now,
         )
 
     def report_plays(

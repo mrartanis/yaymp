@@ -260,6 +260,9 @@ class FakeMusicService:
         track_length_seconds: int,
         total_played_seconds: int,
         end_position_seconds: int,
+        playlist_id: str | None = None,
+        timestamp: str | None = None,
+        client_now: str | None = None,
     ) -> None:
         if self.raise_on_play_audio:
             raise RuntimeError("play_audio failed")
@@ -271,6 +274,9 @@ class FakeMusicService:
                 "track_length_seconds": track_length_seconds,
                 "total_played_seconds": total_played_seconds,
                 "end_position_seconds": end_position_seconds,
+                "playlist_id": playlist_id,
+                "timestamp": timestamp,
+                "client_now": client_now,
             }
         )
 
@@ -880,8 +886,12 @@ def test_playback_service_reports_play_audio_start_and_progress() -> None:
 
     assert music_service.play_audio_reports[0]["track_id"] == "one"
     assert music_service.play_audio_reports[0]["total_played_seconds"] == 0
+    assert music_service.play_audio_reports[0]["playlist_id"] == "user-1:3"
+    assert music_service.play_audio_reports[0]["timestamp"] is not None
+    assert music_service.play_audio_reports[0]["client_now"] is not None
     assert music_service.play_audio_reports[1]["total_played_seconds"] == 15
     assert music_service.play_audio_reports[1]["track_length_seconds"] == 120
+    assert music_service.play_audio_reports[1]["playlist_id"] == "user-1:3"
     start_event = music_service.plays_reports[0]["events"][0]
     assert start_event.track_id == "one"
     assert start_event.context == "playlist"

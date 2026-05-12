@@ -133,6 +133,9 @@ class MusicService(Protocol):
         track_length_seconds: int,
         total_played_seconds: int,
         end_position_seconds: int,
+        playlist_id: str | None = None,
+        timestamp: str | None = None,
+        client_now: str | None = None,
     ) -> None: ...
 
     def report_plays(
