@@ -12,6 +12,8 @@ from app.domain import (
     PlaybackBackendError,
     PlaybackStatus,
     QueueItem,
+    RadioFeedbackType,
+    RadioSession,
     RepeatMode,
     SavedPlaybackQueue,
     StationTrackBatch,
@@ -170,6 +172,45 @@ class FakeMusicService:
             tracks=tracks,
         )
 
+    def start_radio_session(
+        self,
+        station_id: str,
+        *,
+        limit: int = 25,
+    ) -> RadioSession:
+        batch = self.get_station_track_batch(station_id, limit=limit)
+        return RadioSession(
+            station_id=station_id,
+            session_id=f"{station_id}-session",
+            batch_id=batch.batch_id,
+            feedback_from=f"radio-mobile-{station_id.replace(':', '-')}-default",
+            queue_anchor_track_id=batch.tracks[0].id if batch.tracks else None,
+            tracks=batch.tracks,
+        )
+
+    def get_radio_session_tracks(
+        self,
+        session: RadioSession,
+        *,
+        limit: int = 25,
+    ) -> RadioSession:
+        batch = self.get_station_track_batch(
+            session.station_id,
+            limit=limit,
+            queue_track_id=session.queue_anchor_track_id,
+        )
+        next_anchor_track_id = (
+            batch.tracks[0].id if batch.tracks else session.queue_anchor_track_id
+        )
+        return RadioSession(
+            station_id=session.station_id,
+            session_id=session.session_id,
+            batch_id=batch.batch_id,
+            feedback_from=session.feedback_from,
+            queue_anchor_track_id=next_anchor_track_id,
+            tracks=batch.tracks,
+        )
+
     def get_playlist(self, playlist_id: str, *, owner_id: str | None = None):
         del owner_id
         raise NotImplementedError
@@ -291,6 +332,53 @@ class FakeMusicService:
                 "track_id": track_id,
                 "total_played_seconds": total_played_seconds,
                 "batch_id": batch_id,
+            }
+        )
+
+    def report_radio_session_feedback(
+        self,
+        session: RadioSession,
+        feedback_type: RadioFeedbackType,
+        *,
+        track_id: str | None = None,
+        total_played_seconds: float | None = None,
+    ) -> None:
+        if self.raise_on_station_feedback:
+            raise RuntimeError(f"{feedback_type.value} failed")
+        if feedback_type is RadioFeedbackType.RADIO_STARTED:
+            self.station_radio_started_reports.append(
+                {
+                    "station_id": session.station_id,
+                    "from": session.feedback_from,
+                    "batch_id": session.batch_id,
+                }
+            )
+            return
+        if feedback_type is RadioFeedbackType.TRACK_STARTED:
+            self.station_track_started_reports.append(
+                {
+                    "station_id": session.station_id,
+                    "track_id": track_id,
+                    "batch_id": session.batch_id,
+                }
+            )
+            return
+        if feedback_type is RadioFeedbackType.TRACK_FINISHED:
+            self.station_track_finished_reports.append(
+                {
+                    "station_id": session.station_id,
+                    "track_id": track_id,
+                    "total_played_seconds": total_played_seconds,
+                    "batch_id": session.batch_id,
+                }
+            )
+            return
+        self.station_track_skipped_reports.append(
+            {
+                "station_id": session.station_id,
+                "track_id": track_id,
+                "total_played_seconds": total_played_seconds,
+                "batch_id": session.batch_id,
             }
         )
 
@@ -978,7 +1066,7 @@ def test_play_station_loads_initial_station_queue_and_starts_playback() -> None:
     assert music_service.station_requests[0] == "user:onyourwave"
     assert music_service.station_radio_started_reports[0] == {
         "station_id": "user:onyourwave",
-        "from": "desktop_win-radio-user-onyourwave",
+        "from": "radio-mobile-user-onyourwave-default",
         "batch_id": "user:onyourwave-batch-1",
     }
     assert music_service.station_track_started_reports[0] == {
@@ -1164,20 +1252,7 @@ def test_station_queue_next_retries_duplicate_refills_before_stopping() -> None:
         music_service=music_service,
     )
 
-    service.replace_queue(
-        (
-            Track(
-                id="w1",
-                title="Wave 1",
-                artists=("Artist",),
-                duration_ms=1_000,
-                stream_ref="resolved://wave",
-            ),
-        ),
-        start_index=0,
-        source_type="station",
-        source_id="user:onyourwave",
-    )
+    service.play_station("user:onyourwave")
 
     snapshot = service.next()
 

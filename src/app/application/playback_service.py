@@ -16,6 +16,8 @@ from app.domain import (
     PlaybackStateRepo,
     PlaybackStatus,
     QueueItem,
+    RadioFeedbackType,
+    RadioSession,
     RepeatMode,
     Track,
 )
@@ -212,6 +214,9 @@ class PlaybackService:
                 source_id=item.source_id,
                 source_index=item.source_index,
                 station_batch_id=item.station_batch_id,
+                radio_session_id=item.radio_session_id,
+                radio_origin=item.radio_origin,
+                radio_queue_anchor_track_id=item.radio_queue_anchor_track_id,
             )
             for item in saved_queue.queue
         ]
@@ -309,18 +314,18 @@ class PlaybackService:
     def play_station(self, station_id: str) -> PlaybackSnapshot:
         if self._music_service is None:
             raise PlaybackBackendError("Music service is not configured")
-        batch = self._music_service.get_station_track_batch(
+        radio_session = self._music_service.start_radio_session(
             station_id,
             limit=self._STATION_QUEUE_BATCH_SIZE,
         )
-        self._report_station_batch_started(station_id, batch.batch_id)
         tracks = merge_cached_liked_states(
-            batch.tracks,
+            radio_session.tracks,
             self._library_cache_repo,
             user_id=self._current_user_id(),
         )
         if not tracks:
             raise PlaybackBackendError(f"Station {station_id} returned no tracks")
+        self._report_radio_session_started(radio_session)
         return self._replace_queue_items(
             tuple(
                 self._build_queue_item(
@@ -328,7 +333,10 @@ class PlaybackService:
                     source_type="station",
                     source_id=station_id,
                     source_index=index,
-                    station_batch_id=batch.batch_id,
+                    station_batch_id=radio_session.batch_id,
+                    radio_session_id=radio_session.session_id,
+                    radio_origin=radio_session.feedback_from,
+                    radio_queue_anchor_track_id=radio_session.queue_anchor_track_id,
                 )
                 for index, track in enumerate(tracks)
             ),
@@ -571,6 +579,9 @@ class PlaybackService:
             source_id=item.source_id,
             source_index=item.source_index,
             station_batch_id=item.station_batch_id,
+            radio_session_id=item.radio_session_id,
+            radio_origin=item.radio_origin,
+            radio_queue_anchor_track_id=item.radio_queue_anchor_track_id,
         )
 
     def _has_fresh_stream_ref(self, track: Track) -> bool:
@@ -676,14 +687,15 @@ class PlaybackService:
             if remaining >= min_remaining:
                 break
 
-            station_batch = self._music_service.get_station_track_batch(
-                station_id,
+            radio_session = self._radio_session_for_queue_tail()
+            if radio_session is None:
+                break
+            radio_session = self._music_service.get_radio_session_tracks(
+                radio_session,
                 limit=self._STATION_QUEUE_BATCH_SIZE,
-                queue_track_id=current_item.track.id,
             )
-            self._report_station_batch_started(station_id, station_batch.batch_id)
             fetched_tracks = merge_cached_liked_states(
-                station_batch.tracks,
+                radio_session.tracks,
                 self._library_cache_repo,
                 user_id=self._current_user_id(),
             )
@@ -700,7 +712,10 @@ class PlaybackService:
                         source_type="station",
                         source_id=station_id,
                         source_index=next_source_index,
-                        station_batch_id=station_batch.batch_id,
+                        station_batch_id=radio_session.batch_id,
+                        radio_session_id=radio_session.session_id,
+                        radio_origin=radio_session.feedback_from,
+                        radio_queue_anchor_track_id=radio_session.queue_anchor_track_id,
                     )
                 )
                 existing_ids.add(track.id)
@@ -883,6 +898,9 @@ class PlaybackService:
         source_id: str | None = None,
         source_index: int | None = None,
         station_batch_id: str | None = None,
+        radio_session_id: str | None = None,
+        radio_origin: str | None = None,
+        radio_queue_anchor_track_id: str | None = None,
     ) -> QueueItem:
         return QueueItem(
             track=track,
@@ -890,6 +908,9 @@ class PlaybackService:
             source_id=source_id,
             source_index=source_index,
             station_batch_id=station_batch_id,
+            radio_session_id=radio_session_id,
+            radio_origin=radio_origin,
+            radio_queue_anchor_track_id=radio_queue_anchor_track_id,
         )
 
     def _advance_to_next_track(
@@ -944,7 +965,7 @@ class PlaybackService:
             end_position_seconds=0,
         )
         if current_item.source_type == "station":
-            self._report_station_track_started(current_item)
+            self._report_radio_track_started(current_item)
 
     def _report_playback_progress(self, engine_state: PlaybackState) -> None:
         session = self._telemetry_session
@@ -1012,9 +1033,9 @@ class PlaybackService:
                 played_seconds=played_seconds,
                 natural_end=natural_end,
             ):
-                self._report_station_track_finished(current_item, played_seconds)
+                self._report_radio_track_finished(current_item, played_seconds)
             else:
-                self._report_station_track_skipped(current_item, played_seconds)
+                self._report_radio_track_skipped(current_item, played_seconds)
         session.terminal_reported = True
 
     def _should_treat_station_track_as_finished(
@@ -1112,52 +1133,71 @@ class PlaybackService:
                 exc=exc,
             )
 
-    def _report_station_batch_started(self, station_id: str, batch_id: str | None) -> None:
-        if self._music_service is None or not batch_id:
-            return
-        origin = (
-            self._PLAY_ORIGIN_MY_WAVE
-            if station_id == "user:onyourwave"
-            else self._PLAY_ORIGIN_STATION
+    def _radio_session_from_item(self, item: QueueItem) -> RadioSession | None:
+        if (
+            item.source_type != "station"
+            or not item.source_id
+            or not item.radio_session_id
+            or not item.radio_origin
+        ):
+            return None
+        return RadioSession(
+            station_id=item.source_id,
+            session_id=item.radio_session_id,
+            batch_id=item.station_batch_id,
+            feedback_from=item.radio_origin,
+            queue_anchor_track_id=item.radio_queue_anchor_track_id,
+            tracks=(item.track,),
         )
+
+    def _radio_session_for_queue_tail(self) -> RadioSession | None:
+        for item in reversed(self._queue):
+            session = self._radio_session_from_item(item)
+            if session is not None:
+                return session
+        return None
+
+    def _report_radio_session_started(self, session: RadioSession) -> None:
+        if self._music_service is None:
+            return
         self._logger.debug(
-            "Sending rotor radioStarted feedback: station=%s batch=%s origin=%s",
-            station_id,
-            batch_id,
-            origin,
+            "Sending rotor radioStarted feedback: station=%s session=%s batch=%s origin=%s",
+            session.station_id,
+            session.session_id,
+            session.batch_id,
+            session.feedback_from,
         )
         try:
-            self._music_service.report_station_radio_started(
-                station_id=station_id,
-                from_=origin,
-                batch_id=batch_id,
+            self._music_service.report_radio_session_feedback(
+                session,
+                RadioFeedbackType.RADIO_STARTED,
             )
         except Exception as exc:
             self._log_telemetry_failure(
-                "Playback telemetry radioStarted failed for %s batch %s",
-                station_id,
-                batch_id,
+                "Playback telemetry radioStarted failed for %s session %s",
+                session.station_id,
+                session.session_id,
                 exc=exc,
             )
 
-    def _report_station_track_started(self, current_item: QueueItem) -> None:
-        if (
-            self._music_service is None
-            or not current_item.station_batch_id
-            or not current_item.source_id
-        ):
+    def _report_radio_track_started(self, current_item: QueueItem) -> None:
+        if self._music_service is None:
+            return
+        session = self._radio_session_from_item(current_item)
+        if session is None:
             return
         self._logger.debug(
-            "Sending rotor trackStarted feedback: station=%s track=%s batch=%s",
-            current_item.source_id,
+            "Sending rotor trackStarted feedback: station=%s session=%s track=%s batch=%s",
+            session.station_id,
+            session.session_id,
             current_item.track.id,
-            current_item.station_batch_id,
+            session.batch_id,
         )
         try:
-            self._music_service.report_station_track_started(
-                station_id=current_item.source_id,
+            self._music_service.report_radio_session_feedback(
+                session,
+                RadioFeedbackType.TRACK_STARTED,
                 track_id=current_item.track.id,
-                batch_id=current_item.station_batch_id,
             )
         except Exception as exc:
             self._log_telemetry_failure(
@@ -1166,30 +1206,33 @@ class PlaybackService:
                 exc=exc,
             )
 
-    def _report_station_track_finished(
+    def _report_radio_track_finished(
         self,
         current_item: QueueItem,
         played_seconds: float,
     ) -> None:
-        if (
-            self._music_service is None
-            or not current_item.station_batch_id
-            or not current_item.source_id
-        ):
+        if self._music_service is None:
+            return
+        session = self._radio_session_from_item(current_item)
+        if session is None:
             return
         self._logger.debug(
-            "Sending rotor trackFinished feedback: station=%s track=%s batch=%s played=%.3f",
-            current_item.source_id,
+            (
+                "Sending rotor trackFinished feedback: "
+                "station=%s session=%s track=%s batch=%s played=%.3f"
+            ),
+            session.station_id,
+            session.session_id,
             current_item.track.id,
-            current_item.station_batch_id,
+            session.batch_id,
             played_seconds,
         )
         try:
-            self._music_service.report_station_track_finished(
-                station_id=current_item.source_id,
+            self._music_service.report_radio_session_feedback(
+                session,
+                RadioFeedbackType.TRACK_FINISHED,
                 track_id=current_item.track.id,
                 total_played_seconds=played_seconds,
-                batch_id=current_item.station_batch_id,
             )
         except Exception as exc:
             self._log_telemetry_failure(
@@ -1198,30 +1241,30 @@ class PlaybackService:
                 exc=exc,
             )
 
-    def _report_station_track_skipped(
+    def _report_radio_track_skipped(
         self,
         current_item: QueueItem,
         played_seconds: float,
     ) -> None:
-        if (
-            self._music_service is None
-            or not current_item.station_batch_id
-            or not current_item.source_id
-        ):
+        if self._music_service is None:
+            return
+        session = self._radio_session_from_item(current_item)
+        if session is None:
             return
         self._logger.debug(
-            "Sending rotor skip feedback: station=%s track=%s batch=%s played=%.3f",
-            current_item.source_id,
+            "Sending rotor skip feedback: station=%s session=%s track=%s batch=%s played=%.3f",
+            session.station_id,
+            session.session_id,
             current_item.track.id,
-            current_item.station_batch_id,
+            session.batch_id,
             played_seconds,
         )
         try:
-            self._music_service.report_station_track_skipped(
-                station_id=current_item.source_id,
+            self._music_service.report_radio_session_feedback(
+                session,
+                RadioFeedbackType.SKIP,
                 track_id=current_item.track.id,
                 total_played_seconds=played_seconds,
-                batch_id=current_item.station_batch_id,
             )
         except Exception as exc:
             self._log_telemetry_failure(

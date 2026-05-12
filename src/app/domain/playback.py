@@ -26,6 +26,9 @@ class QueueItem:
     source_id: str | None = None
     source_index: int | None = None
     station_batch_id: str | None = None
+    radio_session_id: str | None = None
+    radio_origin: str | None = None
+    radio_queue_anchor_track_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

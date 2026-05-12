@@ -29,7 +29,7 @@ from app.domain.protocols import (
     PlaybackStateRepo,
     SettingsRepo,
 )
-from app.domain.station import Station, StationTrackBatch
+from app.domain.station import RadioFeedbackType, RadioSession, Station, StationTrackBatch
 from app.domain.track import LikedTrackIds, LikedTrackSnapshot, Track
 
 __all__ = [
@@ -55,6 +55,8 @@ __all__ = [
     "Playlist",
     "QueueItem",
     "RepeatMode",
+    "RadioFeedbackType",
+    "RadioSession",
     "SavedPlaybackQueue",
     "SettingsRepo",
     "Station",

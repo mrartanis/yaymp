@@ -150,6 +150,9 @@ class SQLitePlaybackStateRepo(PlaybackStateRepo):
             "source_id": item.source_id,
             "source_index": item.source_index,
             "station_batch_id": item.station_batch_id,
+            "radio_session_id": item.radio_session_id,
+            "radio_origin": item.radio_origin,
+            "radio_queue_anchor_track_id": item.radio_queue_anchor_track_id,
         }
 
     def _decode_queue_item(self, payload: object) -> QueueItem:
@@ -185,4 +188,7 @@ class SQLitePlaybackStateRepo(PlaybackStateRepo):
             source_id=payload.get("source_id"),
             source_index=payload.get("source_index"),
             station_batch_id=payload.get("station_batch_id"),
+            radio_session_id=payload.get("radio_session_id"),
+            radio_origin=payload.get("radio_origin"),
+            radio_queue_anchor_track_id=payload.get("radio_queue_anchor_track_id"),
         )

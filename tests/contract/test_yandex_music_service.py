@@ -10,6 +10,8 @@ from app.domain import (
     AuthError,
     AuthSession,
     NetworkError,
+    RadioFeedbackType,
+    RadioSession,
     Station,
     StationTrackBatch,
     Track,
@@ -178,6 +180,8 @@ class LikeStub:
 
 class FakeYandexClient:
     def __init__(self) -> None:
+        self.base_url = "https://api.music.yandex.net"
+        self.report_unknown_fields = False
         self.track = TrackStub(track_id="track-1", title="Remote")
         self.album = AlbumStub("Album", album_id="album-1")
         self.single = AlbumStub("Single", album_id="single-1", album_type="single")
@@ -225,6 +229,61 @@ class FakeYandexClient:
         self.station_track_queue: str | None = None
         self.play_audio_calls: list[dict[str, object]] = []
         self.station_feedback_calls: list[dict[str, object]] = []
+        self.radio_session_tracks_queue: list[str] = []
+        self.radio_session_new_calls: list[dict[str, object]] = []
+        self.request = self.FakeRequest(self)
+
+    class FakeRequest:
+        def __init__(self, client: "FakeYandexClient") -> None:
+            self._client = client
+
+        def _track_payload(self) -> dict[str, object]:
+            return {
+                "id": self._client.track.id,
+                "title": self._client.track.title,
+                "available": self._client.track.available,
+                "durationMs": self._client.track.duration_ms,
+                "artists": [{"name": artist.name} for artist in self._client.track.artists],
+                "albums": [
+                    {
+                        "id": album.id,
+                        "title": album.title,
+                        "year": album.year,
+                        "artists": [{"name": artist.name} for artist in album.artists],
+                    }
+                    for album in self._client.track.albums
+                ],
+                "coverUri": self._client.track.cover_uri,
+            }
+
+        def post(self, url: str, data=None, json=None, **kwargs):
+            del data, kwargs
+            if url.endswith("/rotor/session/new"):
+                self._client.radio_session_new_calls.append(json or {})
+                return {
+                    "radioSessionId": "session-1",
+                    "batchId": "batch-1",
+                    "descriptionSeed": {"type": "user", "tag": "onyourwave"},
+                    "sequence": [
+                        {"type": "track", "liked": False, "track": self._track_payload()}
+                    ],
+                }
+            if url.endswith("/rotor/session/session-1/tracks"):
+                if isinstance(json, dict):
+                    queue = json.get("queue") or []
+                    if queue:
+                        self._client.radio_session_tracks_queue.append(str(queue[0]))
+                return {
+                    "batchId": "batch-2",
+                    "sequence": [
+                        {"type": "track", "liked": False, "track": self._track_payload()}
+                    ],
+                }
+            if url.endswith("/rotor/session/session-1/feedback"):
+                payload = {"type": "session-feedback", **(json or {})}
+                self._client.station_feedback_calls.append(payload)
+                return {"status": "ok"}
+            raise AssertionError(url)
 
     def tracks(self, track_ids):
         if track_ids == ["missing"]:
@@ -609,6 +668,88 @@ def test_yandex_music_service_reports_playback_telemetry() -> None:
         "trackStarted",
         "trackFinished",
         "skip",
+    ]
+
+
+def test_yandex_music_service_uses_radio_session_flow() -> None:
+    client = FakeYandexClient()
+    service = YandexMusicService(
+        session=AuthSession(user_id="user-1", token="token"),
+        client=client,
+    )
+
+    session = service.start_radio_session("user:onyourwave")
+    continued = service.get_radio_session_tracks(session)
+    service.report_radio_session_feedback(session, RadioFeedbackType.RADIO_STARTED)
+    service.report_radio_session_feedback(
+        session,
+        RadioFeedbackType.TRACK_STARTED,
+        track_id="track-1",
+    )
+    service.report_radio_session_feedback(
+        session,
+        RadioFeedbackType.TRACK_FINISHED,
+        track_id="track-1",
+        total_played_seconds=180.0,
+    )
+
+    assert session == RadioSession(
+        station_id="user:onyourwave",
+        session_id="session-1",
+        batch_id="batch-1",
+        feedback_from="radio-mobile-user-onyourwave-default",
+        queue_anchor_track_id="track-1",
+        tracks=(
+            Track(
+                id="track-1",
+                title="Remote",
+                artists=("Artist",),
+                artist_ids=(),
+                album_id="album-1",
+                album_title="Album",
+                album_year=2024,
+                duration_ms=180_000,
+                artwork_ref="covers/track.jpg",
+                accent_color=None,
+                available=True,
+                is_liked=False,
+            ),
+        ),
+    )
+    assert continued.batch_id == "batch-2"
+    assert client.radio_session_new_calls == [
+        {"seeds": ["user:onyourwave"], "includeTracksInResponse": True}
+    ]
+    assert client.radio_session_tracks_queue == ["track-1"]
+    assert client.station_feedback_calls == [
+        {
+            "type": "session-feedback",
+            "event": {
+                "type": "radioStarted",
+                "timestamp": client.station_feedback_calls[0]["event"]["timestamp"],
+                "from": "radio-mobile-user-onyourwave-default",
+            },
+            "batchId": "batch-1",
+        },
+        {
+            "type": "session-feedback",
+            "event": {
+                "type": "trackStarted",
+                "timestamp": client.station_feedback_calls[1]["event"]["timestamp"],
+                "trackId": "track-1",
+            },
+            "batchId": "batch-1",
+        },
+        {
+            "type": "session-feedback",
+            "event": {
+                "type": "trackFinished",
+                "timestamp": client.station_feedback_calls[2]["event"]["timestamp"],
+                "trackId": "track-1",
+                "totalPlayedSeconds": 180.0,
+            },
+            "batchId": "batch-1",
+        },
     ]
 
 

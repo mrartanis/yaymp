@@ -10,6 +10,8 @@ from app.domain import (
     LikedTrackIds,
     LikedTrackSnapshot,
     Playlist,
+    RadioFeedbackType,
+    RadioSession,
     Station,
     StationTrackBatch,
     Track,
@@ -277,6 +279,45 @@ class FakeMusicService:
             tracks=tuple(self.get_station_tracks(station_id, limit=limit)),
         )
 
+    def start_radio_session(
+        self,
+        station_id: str,
+        *,
+        limit: int = 25,
+    ):
+        batch = self.get_station_track_batch(station_id, limit=limit)
+        return RadioSession(
+            station_id=station_id,
+            session_id=f"{station_id}-session",
+            batch_id=batch.batch_id,
+            feedback_from=f"radio-mobile-{station_id.replace(':', '-')}-default",
+            queue_anchor_track_id=batch.tracks[0].id if batch.tracks else None,
+            tracks=batch.tracks,
+        )
+
+    def get_radio_session_tracks(
+        self,
+        session: RadioSession,
+        *,
+        limit: int = 25,
+    ):
+        batch = self.get_station_track_batch(
+            session.station_id,
+            limit=limit,
+            queue_track_id=session.queue_anchor_track_id,
+        )
+        next_anchor_track_id = (
+            batch.tracks[0].id if batch.tracks else session.queue_anchor_track_id
+        )
+        return RadioSession(
+            station_id=session.station_id,
+            session_id=session.session_id,
+            batch_id=batch.batch_id,
+            feedback_from=session.feedback_from,
+            queue_anchor_track_id=next_anchor_track_id,
+            tracks=batch.tracks,
+        )
+
     def get_playlist(self, playlist_id: str, *, owner_id: str | None = None):
         del owner_id
         return Playlist(id=playlist_id, title=f"Playlist {playlist_id}")
@@ -386,6 +427,16 @@ class FakeMusicService:
         batch_id: str,
     ) -> None:
         del station_id, track_id, total_played_seconds, batch_id
+
+    def report_radio_session_feedback(
+        self,
+        session: RadioSession,
+        feedback_type: RadioFeedbackType,
+        *,
+        track_id: str | None = None,
+        total_played_seconds: float | None = None,
+    ) -> None:
+        del session, feedback_type, track_id, total_played_seconds
 
 
 def test_search_service_updates_recent_searches() -> None:

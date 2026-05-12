@@ -9,7 +9,7 @@ from app.domain.auth import AuthSession
 from app.domain.catalog import Album, Artist, CatalogSearchResults
 from app.domain.playback import PlaybackState, QueueItem, SavedPlaybackQueue
 from app.domain.playlist import Playlist
-from app.domain.station import Station, StationTrackBatch
+from app.domain.station import RadioFeedbackType, RadioSession, Station, StationTrackBatch
 from app.domain.track import LikedTrackIds, LikedTrackSnapshot, Track
 
 
@@ -82,6 +82,20 @@ class MusicService(Protocol):
         queue_track_id: str | None = None,
     ) -> StationTrackBatch: ...
 
+    def start_radio_session(
+        self,
+        station_id: str,
+        *,
+        limit: int = 25,
+    ) -> RadioSession: ...
+
+    def get_radio_session_tracks(
+        self,
+        session: RadioSession,
+        *,
+        limit: int = 25,
+    ) -> RadioSession: ...
+
     def get_playlist(self, playlist_id: str, *, owner_id: str | None = None) -> Playlist: ...
 
     def get_playlist_tracks(
@@ -153,6 +167,15 @@ class MusicService(Protocol):
         track_id: str,
         total_played_seconds: float,
         batch_id: str,
+    ) -> None: ...
+
+    def report_radio_session_feedback(
+        self,
+        session: RadioSession,
+        feedback_type: RadioFeedbackType,
+        *,
+        track_id: str | None = None,
+        total_played_seconds: float | None = None,
     ) -> None: ...
 
 
