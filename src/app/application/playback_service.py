@@ -42,7 +42,6 @@ class _PlaybackTelemetrySession:
     plays_add_tracks_to_player_time: str | None = None
     started: bool = False
     terminal_reported: bool = False
-    last_progress_report_seconds: int = 0
     accumulated_played_ms: int = 0
     last_known_position_ms: int = 0
     last_accounted_position_ms: int = 0
@@ -61,7 +60,6 @@ class _ScrobbleContext:
 
 class PlaybackService:
     _STREAM_REF_TTL = timedelta(hours=1)
-    _PLAY_AUDIO_PROGRESS_INTERVAL_SECONDS = 15
     _STATION_FINISHED_RATIO = 0.9
     _STATION_FINISHED_REMAINING_SECONDS = 5.0
     _PLAY_ORIGIN_DESKTOP = "desktop_win-yaymp"
@@ -403,7 +401,6 @@ class PlaybackService:
         if self._should_auto_advance(engine_state):
             self._finalize_active_playback(natural_end=True, engine_state=engine_state)
             return self._advance_to_next_track(natural_end=True, finalize_current=False)
-        self._report_playback_progress(engine_state)
         self._prefetch_queue_ahead()
         self._persist_playback_position_if_due(engine_state)
         return self._build_snapshot(engine_state)
@@ -986,7 +983,6 @@ class PlaybackService:
         session.plays_start_timestamp_iso = now_iso
         session.plays_add_tracks_to_player_time = now_iso
         session.started = True
-        session.last_progress_report_seconds = 0
         self._report_play_audio(
             current_item.track,
             origin=session.origin,
@@ -1005,35 +1001,6 @@ class PlaybackService:
         )
         if current_item.source_type == "station":
             self._report_radio_track_started(current_item)
-
-    def _report_playback_progress(self, engine_state: PlaybackState) -> None:
-        session = self._telemetry_session
-        current_item = self.current_item()
-        if (
-            session is None
-            or current_item is None
-            or not session.started
-            or session.terminal_reported
-            or engine_state.status is not PlaybackStatus.PLAYING
-        ):
-            return
-        played_seconds = max(0, int(session.accumulated_played_ms // 1000))
-        if (
-            played_seconds - session.last_progress_report_seconds
-            < self._PLAY_AUDIO_PROGRESS_INTERVAL_SECONDS
-        ):
-            return
-        session.last_progress_report_seconds = played_seconds
-        self._report_play_audio(
-            current_item.track,
-            origin=session.origin,
-            play_id=session.play_id,
-            track_length_seconds=self._track_length_seconds(current_item.track),
-            total_played_seconds=played_seconds,
-            end_position_seconds=max(0, int(engine_state.position_ms // 1000)),
-            playlist_id=self._play_audio_playlist_id(current_item),
-            timestamp_iso=self._utc_now_iso(),
-        )
 
     def _finalize_active_playback(
         self,

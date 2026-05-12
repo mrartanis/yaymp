@@ -863,7 +863,7 @@ def test_play_single_track_replaces_queue_and_starts_playback() -> None:
     assert snapshot.current_item.track.id == "one"
 
 
-def test_playback_service_reports_play_audio_start_and_progress() -> None:
+def test_playback_service_reports_play_audio_start_only_until_terminal() -> None:
     music_service = FakeMusicService(stream_ref="resolved://one")
     engine = FakePlaybackEngine()
     service = PlaybackService(
@@ -889,9 +889,7 @@ def test_playback_service_reports_play_audio_start_and_progress() -> None:
     assert music_service.play_audio_reports[0]["playlist_id"] == "user-1:3"
     assert music_service.play_audio_reports[0]["timestamp"] is not None
     assert music_service.play_audio_reports[0]["client_now"] is not None
-    assert music_service.play_audio_reports[1]["total_played_seconds"] == 15
-    assert music_service.play_audio_reports[1]["track_length_seconds"] == 120
-    assert music_service.play_audio_reports[1]["playlist_id"] == "user-1:3"
+    assert len(music_service.play_audio_reports) == 1
     start_event = music_service.plays_reports[0]["events"][0]
     assert start_event.track_id == "one"
     assert start_event.context == "playlist"
@@ -924,9 +922,7 @@ def test_playback_service_seek_does_not_count_as_listened_time() -> None:
     engine.seek(220_000)
     service.refresh()
 
-    assert music_service.play_audio_reports[1]["total_played_seconds"] == 15
-    assert music_service.play_audio_reports[2]["total_played_seconds"] == 30
-    assert music_service.play_audio_reports[2]["end_position_seconds"] == 220
+    assert len(music_service.play_audio_reports) == 1
     assert music_service.plays_reports[0]["events"][0].end_position_seconds == 0.0
 
 
