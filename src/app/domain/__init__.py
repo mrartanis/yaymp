@@ -29,7 +29,7 @@ from app.domain.protocols import (
     PlaybackStateRepo,
     SettingsRepo,
 )
-from app.domain.station import Station
+from app.domain.station import Station, StationTrackBatch
 from app.domain.track import LikedTrackIds, LikedTrackSnapshot, Track
 
 __all__ = [
@@ -58,6 +58,7 @@ __all__ = [
     "SavedPlaybackQueue",
     "SettingsRepo",
     "Station",
+    "StationTrackBatch",
     "StorageError",
     "StreamResolveError",
     "Track",

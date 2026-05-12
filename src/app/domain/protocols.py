@@ -9,7 +9,7 @@ from app.domain.auth import AuthSession
 from app.domain.catalog import Album, Artist, CatalogSearchResults
 from app.domain.playback import PlaybackState, QueueItem, SavedPlaybackQueue
 from app.domain.playlist import Playlist
-from app.domain.station import Station
+from app.domain.station import Station, StationTrackBatch
 from app.domain.track import LikedTrackIds, LikedTrackSnapshot, Track
 
 
@@ -74,6 +74,14 @@ class MusicService(Protocol):
 
     def get_station_tracks(self, station_id: str, *, limit: int = 25) -> Sequence[Track]: ...
 
+    def get_station_track_batch(
+        self,
+        station_id: str,
+        *,
+        limit: int = 25,
+        queue_track_id: str | None = None,
+    ) -> StationTrackBatch: ...
+
     def get_playlist(self, playlist_id: str, *, owner_id: str | None = None) -> Playlist: ...
 
     def get_playlist_tracks(
@@ -101,6 +109,51 @@ class MusicService(Protocol):
     def get_artist_tracks(self, artist_id: str, *, limit: int = 50) -> Sequence[Track]: ...
 
     def resolve_stream_ref(self, track: Track) -> str: ...
+
+    def report_play_audio(
+        self,
+        *,
+        track: Track,
+        from_: str,
+        play_id: str,
+        track_length_seconds: int,
+        total_played_seconds: int,
+        end_position_seconds: int,
+    ) -> None: ...
+
+    def report_station_radio_started(
+        self,
+        *,
+        station_id: str,
+        from_: str,
+        batch_id: str,
+    ) -> None: ...
+
+    def report_station_track_started(
+        self,
+        *,
+        station_id: str,
+        track_id: str,
+        batch_id: str,
+    ) -> None: ...
+
+    def report_station_track_finished(
+        self,
+        *,
+        station_id: str,
+        track_id: str,
+        total_played_seconds: float,
+        batch_id: str,
+    ) -> None: ...
+
+    def report_station_track_skipped(
+        self,
+        *,
+        station_id: str,
+        track_id: str,
+        total_played_seconds: float,
+        batch_id: str,
+    ) -> None: ...
 
 
 @runtime_checkable

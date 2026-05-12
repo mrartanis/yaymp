@@ -26,6 +26,7 @@ def test_sqlite_playback_state_repo_round_trips_queue(tmp_path) -> None:
             source_type="album",
             source_id="album-1",
             source_index=0,
+            station_batch_id="batch-1",
         ),
     )
 
@@ -48,6 +49,7 @@ def test_sqlite_playback_state_repo_round_trips_queue(tmp_path) -> None:
                 source_type="album",
                 source_id="album-1",
                 source_index=0,
+                station_batch_id="batch-1",
             ),
         ),
         active_index=0,

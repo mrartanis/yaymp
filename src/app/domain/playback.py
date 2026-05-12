@@ -25,6 +25,7 @@ class QueueItem:
     source_type: str | None = None
     source_id: str | None = None
     source_index: int | None = None
+    station_batch_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

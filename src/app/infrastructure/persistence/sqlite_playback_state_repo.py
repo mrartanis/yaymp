@@ -149,6 +149,7 @@ class SQLitePlaybackStateRepo(PlaybackStateRepo):
             "source_type": item.source_type,
             "source_id": item.source_id,
             "source_index": item.source_index,
+            "station_batch_id": item.station_batch_id,
         }
 
     def _decode_queue_item(self, payload: object) -> QueueItem:
@@ -183,4 +184,5 @@ class SQLitePlaybackStateRepo(PlaybackStateRepo):
             source_type=payload.get("source_type"),
             source_id=payload.get("source_id"),
             source_index=payload.get("source_index"),
+            station_batch_id=payload.get("station_batch_id"),
         )

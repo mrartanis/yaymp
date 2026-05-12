@@ -14,6 +14,7 @@ from app.domain import (
     MusicService,
     Playlist,
     Station,
+    StationTrackBatch,
     Track,
 )
 from app.domain.errors import AuthError, NetworkError, StreamResolveError, TrackUnavailableError
@@ -324,9 +325,18 @@ class YandexMusicService(MusicService):
         )
 
     def get_station_tracks(self, station_id: str, *, limit: int = 25) -> Sequence[Track]:
+        return self.get_station_track_batch(station_id, limit=limit).tracks
+
+    def get_station_track_batch(
+        self,
+        station_id: str,
+        *,
+        limit: int = 25,
+        queue_track_id: str | None = None,
+    ) -> StationTrackBatch:
         client = self._require_client()
         try:
-            result = client.rotor_station_tracks(station_id)
+            result = client.rotor_station_tracks(station_id, queue=queue_track_id)
         except Exception as exc:
             raise self._map_client_error(
                 exc,
@@ -340,7 +350,124 @@ class YandexMusicService(MusicService):
                 tracks.append(self._map_track(raw_track))
             if len(tracks) >= limit:
                 break
-        return tuple(tracks)
+        return StationTrackBatch(
+            station_id=station_id,
+            batch_id=getattr(result, "batch_id", None),
+            tracks=tuple(tracks),
+        )
+
+    def report_play_audio(
+        self,
+        *,
+        track: Track,
+        from_: str,
+        play_id: str,
+        track_length_seconds: int,
+        total_played_seconds: int,
+        end_position_seconds: int,
+    ) -> None:
+        if track.album_id is None:
+            raise NetworkError(f"Track {track.id} has no album id for play telemetry")
+        client = self._require_client()
+        try:
+            client.play_audio(
+                track_id=track.id,
+                from_=from_,
+                album_id=track.album_id,
+                play_id=play_id,
+                track_length_seconds=track_length_seconds,
+                total_played_seconds=total_played_seconds,
+                end_position_seconds=end_position_seconds,
+            )
+        except Exception as exc:
+            raise self._map_client_error(
+                exc,
+                f"Failed to report play_audio for {track.id}",
+            ) from exc
+
+    def report_station_radio_started(
+        self,
+        *,
+        station_id: str,
+        from_: str,
+        batch_id: str,
+    ) -> None:
+        client = self._require_client()
+        try:
+            client.rotor_station_feedback_radio_started(
+                station=station_id,
+                from_=from_,
+                batch_id=batch_id,
+            )
+        except Exception as exc:
+            raise self._map_client_error(
+                exc,
+                f"Failed to report radioStarted for {station_id}",
+            ) from exc
+
+    def report_station_track_started(
+        self,
+        *,
+        station_id: str,
+        track_id: str,
+        batch_id: str,
+    ) -> None:
+        client = self._require_client()
+        try:
+            client.rotor_station_feedback_track_started(
+                station=station_id,
+                track_id=track_id,
+                batch_id=batch_id,
+            )
+        except Exception as exc:
+            raise self._map_client_error(
+                exc,
+                f"Failed to report trackStarted for {track_id}",
+            ) from exc
+
+    def report_station_track_finished(
+        self,
+        *,
+        station_id: str,
+        track_id: str,
+        total_played_seconds: float,
+        batch_id: str,
+    ) -> None:
+        client = self._require_client()
+        try:
+            client.rotor_station_feedback_track_finished(
+                station=station_id,
+                track_id=track_id,
+                total_played_seconds=total_played_seconds,
+                batch_id=batch_id,
+            )
+        except Exception as exc:
+            raise self._map_client_error(
+                exc,
+                f"Failed to report trackFinished for {track_id}",
+            ) from exc
+
+    def report_station_track_skipped(
+        self,
+        *,
+        station_id: str,
+        track_id: str,
+        total_played_seconds: float,
+        batch_id: str,
+    ) -> None:
+        client = self._require_client()
+        try:
+            client.rotor_station_feedback_skip(
+                station=station_id,
+                track_id=track_id,
+                total_played_seconds=total_played_seconds,
+                batch_id=batch_id,
+            )
+        except Exception as exc:
+            raise self._map_client_error(
+                exc,
+                f"Failed to report skip for {track_id}",
+            ) from exc
 
     def get_playlist(self, playlist_id: str, *, owner_id: str | None = None) -> Playlist:
         client = self._require_client()

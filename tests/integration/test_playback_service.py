@@ -14,6 +14,7 @@ from app.domain import (
     QueueItem,
     RepeatMode,
     SavedPlaybackQueue,
+    StationTrackBatch,
     StreamResolveError,
     Track,
 )
@@ -45,6 +46,14 @@ class FakeMusicService:
         self.loaded_track_ids: list[str] = []
         self.station_batches: dict[str, list[tuple[Track, ...]]] = {}
         self.station_requests: list[str] = []
+        self.station_request_queues: list[str | None] = []
+        self.play_audio_reports: list[dict[str, object]] = []
+        self.station_radio_started_reports: list[dict[str, object]] = []
+        self.station_track_started_reports: list[dict[str, object]] = []
+        self.station_track_finished_reports: list[dict[str, object]] = []
+        self.station_track_skipped_reports: list[dict[str, object]] = []
+        self.raise_on_play_audio = False
+        self.raise_on_station_feedback = False
 
     def get_auth_session(self):
         from app.domain import AuthSession
@@ -138,12 +147,28 @@ class FakeMusicService:
         return ()
 
     def get_station_tracks(self, station_id: str, *, limit: int = 25):
+        return self.get_station_track_batch(station_id, limit=limit).tracks
+
+    def get_station_track_batch(
+        self,
+        station_id: str,
+        *,
+        limit: int = 25,
+        queue_track_id: str | None = None,
+    ):
         del limit
         self.station_requests.append(station_id)
+        self.station_request_queues.append(queue_track_id)
         batches = self.station_batches.get(station_id)
         if batches:
-            return batches.pop(0)
-        return ()
+            tracks = batches.pop(0)
+        else:
+            tracks = ()
+        return StationTrackBatch(
+            station_id=station_id,
+            batch_id=f"{station_id}-batch-{len(self.station_requests)}",
+            tracks=tracks,
+        )
 
     def get_playlist(self, playlist_id: str, *, owner_id: str | None = None):
         del owner_id
@@ -181,6 +206,93 @@ class FakeMusicService:
         if self.stream_ref is None:
             raise StreamResolveError("Stream resolution failed")
         return self.stream_ref
+
+    def report_play_audio(
+        self,
+        *,
+        track: Track,
+        from_: str,
+        play_id: str,
+        track_length_seconds: int,
+        total_played_seconds: int,
+        end_position_seconds: int,
+    ) -> None:
+        if self.raise_on_play_audio:
+            raise RuntimeError("play_audio failed")
+        self.play_audio_reports.append(
+            {
+                "track_id": track.id,
+                "from": from_,
+                "play_id": play_id,
+                "track_length_seconds": track_length_seconds,
+                "total_played_seconds": total_played_seconds,
+                "end_position_seconds": end_position_seconds,
+            }
+        )
+
+    def report_station_radio_started(
+        self,
+        *,
+        station_id: str,
+        from_: str,
+        batch_id: str,
+    ) -> None:
+        if self.raise_on_station_feedback:
+            raise RuntimeError("radio feedback failed")
+        self.station_radio_started_reports.append(
+            {"station_id": station_id, "from": from_, "batch_id": batch_id}
+        )
+
+    def report_station_track_started(
+        self,
+        *,
+        station_id: str,
+        track_id: str,
+        batch_id: str,
+    ) -> None:
+        if self.raise_on_station_feedback:
+            raise RuntimeError("trackStarted failed")
+        self.station_track_started_reports.append(
+            {"station_id": station_id, "track_id": track_id, "batch_id": batch_id}
+        )
+
+    def report_station_track_finished(
+        self,
+        *,
+        station_id: str,
+        track_id: str,
+        total_played_seconds: float,
+        batch_id: str,
+    ) -> None:
+        if self.raise_on_station_feedback:
+            raise RuntimeError("trackFinished failed")
+        self.station_track_finished_reports.append(
+            {
+                "station_id": station_id,
+                "track_id": track_id,
+                "total_played_seconds": total_played_seconds,
+                "batch_id": batch_id,
+            }
+        )
+
+    def report_station_track_skipped(
+        self,
+        *,
+        station_id: str,
+        track_id: str,
+        total_played_seconds: float,
+        batch_id: str,
+    ) -> None:
+        if self.raise_on_station_feedback:
+            raise RuntimeError("skip failed")
+        self.station_track_skipped_reports.append(
+            {
+                "station_id": station_id,
+                "track_id": track_id,
+                "total_played_seconds": total_played_seconds,
+                "batch_id": batch_id,
+            }
+        )
 
 
 class FailingPlaybackEngine(FakePlaybackEngine):
@@ -342,9 +454,30 @@ class InMemoryLibraryCacheRepo:
 
 def build_tracks() -> tuple[Track, ...]:
     return (
-        Track(id="one", title="One", artists=("Artist",), duration_ms=120_000, stream_ref="demo://one"),
-        Track(id="two", title="Two", artists=("Artist",), duration_ms=180_000, stream_ref="demo://two"),
-        Track(id="three", title="Three", artists=("Artist",), duration_ms=240_000, stream_ref="demo://three"),
+        Track(
+            id="one",
+            title="One",
+            artists=("Artist",),
+            album_id="album-1",
+            duration_ms=120_000,
+            stream_ref="demo://one",
+        ),
+        Track(
+            id="two",
+            title="Two",
+            artists=("Artist",),
+            album_id="album-1",
+            duration_ms=180_000,
+            stream_ref="demo://two",
+        ),
+        Track(
+            id="three",
+            title="Three",
+            artists=("Artist",),
+            album_id="album-1",
+            duration_ms=240_000,
+            stream_ref="demo://three",
+        ),
     )
 
 
@@ -618,6 +751,33 @@ def test_play_single_track_replaces_queue_and_starts_playback() -> None:
     assert snapshot.current_item.track.id == "one"
 
 
+def test_playback_service_reports_play_audio_start_and_progress() -> None:
+    music_service = FakeMusicService(stream_ref="resolved://one")
+    engine = FakePlaybackEngine()
+    service = PlaybackService(
+        playback_engine=engine,
+        logger=TestLogger(),
+        music_service=music_service,
+    )
+
+    service.play_track(
+        Track(
+            id="one",
+            title="One",
+            artists=("Artist",),
+            album_id="album-1",
+            duration_ms=120_000,
+        )
+    )
+    engine.seek(15_000)
+    service.refresh()
+
+    assert music_service.play_audio_reports[0]["track_id"] == "one"
+    assert music_service.play_audio_reports[0]["total_played_seconds"] == 0
+    assert music_service.play_audio_reports[1]["total_played_seconds"] == 15
+    assert music_service.play_audio_reports[1]["track_length_seconds"] == 120
+
+
 def test_next_and_previous_move_inside_queue() -> None:
     service = PlaybackService(
         playback_engine=FakePlaybackEngine(),
@@ -634,8 +794,14 @@ def test_next_and_previous_move_inside_queue() -> None:
 
 def test_refresh_auto_advances_when_active_track_finishes() -> None:
     engine = FakePlaybackEngine()
-    service = PlaybackService(playback_engine=engine, logger=TestLogger())
+    music_service = FakeMusicService(stream_ref="resolved://one")
+    service = PlaybackService(
+        playback_engine=engine,
+        logger=TestLogger(),
+        music_service=music_service,
+    )
     service.replace_queue(build_tracks(), start_index=0, source_type="test")
+    service.seek(120_000)
 
     engine.stop()
     snapshot = service.refresh()
@@ -644,6 +810,10 @@ def test_refresh_auto_advances_when_active_track_finishes() -> None:
     assert snapshot.state.active_index == 1
     assert snapshot.current_item is not None
     assert snapshot.current_item.track.id == "two"
+    assert music_service.play_audio_reports[-2]["track_id"] == "one"
+    assert music_service.play_audio_reports[-2]["total_played_seconds"] == 120
+    assert music_service.play_audio_reports[-1]["track_id"] == "two"
+    assert music_service.play_audio_reports[-1]["total_played_seconds"] == 0
 
 
 def test_refresh_does_not_auto_advance_after_manual_stop() -> None:
@@ -789,6 +959,8 @@ def test_play_station_loads_initial_station_queue_and_starts_playback() -> None:
         (
             Track(id="w1", title="Wave 1", artists=("Artist",), duration_ms=1_000),
             Track(id="w2", title="Wave 2", artists=("Artist",), duration_ms=1_000),
+            Track(id="w3", title="Wave 3", artists=("Artist",), duration_ms=1_000),
+            Track(id="w4", title="Wave 4", artists=("Artist",), duration_ms=1_000),
         )
     ]
     service = PlaybackService(
@@ -800,16 +972,28 @@ def test_play_station_loads_initial_station_queue_and_starts_playback() -> None:
     snapshot = service.play_station("user:onyourwave")
 
     assert snapshot.state.status is PlaybackStatus.PLAYING
-    assert [item.track.id for item in snapshot.queue] == ["w1", "w2"]
+    assert [item.track.id for item in snapshot.queue] == ["w1", "w2", "w3", "w4"]
     assert snapshot.current_item is not None
     assert snapshot.current_item.track.id == "w1"
     assert music_service.station_requests[0] == "user:onyourwave"
+    assert music_service.station_radio_started_reports[0] == {
+        "station_id": "user:onyourwave",
+        "from": "desktop_win-radio-user-onyourwave",
+        "batch_id": "user:onyourwave-batch-1",
+    }
+    assert music_service.station_track_started_reports[0] == {
+        "station_id": "user:onyourwave",
+        "track_id": "w1",
+        "batch_id": "user:onyourwave-batch-1",
+    }
 
 
 def test_play_station_preserves_cached_liked_state() -> None:
     music_service = FakeMusicService(stream_ref="resolved://wave")
     music_service.station_batches["user:onyourwave"] = [
-        (Track(id="w1", title="Wave 1", artists=("Artist",), duration_ms=1_000),)
+        (
+            Track(id="w1", title="Wave 1", artists=("Artist",), duration_ms=1_000),
+        )
     ]
     cache_repo = InMemoryLibraryCacheRepo()
     cache_repo.save_track_metadata(
@@ -858,6 +1042,113 @@ def test_station_queue_refills_when_near_end() -> None:
     assert snapshot.current_item.track.id == "w2"
     assert [item.track.id for item in snapshot.queue] == ["w1", "w2", "w3", "w4", "w5"]
     assert music_service.station_requests == ["user:onyourwave", "user:onyourwave"]
+    assert music_service.station_request_queues == [None, "w1"]
+
+
+def test_station_skip_reports_feedback_when_user_skips_track() -> None:
+    music_service = FakeMusicService(stream_ref="resolved://wave")
+    music_service.station_batches["user:onyourwave"] = [
+        (
+            Track(
+                id="w1",
+                title="Wave 1",
+                artists=("Artist",),
+                album_id="album-1",
+                duration_ms=100_000,
+            ),
+            Track(
+                id="w2",
+                title="Wave 2",
+                artists=("Artist",),
+                album_id="album-1",
+                duration_ms=100_000,
+            ),
+        )
+    ]
+    engine = FakePlaybackEngine()
+    service = PlaybackService(
+        playback_engine=engine,
+        logger=TestLogger(),
+        music_service=music_service,
+    )
+    service.play_station("user:onyourwave")
+    service.seek(10_000)
+
+    service.next()
+
+    assert music_service.station_track_skipped_reports == [
+        {
+            "station_id": "user:onyourwave",
+            "track_id": "w1",
+            "total_played_seconds": 10.0,
+            "batch_id": "user:onyourwave-batch-1",
+        }
+    ]
+    assert music_service.station_track_finished_reports == []
+
+
+def test_station_finish_reports_feedback_when_track_ends_naturally() -> None:
+    music_service = FakeMusicService(stream_ref="resolved://wave")
+    music_service.station_batches["user:onyourwave"] = [
+        (
+            Track(
+                id="w1",
+                title="Wave 1",
+                artists=("Artist",),
+                album_id="album-1",
+                duration_ms=100_000,
+            ),
+            Track(
+                id="w2",
+                title="Wave 2",
+                artists=("Artist",),
+                album_id="album-1",
+                duration_ms=100_000,
+            ),
+        )
+    ]
+    engine = FakePlaybackEngine()
+    service = PlaybackService(
+        playback_engine=engine,
+        logger=TestLogger(),
+        music_service=music_service,
+    )
+    service.play_station("user:onyourwave")
+    service.seek(100_000)
+    engine.stop()
+
+    service.refresh()
+
+    assert music_service.station_track_finished_reports == [
+        {
+            "station_id": "user:onyourwave",
+            "track_id": "w1",
+            "total_played_seconds": 100.0,
+            "batch_id": "user:onyourwave-batch-1",
+        }
+    ]
+
+
+def test_playback_service_ignores_telemetry_failures() -> None:
+    music_service = FakeMusicService(stream_ref="resolved://one")
+    music_service.raise_on_play_audio = True
+    service = PlaybackService(
+        playback_engine=FakePlaybackEngine(),
+        logger=TestLogger(),
+        music_service=music_service,
+    )
+
+    snapshot = service.play_track(
+        Track(
+            id="one",
+            title="One",
+            artists=("Artist",),
+            album_id="album-1",
+            duration_ms=120_000,
+        )
+    )
+
+    assert snapshot.state.status is PlaybackStatus.PLAYING
 
 
 def test_station_queue_next_retries_duplicate_refills_before_stopping() -> None:

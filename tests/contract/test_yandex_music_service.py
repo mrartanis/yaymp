@@ -11,6 +11,7 @@ from app.domain import (
     AuthSession,
     NetworkError,
     Station,
+    StationTrackBatch,
     Track,
     TrackUnavailableError,
 )
@@ -221,6 +222,9 @@ class FakeYandexClient:
         self.liked_playlist_ids: list[str] = []
         self.unliked_playlist_ids: list[str] = []
         self.playlist_requests: list[tuple[str, str | None]] = []
+        self.station_track_queue: str | None = None
+        self.play_audio_calls: list[dict[str, object]] = []
+        self.station_feedback_calls: list[dict[str, object]] = []
 
     def tracks(self, track_ids):
         if track_ids == ["missing"]:
@@ -351,10 +355,35 @@ class FakeYandexClient:
             )()
         ]
 
-    def rotor_station_tracks(self, station_id: str):
+    def rotor_station_tracks(self, station_id: str, queue: str | None = None):
         del station_id
+        self.station_track_queue = queue
         sequence_item = type("SequenceItem", (), {"track": self.track})()
-        return type("StationTracksResultStub", (), {"sequence": [sequence_item]})()
+        return type(
+            "StationTracksResultStub",
+            (),
+            {"sequence": [sequence_item], "batch_id": "batch-1"},
+        )()
+
+    def play_audio(self, **kwargs):
+        self.play_audio_calls.append(kwargs)
+        return True
+
+    def rotor_station_feedback_radio_started(self, **kwargs):
+        self.station_feedback_calls.append({"type": "radioStarted", **kwargs})
+        return True
+
+    def rotor_station_feedback_track_started(self, **kwargs):
+        self.station_feedback_calls.append({"type": "trackStarted", **kwargs})
+        return True
+
+    def rotor_station_feedback_track_finished(self, **kwargs):
+        self.station_feedback_calls.append({"type": "trackFinished", **kwargs})
+        return True
+
+    def rotor_station_feedback_skip(self, **kwargs):
+        self.station_feedback_calls.append({"type": "skip", **kwargs})
+        return True
 
     def tracks_download_info(self, track_id: str, get_direct_links: bool = True):
         del track_id, get_direct_links
@@ -392,6 +421,7 @@ def test_yandex_music_service_maps_track_and_playlist_data() -> None:
     generated_playlists = service.get_generated_playlists()
     stations = service.get_stations()
     station_tracks = service.get_station_tracks("user:onyourwave")
+    station_batch = service.get_station_track_batch("user:onyourwave", queue_track_id="track-0")
     album = service.get_album("album-1")
     album_tracks = service.get_album_tracks("album-1")
     artist_albums = service.get_artist_direct_albums("artist-1")
@@ -451,6 +481,12 @@ def test_yandex_music_service_maps_track_and_playlist_data() -> None:
         ),
     )
     assert [item.id for item in station_tracks] == ["track-1"]
+    assert station_batch == StationTrackBatch(
+        station_id="user:onyourwave",
+        batch_id="batch-1",
+        tracks=(track,),
+    )
+    assert client.station_track_queue == "track-0"
     assert album.id == "album-1"
     assert [item.id for item in album_tracks] == ["track-1"]
     assert [item.id for item in artist_albums] == ["album-1", "single-1"]
@@ -511,6 +547,69 @@ def test_yandex_music_service_resolves_playable_stream() -> None:
     )
 
     assert stream_ref == "https://stream.example/track-1"
+
+
+def test_yandex_music_service_reports_playback_telemetry() -> None:
+    client = FakeYandexClient()
+    service = YandexMusicService(
+        session=AuthSession(user_id="user-1", token="token"),
+        client=client,
+    )
+    track = Track(
+        id="track-1",
+        title="Remote",
+        artists=("Artist",),
+        album_id="album-1",
+    )
+
+    service.report_play_audio(
+        track=track,
+        from_="desktop_win-yaymp",
+        play_id="play-1",
+        track_length_seconds=180,
+        total_played_seconds=42,
+        end_position_seconds=42,
+    )
+    service.report_station_radio_started(
+        station_id="user:onyourwave",
+        from_="desktop_win-radio-user-onyourwave",
+        batch_id="batch-1",
+    )
+    service.report_station_track_started(
+        station_id="user:onyourwave",
+        track_id="track-1",
+        batch_id="batch-1",
+    )
+    service.report_station_track_finished(
+        station_id="user:onyourwave",
+        track_id="track-1",
+        total_played_seconds=180.0,
+        batch_id="batch-1",
+    )
+    service.report_station_track_skipped(
+        station_id="user:onyourwave",
+        track_id="track-1",
+        total_played_seconds=12.0,
+        batch_id="batch-1",
+    )
+
+    assert client.play_audio_calls == [
+        {
+            "track_id": "track-1",
+            "from_": "desktop_win-yaymp",
+            "album_id": "album-1",
+            "play_id": "play-1",
+            "track_length_seconds": 180,
+            "total_played_seconds": 42,
+            "end_position_seconds": 42,
+        }
+    ]
+    assert [call["type"] for call in client.station_feedback_calls] == [
+        "radioStarted",
+        "trackStarted",
+        "trackFinished",
+        "skip",
+    ]
 
 
 def test_yandex_music_service_selects_stream_by_audio_quality() -> None:

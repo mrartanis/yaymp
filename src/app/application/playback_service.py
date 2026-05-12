@@ -5,6 +5,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from time import monotonic
+from uuid import uuid4
 
 from app.application.track_metadata import merge_cached_liked_state, merge_cached_liked_states
 from app.domain import (
@@ -29,8 +30,25 @@ class PlaybackSnapshot:
     current_item: QueueItem | None
 
 
+@dataclass(slots=True)
+class _PlaybackTelemetrySession:
+    track_id: str
+    play_id: str
+    origin: str
+    started: bool = False
+    terminal_reported: bool = False
+    last_progress_report_seconds: int = 0
+    last_known_position_ms: int = 0
+
+
 class PlaybackService:
     _STREAM_REF_TTL = timedelta(hours=1)
+    _PLAY_AUDIO_PROGRESS_INTERVAL_SECONDS = 15
+    _STATION_FINISHED_RATIO = 0.9
+    _STATION_FINISHED_REMAINING_SECONDS = 5.0
+    _PLAY_ORIGIN_DESKTOP = "desktop_win-yaymp"
+    _PLAY_ORIGIN_MY_WAVE = "desktop_win-radio-user-onyourwave"
+    _PLAY_ORIGIN_STATION = "desktop_win-radio-station"
     _STATION_QUEUE_REFILL_THRESHOLD = 3
     _STATION_QUEUE_BATCH_SIZE = 10
     _STATION_QUEUE_REFILL_MAX_ATTEMPTS = 3
@@ -68,6 +86,7 @@ class PlaybackService:
         self._play_order_position: int | None = None
         self._last_observed_status = PlaybackStatus.STOPPED
         self._last_position_persisted_at = 0.0
+        self._telemetry_session: _PlaybackTelemetrySession | None = None
         self._playback_engine.on_ready_for_seek(self._apply_pending_restore_seek)
 
     def replace_queue(
@@ -78,45 +97,23 @@ class PlaybackService:
         source_type: str | None = None,
         source_id: str | None = None,
     ) -> PlaybackSnapshot:
-        if not tracks:
-            raise PlaybackBackendError("Playback queue cannot be empty")
-        if start_index < 0 or start_index >= len(tracks):
-            raise PlaybackBackendError("Playback start index is out of range")
-
-        previous_queue = self._queue
-        previous_index = self._active_index
-        previous_loaded = self._active_item_loaded
-        previous_order = self._play_order
-        previous_order_position = self._play_order_position
-
         tracks = merge_cached_liked_states(
             tuple(tracks),
             self._library_cache_repo,
             user_id=self._current_user_id(),
         )
-        self._queue = [
-            QueueItem(
-                track=track,
-                source_type=source_type,
-                source_id=source_id,
-                source_index=index,
-            )
-            for index, track in enumerate(tracks)
-        ]
-        self._rebuild_play_order(anchor_index=start_index)
-
-        try:
-            self._activate_index(start_index)
-            snapshot = self.play()
-            self._persist_playback_queue(position_ms=0)
-            return snapshot
-        except Exception:
-            self._queue = previous_queue
-            self._active_index = previous_index
-            self._active_item_loaded = previous_loaded
-            self._play_order = previous_order
-            self._play_order_position = previous_order_position
-            raise
+        return self._replace_queue_items(
+            tuple(
+                self._build_queue_item(
+                    track,
+                    source_type=source_type,
+                    source_id=source_id,
+                    source_index=index,
+                )
+                for index, track in enumerate(tracks)
+            ),
+            start_index=start_index,
+        )
 
     def append_queue(
         self,
@@ -137,8 +134,8 @@ class PlaybackService:
         )
         for offset, track in enumerate(tracks):
             self._queue.append(
-                QueueItem(
-                    track=track,
+                self._build_queue_item(
+                    track,
                     source_type=source_type,
                     source_id=source_id,
                     source_index=start_source_index + offset,
@@ -179,8 +176,8 @@ class PlaybackService:
         for offset, track in enumerate(normalized_tracks):
             self._queue.insert(
                 insert_at + offset,
-                QueueItem(
-                    track=track,
+                self._build_queue_item(
+                    track,
                     source_type=source_type,
                     source_id=source_id,
                     source_index=start_source_index + offset,
@@ -205,8 +202,8 @@ class PlaybackService:
             return self.snapshot()
 
         self._queue = [
-            QueueItem(
-                track=merge_cached_liked_state(
+            self._build_queue_item(
+                merge_cached_liked_state(
                     item.track,
                     self._library_cache_repo,
                     user_id=self._current_user_id(),
@@ -214,6 +211,7 @@ class PlaybackService:
                 source_type=item.source_type,
                 source_id=item.source_id,
                 source_index=item.source_index,
+                station_batch_id=item.station_batch_id,
             )
             for item in saved_queue.queue
         ]
@@ -245,6 +243,7 @@ class PlaybackService:
             self._pending_restore_seek_ms = self._restored_position_ms
             self._load_current_item()
         self._playback_engine.play()
+        self._report_playback_started()
         self._logger.info("Playback started for index %s", self._active_index)
         return self.snapshot()
 
@@ -261,12 +260,14 @@ class PlaybackService:
         return self.play()
 
     def stop(self) -> PlaybackSnapshot:
+        self._finalize_active_playback(natural_end=False)
         self._playback_engine.stop()
         self._logger.info("Playback stopped")
         self._persist_playback_queue(position_ms=0)
         return self.snapshot()
 
     def clear_queue(self) -> PlaybackSnapshot:
+        self._finalize_active_playback(natural_end=False)
         self._playback_engine.stop()
         self._queue = []
         self._active_index = None
@@ -276,6 +277,7 @@ class PlaybackService:
         self._play_order = []
         self._play_order_position = None
         self._last_observed_status = PlaybackStatus.STOPPED
+        self._telemetry_session = None
         self._clear_persisted_playback_queue()
         self._logger.info("Playback queue cleared")
         return self.snapshot()
@@ -307,43 +309,34 @@ class PlaybackService:
     def play_station(self, station_id: str) -> PlaybackSnapshot:
         if self._music_service is None:
             raise PlaybackBackendError("Music service is not configured")
+        batch = self._music_service.get_station_track_batch(
+            station_id,
+            limit=self._STATION_QUEUE_BATCH_SIZE,
+        )
+        self._report_station_batch_started(station_id, batch.batch_id)
         tracks = merge_cached_liked_states(
-            tuple(
-                self._music_service.get_station_tracks(
-                    station_id,
-                    limit=self._STATION_QUEUE_BATCH_SIZE,
-                )
-            ),
+            batch.tracks,
             self._library_cache_repo,
             user_id=self._current_user_id(),
         )
         if not tracks:
             raise PlaybackBackendError(f"Station {station_id} returned no tracks")
-        return self.replace_queue(
-            tracks,
+        return self._replace_queue_items(
+            tuple(
+                self._build_queue_item(
+                    track,
+                    source_type="station",
+                    source_id=station_id,
+                    source_index=index,
+                    station_batch_id=batch.batch_id,
+                )
+                for index, track in enumerate(tracks)
+            ),
             start_index=0,
-            source_type="station",
-            source_id=station_id,
         )
 
     def next(self) -> PlaybackSnapshot:
-        if self._active_index is None:
-            raise PlaybackBackendError("No active queue item")
-
-        if self._repeat_mode is RepeatMode.ONE:
-            self._activate_index(self._active_index)
-            return self.play()
-
-        self._ensure_station_queue_capacity(min_remaining=1)
-        next_index = self._resolve_next_index()
-        if next_index is None:
-            self.stop()
-            return self.snapshot()
-
-        self._activate_index(next_index)
-        snapshot = self.play()
-        self._persist_playback_queue(position_ms=0)
-        return snapshot
+        return self._advance_to_next_track(natural_end=False)
 
     def previous(self) -> PlaybackSnapshot:
         if self._active_index is None:
@@ -351,6 +344,7 @@ class PlaybackService:
 
         if self._repeat_mode is RepeatMode.ONE:
             self.seek(0)
+            self._finalize_active_playback(natural_end=False)
             self._activate_index(self._active_index)
             return self.play()
 
@@ -359,6 +353,7 @@ class PlaybackService:
             self.seek(0)
             return self.snapshot()
 
+        self._finalize_active_playback(natural_end=False)
         previous_index = self._resolve_previous_index()
         self._activate_index(previous_index)
         snapshot = self.play()
@@ -367,13 +362,18 @@ class PlaybackService:
 
     def seek(self, position_ms: int) -> PlaybackSnapshot:
         self._playback_engine.seek(position_ms)
+        if self._telemetry_session is not None:
+            self._telemetry_session.last_known_position_ms = max(0, position_ms)
         self._persist_playback_queue(position_ms=self._current_position_ms())
         return self.snapshot()
 
     def refresh(self) -> PlaybackSnapshot:
         engine_state = self._playback_engine.get_state()
+        self._update_telemetry_position(engine_state)
         if self._should_auto_advance(engine_state):
-            return self.next()
+            self._finalize_active_playback(natural_end=True, engine_state=engine_state)
+            return self._advance_to_next_track(natural_end=True, finalize_current=False)
+        self._report_playback_progress(engine_state)
         self._prefetch_queue_ahead()
         self._persist_playback_position_if_due(engine_state)
         return self._build_snapshot(engine_state)
@@ -396,6 +396,7 @@ class PlaybackService:
     def select_index(self, index: int) -> PlaybackSnapshot:
         if index < 0 or index >= len(self._queue):
             raise PlaybackBackendError("Queue index is out of range")
+        self._finalize_active_playback(natural_end=False)
         self._activate_index(index)
         snapshot = self.play()
         self._persist_playback_queue(position_ms=0)
@@ -452,6 +453,8 @@ class PlaybackService:
             raise PlaybackBackendError("Queue index is out of range")
 
         removing_active = self._active_index == index
+        if removing_active:
+            self._finalize_active_playback(natural_end=False)
         del self._queue[index]
 
         if not self._queue:
@@ -463,6 +466,7 @@ class PlaybackService:
             self._play_order = []
             self._play_order_position = None
             self._last_observed_status = PlaybackStatus.STOPPED
+            self._telemetry_session = None
             self._clear_persisted_playback_queue()
             return self.snapshot()
 
@@ -526,6 +530,12 @@ class PlaybackService:
         if not preserve_restored_position:
             self._restored_position_ms = 0
         self._sync_play_order_position(index)
+        self._telemetry_session = _PlaybackTelemetrySession(
+            track_id=prepared_item.track.id,
+            play_id=str(uuid4()),
+            origin=self._play_origin_for_item(prepared_item),
+            last_known_position_ms=self._restored_position_ms if preserve_restored_position else 0,
+        )
 
     def _prepare_queue_item(self, item: QueueItem) -> QueueItem:
         stream_ref = item.track.stream_ref
@@ -560,6 +570,7 @@ class PlaybackService:
             source_type=item.source_type,
             source_id=item.source_id,
             source_index=item.source_index,
+            station_batch_id=item.station_batch_id,
         )
 
     def _has_fresh_stream_ref(self, track: Track) -> bool:
@@ -665,13 +676,14 @@ class PlaybackService:
             if remaining >= min_remaining:
                 break
 
+            station_batch = self._music_service.get_station_track_batch(
+                station_id,
+                limit=self._STATION_QUEUE_BATCH_SIZE,
+                queue_track_id=current_item.track.id,
+            )
+            self._report_station_batch_started(station_id, station_batch.batch_id)
             fetched_tracks = merge_cached_liked_states(
-                tuple(
-                    self._music_service.get_station_tracks(
-                        station_id,
-                        limit=self._STATION_QUEUE_BATCH_SIZE,
-                    )
-                ),
+                station_batch.tracks,
                 self._library_cache_repo,
                 user_id=self._current_user_id(),
             )
@@ -683,11 +695,12 @@ class PlaybackService:
                 if track.id in existing_ids:
                     continue
                 self._queue.append(
-                    QueueItem(
-                        track=track,
+                    self._build_queue_item(
+                        track,
                         source_type="station",
                         source_id=station_id,
                         source_index=next_source_index,
+                        station_batch_id=station_batch.batch_id,
                     )
                 )
                 existing_ids.add(track.id)
@@ -814,6 +827,8 @@ class PlaybackService:
         return tuple(self._queue[start_index:end_index]), self._active_index - start_index
 
     def _current_position_ms(self) -> int:
+        if self._telemetry_session is not None:
+            return self._telemetry_session.last_known_position_ms
         if self.current_item() is not None and not self._active_item_loaded:
             return self._restored_position_ms
         return self._playback_engine.get_state().position_ms
@@ -823,3 +838,394 @@ class PlaybackService:
             return None
         session = self._music_service.get_auth_session()
         return session.user_id if session is not None else None
+
+    def _replace_queue_items(
+        self,
+        queue_items: tuple[QueueItem, ...],
+        *,
+        start_index: int,
+    ) -> PlaybackSnapshot:
+        if not queue_items:
+            raise PlaybackBackendError("Playback queue cannot be empty")
+        if start_index < 0 or start_index >= len(queue_items):
+            raise PlaybackBackendError("Playback start index is out of range")
+
+        previous_queue = self._queue
+        previous_index = self._active_index
+        previous_loaded = self._active_item_loaded
+        previous_order = self._play_order
+        previous_order_position = self._play_order_position
+        previous_telemetry_session = self._telemetry_session
+
+        self._finalize_active_playback(natural_end=False)
+        self._queue = list(queue_items)
+        self._rebuild_play_order(anchor_index=start_index)
+
+        try:
+            self._activate_index(start_index)
+            snapshot = self.play()
+            self._persist_playback_queue(position_ms=0)
+            return snapshot
+        except Exception:
+            self._queue = previous_queue
+            self._active_index = previous_index
+            self._active_item_loaded = previous_loaded
+            self._play_order = previous_order
+            self._play_order_position = previous_order_position
+            self._telemetry_session = previous_telemetry_session
+            raise
+
+    def _build_queue_item(
+        self,
+        track: Track,
+        *,
+        source_type: str | None = None,
+        source_id: str | None = None,
+        source_index: int | None = None,
+        station_batch_id: str | None = None,
+    ) -> QueueItem:
+        return QueueItem(
+            track=track,
+            source_type=source_type,
+            source_id=source_id,
+            source_index=source_index,
+            station_batch_id=station_batch_id,
+        )
+
+    def _advance_to_next_track(
+        self,
+        *,
+        natural_end: bool,
+        finalize_current: bool = True,
+    ) -> PlaybackSnapshot:
+        if self._active_index is None:
+            raise PlaybackBackendError("No active queue item")
+
+        if finalize_current:
+            self._finalize_active_playback(natural_end=natural_end)
+
+        if self._repeat_mode is RepeatMode.ONE:
+            self._activate_index(self._active_index)
+            return self.play()
+
+        self._ensure_station_queue_capacity(min_remaining=1)
+        next_index = self._resolve_next_index()
+        if next_index is None:
+            self._playback_engine.stop()
+            self._telemetry_session = None
+            self._last_observed_status = PlaybackStatus.STOPPED
+            return self.snapshot()
+
+        self._activate_index(next_index)
+        snapshot = self.play()
+        self._persist_playback_queue(position_ms=0)
+        return snapshot
+
+    def _play_origin_for_item(self, item: QueueItem) -> str:
+        if item.source_type == "station":
+            if item.source_id == "user:onyourwave":
+                return self._PLAY_ORIGIN_MY_WAVE
+            return self._PLAY_ORIGIN_STATION
+        return self._PLAY_ORIGIN_DESKTOP
+
+    def _report_playback_started(self) -> None:
+        session = self._telemetry_session
+        current_item = self.current_item()
+        if session is None or current_item is None or session.started:
+            return
+        session.started = True
+        session.last_progress_report_seconds = 0
+        self._report_play_audio(
+            current_item.track,
+            origin=session.origin,
+            play_id=session.play_id,
+            track_length_seconds=0,
+            total_played_seconds=0,
+            end_position_seconds=0,
+        )
+        if current_item.source_type == "station":
+            self._report_station_track_started(current_item)
+
+    def _report_playback_progress(self, engine_state: PlaybackState) -> None:
+        session = self._telemetry_session
+        current_item = self.current_item()
+        if (
+            session is None
+            or current_item is None
+            or not session.started
+            or session.terminal_reported
+            or engine_state.status is not PlaybackStatus.PLAYING
+        ):
+            return
+        played_seconds = max(0, int(engine_state.position_ms // 1000))
+        if (
+            played_seconds - session.last_progress_report_seconds
+            < self._PLAY_AUDIO_PROGRESS_INTERVAL_SECONDS
+        ):
+            return
+        session.last_progress_report_seconds = played_seconds
+        self._report_play_audio(
+            current_item.track,
+            origin=session.origin,
+            play_id=session.play_id,
+            track_length_seconds=self._track_length_seconds(current_item.track),
+            total_played_seconds=played_seconds,
+            end_position_seconds=played_seconds,
+        )
+
+    def _finalize_active_playback(
+        self,
+        *,
+        natural_end: bool,
+        engine_state: PlaybackState | None = None,
+    ) -> None:
+        session = self._telemetry_session
+        current_item = self.current_item()
+        if (
+            session is None
+            or current_item is None
+            or session.terminal_reported
+            or not session.started
+        ):
+            return
+        if engine_state is not None:
+            self._update_telemetry_position(engine_state)
+        played_ms = session.last_known_position_ms
+        played_seconds = max(0.0, played_ms / 1000.0)
+        played_seconds_int = max(0, int(played_ms // 1000))
+        track_length_seconds = self._track_length_seconds(current_item.track)
+        terminal_position_seconds = min(
+            played_seconds_int,
+            track_length_seconds or played_seconds_int,
+        )
+        self._report_play_audio(
+            current_item.track,
+            origin=session.origin,
+            play_id=session.play_id,
+            track_length_seconds=track_length_seconds,
+            total_played_seconds=played_seconds_int,
+            end_position_seconds=terminal_position_seconds,
+        )
+        if current_item.source_type == "station":
+            if self._should_treat_station_track_as_finished(
+                current_item.track,
+                played_seconds=played_seconds,
+                natural_end=natural_end,
+            ):
+                self._report_station_track_finished(current_item, played_seconds)
+            else:
+                self._report_station_track_skipped(current_item, played_seconds)
+        session.terminal_reported = True
+
+    def _should_treat_station_track_as_finished(
+        self,
+        track: Track,
+        *,
+        played_seconds: float,
+        natural_end: bool,
+    ) -> bool:
+        if natural_end:
+            return True
+        if track.duration_ms is None or track.duration_ms <= 0:
+            return False
+        duration_seconds = track.duration_ms / 1000.0
+        if played_seconds >= duration_seconds * self._STATION_FINISHED_RATIO:
+            return True
+        return duration_seconds - played_seconds <= self._STATION_FINISHED_REMAINING_SECONDS
+
+    def _update_telemetry_position(self, engine_state: PlaybackState) -> None:
+        if self._telemetry_session is None:
+            return
+        position_ms = engine_state.position_ms
+        if position_ms <= 0 and engine_state.status is PlaybackStatus.STOPPED:
+            return
+        self._telemetry_session.last_known_position_ms = max(0, position_ms)
+
+    def _track_length_seconds(self, track: Track) -> int:
+        if track.duration_ms is None:
+            return 0
+        return max(0, int(track.duration_ms // 1000))
+
+    def _debug_logging_enabled(self) -> bool:
+        is_enabled_for = getattr(self._logger, "isEnabledFor", None)
+        if callable(is_enabled_for):
+            try:
+                import logging
+
+                return bool(is_enabled_for(logging.DEBUG))
+            except Exception:
+                return False
+        return False
+
+    def _log_telemetry_failure(
+        self,
+        message: str,
+        *args: object,
+        exc: Exception,
+    ) -> None:
+        if self._debug_logging_enabled():
+            self._logger.exception(f"{message}: %r", *args, exc)
+            return
+        self._logger.warning(f"{message}: %s", *args, exc)
+
+    def _report_play_audio(
+        self,
+        track: Track,
+        *,
+        origin: str,
+        play_id: str,
+        track_length_seconds: int,
+        total_played_seconds: int,
+        end_position_seconds: int,
+    ) -> None:
+        if self._music_service is None:
+            return
+        if track.album_id is None:
+            self._logger.warning("Skipping play_audio telemetry for %s: missing album_id", track.id)
+            return
+        self._logger.debug(
+            (
+                "Sending play_audio telemetry: track=%s album=%s origin=%s play_id=%s "
+                "length=%s played=%s end=%s"
+            ),
+            track.id,
+            track.album_id,
+            origin,
+            play_id,
+            track_length_seconds,
+            total_played_seconds,
+            end_position_seconds,
+        )
+        try:
+            self._music_service.report_play_audio(
+                track=track,
+                from_=origin,
+                play_id=play_id,
+                track_length_seconds=track_length_seconds,
+                total_played_seconds=total_played_seconds,
+                end_position_seconds=end_position_seconds,
+            )
+        except Exception as exc:
+            self._log_telemetry_failure(
+                "Playback telemetry play_audio failed for %s",
+                track.id,
+                exc=exc,
+            )
+
+    def _report_station_batch_started(self, station_id: str, batch_id: str | None) -> None:
+        if self._music_service is None or not batch_id:
+            return
+        origin = (
+            self._PLAY_ORIGIN_MY_WAVE
+            if station_id == "user:onyourwave"
+            else self._PLAY_ORIGIN_STATION
+        )
+        self._logger.debug(
+            "Sending rotor radioStarted feedback: station=%s batch=%s origin=%s",
+            station_id,
+            batch_id,
+            origin,
+        )
+        try:
+            self._music_service.report_station_radio_started(
+                station_id=station_id,
+                from_=origin,
+                batch_id=batch_id,
+            )
+        except Exception as exc:
+            self._log_telemetry_failure(
+                "Playback telemetry radioStarted failed for %s batch %s",
+                station_id,
+                batch_id,
+                exc=exc,
+            )
+
+    def _report_station_track_started(self, current_item: QueueItem) -> None:
+        if (
+            self._music_service is None
+            or not current_item.station_batch_id
+            or not current_item.source_id
+        ):
+            return
+        self._logger.debug(
+            "Sending rotor trackStarted feedback: station=%s track=%s batch=%s",
+            current_item.source_id,
+            current_item.track.id,
+            current_item.station_batch_id,
+        )
+        try:
+            self._music_service.report_station_track_started(
+                station_id=current_item.source_id,
+                track_id=current_item.track.id,
+                batch_id=current_item.station_batch_id,
+            )
+        except Exception as exc:
+            self._log_telemetry_failure(
+                "Playback telemetry trackStarted failed for %s",
+                current_item.track.id,
+                exc=exc,
+            )
+
+    def _report_station_track_finished(
+        self,
+        current_item: QueueItem,
+        played_seconds: float,
+    ) -> None:
+        if (
+            self._music_service is None
+            or not current_item.station_batch_id
+            or not current_item.source_id
+        ):
+            return
+        self._logger.debug(
+            "Sending rotor trackFinished feedback: station=%s track=%s batch=%s played=%.3f",
+            current_item.source_id,
+            current_item.track.id,
+            current_item.station_batch_id,
+            played_seconds,
+        )
+        try:
+            self._music_service.report_station_track_finished(
+                station_id=current_item.source_id,
+                track_id=current_item.track.id,
+                total_played_seconds=played_seconds,
+                batch_id=current_item.station_batch_id,
+            )
+        except Exception as exc:
+            self._log_telemetry_failure(
+                "Playback telemetry trackFinished failed for %s",
+                current_item.track.id,
+                exc=exc,
+            )
+
+    def _report_station_track_skipped(
+        self,
+        current_item: QueueItem,
+        played_seconds: float,
+    ) -> None:
+        if (
+            self._music_service is None
+            or not current_item.station_batch_id
+            or not current_item.source_id
+        ):
+            return
+        self._logger.debug(
+            "Sending rotor skip feedback: station=%s track=%s batch=%s played=%.3f",
+            current_item.source_id,
+            current_item.track.id,
+            current_item.station_batch_id,
+            played_seconds,
+        )
+        try:
+            self._music_service.report_station_track_skipped(
+                station_id=current_item.source_id,
+                track_id=current_item.track.id,
+                total_played_seconds=played_seconds,
+                batch_id=current_item.station_batch_id,
+            )
+        except Exception as exc:
+            self._log_telemetry_failure(
+                "Playback telemetry skip failed for %s",
+                current_item.track.id,
+                exc=exc,
+            )

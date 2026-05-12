@@ -11,6 +11,7 @@ from app.domain import (
     LikedTrackSnapshot,
     Playlist,
     Station,
+    StationTrackBatch,
     Track,
 )
 
@@ -262,6 +263,20 @@ class FakeMusicService:
     def get_station_tracks(self, station_id: str, *, limit: int = 25):
         return (Track(id=f"{station_id}-{limit}", title="Wave", artists=("Artist",)),)
 
+    def get_station_track_batch(
+        self,
+        station_id: str,
+        *,
+        limit: int = 25,
+        queue_track_id: str | None = None,
+    ):
+        del queue_track_id
+        return StationTrackBatch(
+            station_id=station_id,
+            batch_id="batch-1",
+            tracks=tuple(self.get_station_tracks(station_id, limit=limit)),
+        )
+
     def get_playlist(self, playlist_id: str, *, owner_id: str | None = None):
         del owner_id
         return Playlist(id=playlist_id, title=f"Playlist {playlist_id}")
@@ -314,6 +329,63 @@ class FakeMusicService:
 
     def resolve_stream_ref(self, track: Track) -> str:
         return track.stream_ref or f"stream:{track.id}"
+
+    def report_play_audio(
+        self,
+        *,
+        track: Track,
+        from_: str,
+        play_id: str,
+        track_length_seconds: int,
+        total_played_seconds: int,
+        end_position_seconds: int,
+    ) -> None:
+        del (
+            track,
+            from_,
+            play_id,
+            track_length_seconds,
+            total_played_seconds,
+            end_position_seconds,
+        )
+
+    def report_station_radio_started(
+        self,
+        *,
+        station_id: str,
+        from_: str,
+        batch_id: str,
+    ) -> None:
+        del station_id, from_, batch_id
+
+    def report_station_track_started(
+        self,
+        *,
+        station_id: str,
+        track_id: str,
+        batch_id: str,
+    ) -> None:
+        del station_id, track_id, batch_id
+
+    def report_station_track_finished(
+        self,
+        *,
+        station_id: str,
+        track_id: str,
+        total_played_seconds: float,
+        batch_id: str,
+    ) -> None:
+        del station_id, track_id, total_played_seconds, batch_id
+
+    def report_station_track_skipped(
+        self,
+        *,
+        station_id: str,
+        track_id: str,
+        total_played_seconds: float,
+        batch_id: str,
+    ) -> None:
+        del station_id, track_id, total_played_seconds, batch_id
 
 
 def test_search_service_updates_recent_searches() -> None:
