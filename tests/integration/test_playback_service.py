@@ -866,6 +866,36 @@ def test_playback_service_reports_play_audio_start_and_progress() -> None:
     assert music_service.play_audio_reports[1]["track_length_seconds"] == 120
 
 
+def test_playback_service_seek_does_not_count_as_listened_time() -> None:
+    music_service = FakeMusicService(stream_ref="resolved://one")
+    engine = FakePlaybackEngine()
+    service = PlaybackService(
+        playback_engine=engine,
+        logger=TestLogger(),
+        music_service=music_service,
+    )
+
+    service.play_track(
+        Track(
+            id="one",
+            title="One",
+            artists=("Artist",),
+            album_id="album-1",
+            duration_ms=240_000,
+        )
+    )
+    engine.seek(15_000)
+    service.refresh()
+
+    service.seek(205_000)
+    engine.seek(220_000)
+    service.refresh()
+
+    assert music_service.play_audio_reports[1]["total_played_seconds"] == 15
+    assert music_service.play_audio_reports[2]["total_played_seconds"] == 30
+    assert music_service.play_audio_reports[2]["end_position_seconds"] == 220
+
+
 def test_next_and_previous_move_inside_queue() -> None:
     service = PlaybackService(
         playback_engine=FakePlaybackEngine(),
@@ -889,7 +919,8 @@ def test_refresh_auto_advances_when_active_track_finishes() -> None:
         music_service=music_service,
     )
     service.replace_queue(build_tracks(), start_index=0, source_type="test")
-    service.seek(120_000)
+    engine.seek(120_000)
+    service.refresh()
 
     engine.stop()
     snapshot = service.refresh()
@@ -900,6 +931,7 @@ def test_refresh_auto_advances_when_active_track_finishes() -> None:
     assert snapshot.current_item.track.id == "two"
     assert music_service.play_audio_reports[-2]["track_id"] == "one"
     assert music_service.play_audio_reports[-2]["total_played_seconds"] == 120
+    assert music_service.play_audio_reports[-2]["end_position_seconds"] == 120
     assert music_service.play_audio_reports[-1]["track_id"] == "two"
     assert music_service.play_audio_reports[-1]["total_played_seconds"] == 0
 
@@ -1160,7 +1192,7 @@ def test_station_skip_reports_feedback_when_user_skips_track() -> None:
         music_service=music_service,
     )
     service.play_station("user:onyourwave")
-    service.seek(10_000)
+    engine.seek(10_000)
 
     service.next()
 
@@ -1202,7 +1234,8 @@ def test_station_finish_reports_feedback_when_track_ends_naturally() -> None:
         music_service=music_service,
     )
     service.play_station("user:onyourwave")
-    service.seek(100_000)
+    engine.seek(100_000)
+    service.refresh()
     engine.stop()
 
     service.refresh()

@@ -40,7 +40,9 @@ class _PlaybackTelemetrySession:
     started: bool = False
     terminal_reported: bool = False
     last_progress_report_seconds: int = 0
+    accumulated_played_ms: int = 0
     last_known_position_ms: int = 0
+    last_accounted_position_ms: int = 0
 
 
 class PlaybackService:
@@ -371,7 +373,9 @@ class PlaybackService:
     def seek(self, position_ms: int) -> PlaybackSnapshot:
         self._playback_engine.seek(position_ms)
         if self._telemetry_session is not None:
-            self._telemetry_session.last_known_position_ms = max(0, position_ms)
+            bounded_position_ms = max(0, position_ms)
+            self._telemetry_session.last_known_position_ms = bounded_position_ms
+            self._telemetry_session.last_accounted_position_ms = bounded_position_ms
         self._persist_playback_queue(position_ms=self._current_position_ms())
         return self.snapshot()
 
@@ -542,7 +546,13 @@ class PlaybackService:
             track_id=prepared_item.track.id,
             play_id=str(uuid4()),
             origin=self._play_origin_for_item(prepared_item),
-            last_known_position_ms=self._restored_position_ms if preserve_restored_position else 0,
+            accumulated_played_ms=0,
+            last_known_position_ms=(
+                self._restored_position_ms if preserve_restored_position else 0
+            ),
+            last_accounted_position_ms=(
+                self._restored_position_ms if preserve_restored_position else 0
+            ),
         )
 
     def _prepare_queue_item(self, item: QueueItem) -> QueueItem:
@@ -978,7 +988,7 @@ class PlaybackService:
             or engine_state.status is not PlaybackStatus.PLAYING
         ):
             return
-        played_seconds = max(0, int(engine_state.position_ms // 1000))
+        played_seconds = max(0, int(session.accumulated_played_ms // 1000))
         if (
             played_seconds - session.last_progress_report_seconds
             < self._PLAY_AUDIO_PROGRESS_INTERVAL_SECONDS
@@ -991,7 +1001,7 @@ class PlaybackService:
             play_id=session.play_id,
             track_length_seconds=self._track_length_seconds(current_item.track),
             total_played_seconds=played_seconds,
-            end_position_seconds=played_seconds,
+            end_position_seconds=max(0, int(engine_state.position_ms // 1000)),
         )
 
     def _finalize_active_playback(
@@ -1009,16 +1019,19 @@ class PlaybackService:
             or not session.started
         ):
             return
-        if engine_state is not None:
-            self._update_telemetry_position(engine_state)
-        played_ms = session.last_known_position_ms
+        current_engine_state = engine_state or self._playback_engine.get_state()
+        self._update_telemetry_position(current_engine_state)
+        played_ms = session.accumulated_played_ms
         played_seconds = max(0.0, played_ms / 1000.0)
         played_seconds_int = max(0, int(played_ms // 1000))
         track_length_seconds = self._track_length_seconds(current_item.track)
-        terminal_position_seconds = min(
-            played_seconds_int,
-            track_length_seconds or played_seconds_int,
-        )
+        if natural_end and track_length_seconds > 0:
+            terminal_position_seconds = track_length_seconds
+        else:
+            terminal_position_seconds = min(
+                played_seconds_int,
+                track_length_seconds or played_seconds_int,
+            )
         self._report_play_audio(
             current_item.track,
             origin=session.origin,
@@ -1057,6 +1070,11 @@ class PlaybackService:
     def _update_telemetry_position(self, engine_state: PlaybackState) -> None:
         if self._telemetry_session is None:
             return
+        if engine_state.status is PlaybackStatus.PLAYING:
+            delta_ms = engine_state.position_ms - self._telemetry_session.last_accounted_position_ms
+            if delta_ms > 0:
+                self._telemetry_session.accumulated_played_ms += delta_ms
+            self._telemetry_session.last_accounted_position_ms = max(0, engine_state.position_ms)
         position_ms = engine_state.position_ms
         if position_ms <= 0 and engine_state.status is PlaybackStatus.STOPPED:
             return
