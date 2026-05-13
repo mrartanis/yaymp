@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import random
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from time import monotonic
@@ -107,7 +108,23 @@ class PlaybackService:
         self._last_observed_status = PlaybackStatus.STOPPED
         self._last_position_persisted_at = 0.0
         self._telemetry_session: _PlaybackTelemetrySession | None = None
+        self._telemetry_executor = ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="yaymp-telemetry",
+        )
+        self._telemetry_shutdown = False
         self._playback_engine.on_ready_for_seek(self._apply_pending_restore_seek)
+
+    def shutdown(self) -> None:
+        self._telemetry_shutdown = True
+        self._telemetry_executor.shutdown(wait=False, cancel_futures=True)
+
+    def wait_for_pending_telemetry(self, *, timeout: float = 5.0) -> None:
+        if self._telemetry_shutdown:
+            return
+        future = self._submit_telemetry(lambda: None)
+        if future is not None:
+            future.result(timeout=timeout)
 
     def replace_queue(
         self,
@@ -1123,6 +1140,14 @@ class PlaybackService:
             return
         self._logger.warning(f"{message}: %s", *args, exc)
 
+    def _submit_telemetry(self, callback: Callable[[], None]) -> Future | None:
+        if self._telemetry_shutdown:
+            return None
+        try:
+            return self._telemetry_executor.submit(callback)
+        except RuntimeError:
+            return None
+
     def _report_play_audio(
         self,
         track: Track,
@@ -1135,7 +1160,8 @@ class PlaybackService:
         playlist_id: str | None = None,
         timestamp_iso: str | None = None,
     ) -> None:
-        if self._music_service is None:
+        music_service = self._music_service
+        if music_service is None:
             return
         if track.album_id is None:
             self._logger.warning("Skipping play_audio telemetry for %s: missing album_id", track.id)
@@ -1153,24 +1179,28 @@ class PlaybackService:
             total_played_seconds,
             end_position_seconds,
         )
-        try:
-            self._music_service.report_play_audio(
-                track=track,
-                from_=origin,
-                play_id=play_id,
-                track_length_seconds=track_length_seconds,
-                total_played_seconds=total_played_seconds,
-                end_position_seconds=end_position_seconds,
-                playlist_id=playlist_id,
-                timestamp=timestamp_iso,
-                client_now=timestamp_iso,
-            )
-        except Exception as exc:
-            self._log_telemetry_failure(
-                "Playback telemetry play_audio failed for %s",
-                track.id,
-                exc=exc,
-            )
+
+        def send_safely() -> None:
+            try:
+                music_service.report_play_audio(
+                    track=track,
+                    from_=origin,
+                    play_id=play_id,
+                    track_length_seconds=track_length_seconds,
+                    total_played_seconds=total_played_seconds,
+                    end_position_seconds=end_position_seconds,
+                    playlist_id=playlist_id,
+                    timestamp=timestamp_iso,
+                    client_now=timestamp_iso,
+                )
+            except Exception as exc:
+                self._log_telemetry_failure(
+                    "Playback telemetry play_audio failed for %s",
+                    track.id,
+                    exc=exc,
+                )
+
+        self._submit_telemetry(send_safely)
 
     def _report_plays_event(
         self,
@@ -1181,7 +1211,8 @@ class PlaybackService:
         end_position_seconds: float,
         change_reason: str | None = None,
     ) -> None:
-        if self._music_service is None or self._telemetry_session is None:
+        music_service = self._music_service
+        if music_service is None or self._telemetry_session is None:
             return
         scrobble = self._scrobble_context_for_item(current_item)
         if scrobble is None:
@@ -1224,14 +1255,18 @@ class PlaybackService:
             report.end_position_seconds,
             report.change_reason or "start",
         )
-        try:
-            self._music_service.report_plays((report,), client_now=timestamp_iso)
-        except Exception as exc:
-            self._log_telemetry_failure(
-                "Playback telemetry /plays failed for %s",
-                current_item.track.id,
-                exc=exc,
-            )
+
+        def send_safely() -> None:
+            try:
+                music_service.report_plays((report,), client_now=timestamp_iso)
+            except Exception as exc:
+                self._log_telemetry_failure(
+                    "Playback telemetry /plays failed for %s",
+                    current_item.track.id,
+                    exc=exc,
+                )
+
+        self._submit_telemetry(send_safely)
 
     def _play_audio_playlist_id(self, item: QueueItem) -> str | None:
         scrobble = self._scrobble_context_for_item(item)
@@ -1352,6 +1387,7 @@ class PlaybackService:
     def _report_radio_session_started(self, session: RadioSession) -> None:
         if self._music_service is None:
             return
+        music_service = self._music_service
         self._logger.debug(
             "Sending rotor radioStarted feedback: station=%s session=%s batch=%s origin=%s",
             session.station_id,
@@ -1359,44 +1395,55 @@ class PlaybackService:
             session.batch_id,
             session.feedback_from,
         )
-        try:
-            self._music_service.report_radio_session_feedback(
-                session,
-                RadioFeedbackType.RADIO_STARTED,
-            )
-        except Exception as exc:
-            self._log_telemetry_failure(
-                "Playback telemetry radioStarted failed for %s session %s",
-                session.station_id,
-                session.session_id,
-                exc=exc,
-            )
+
+        def send_safely() -> None:
+            try:
+                music_service.report_radio_session_feedback(
+                    session,
+                    RadioFeedbackType.RADIO_STARTED,
+                )
+            except Exception as exc:
+                self._log_telemetry_failure(
+                    "Playback telemetry radioStarted failed for %s session %s",
+                    session.station_id,
+                    session.session_id,
+                    exc=exc,
+                )
+
+        self._submit_telemetry(send_safely)
 
     def _report_radio_track_started(self, current_item: QueueItem) -> None:
         if self._music_service is None:
             return
+        music_service = self._music_service
         session = self._radio_session_from_item(current_item)
         if session is None:
             return
+        track = current_item.track
+        feedback_track_id = self._radio_feedback_track_id(track)
         self._logger.debug(
             "Sending rotor trackStarted feedback: station=%s session=%s track=%s batch=%s",
             session.station_id,
             session.session_id,
-            current_item.track.id,
+            track.id,
             session.batch_id,
         )
-        try:
-            self._music_service.report_radio_session_feedback(
-                session,
-                RadioFeedbackType.TRACK_STARTED,
-                track_id=self._radio_feedback_track_id(current_item.track),
-            )
-        except Exception as exc:
-            self._log_telemetry_failure(
-                "Playback telemetry trackStarted failed for %s",
-                current_item.track.id,
-                exc=exc,
-            )
+
+        def send_safely() -> None:
+            try:
+                music_service.report_radio_session_feedback(
+                    session,
+                    RadioFeedbackType.TRACK_STARTED,
+                    track_id=feedback_track_id,
+                )
+            except Exception as exc:
+                self._log_telemetry_failure(
+                    "Playback telemetry trackStarted failed for %s",
+                    track.id,
+                    exc=exc,
+                )
+
+        self._submit_telemetry(send_safely)
 
     def _report_radio_track_finished(
         self,
@@ -1405,9 +1452,12 @@ class PlaybackService:
     ) -> None:
         if self._music_service is None:
             return
+        music_service = self._music_service
         session = self._radio_session_from_item(current_item)
         if session is None:
             return
+        track = current_item.track
+        feedback_track_id = self._radio_feedback_track_id(track)
         self._logger.debug(
             (
                 "Sending rotor trackFinished feedback: "
@@ -1415,23 +1465,27 @@ class PlaybackService:
             ),
             session.station_id,
             session.session_id,
-            current_item.track.id,
+            track.id,
             session.batch_id,
             played_seconds,
         )
-        try:
-            self._music_service.report_radio_session_feedback(
-                session,
-                RadioFeedbackType.TRACK_FINISHED,
-                track_id=self._radio_feedback_track_id(current_item.track),
-                total_played_seconds=played_seconds,
-            )
-        except Exception as exc:
-            self._log_telemetry_failure(
-                "Playback telemetry trackFinished failed for %s",
-                current_item.track.id,
-                exc=exc,
-            )
+
+        def send_safely() -> None:
+            try:
+                music_service.report_radio_session_feedback(
+                    session,
+                    RadioFeedbackType.TRACK_FINISHED,
+                    track_id=feedback_track_id,
+                    total_played_seconds=played_seconds,
+                )
+            except Exception as exc:
+                self._log_telemetry_failure(
+                    "Playback telemetry trackFinished failed for %s",
+                    track.id,
+                    exc=exc,
+                )
+
+        self._submit_telemetry(send_safely)
 
     def _report_radio_track_skipped(
         self,
@@ -1440,30 +1494,37 @@ class PlaybackService:
     ) -> None:
         if self._music_service is None:
             return
+        music_service = self._music_service
         session = self._radio_session_from_item(current_item)
         if session is None:
             return
+        track = current_item.track
+        feedback_track_id = self._radio_feedback_track_id(track)
         self._logger.debug(
             "Sending rotor skip feedback: station=%s session=%s track=%s batch=%s played=%.3f",
             session.station_id,
             session.session_id,
-            current_item.track.id,
+            track.id,
             session.batch_id,
             played_seconds,
         )
-        try:
-            self._music_service.report_radio_session_feedback(
-                session,
-                RadioFeedbackType.SKIP,
-                track_id=self._radio_feedback_track_id(current_item.track),
-                total_played_seconds=played_seconds,
-            )
-        except Exception as exc:
-            self._log_telemetry_failure(
-                "Playback telemetry skip failed for %s",
-                current_item.track.id,
-                exc=exc,
-            )
+
+        def send_safely() -> None:
+            try:
+                music_service.report_radio_session_feedback(
+                    session,
+                    RadioFeedbackType.SKIP,
+                    track_id=feedback_track_id,
+                    total_played_seconds=played_seconds,
+                )
+            except Exception as exc:
+                self._log_telemetry_failure(
+                    "Playback telemetry skip failed for %s",
+                    track.id,
+                    exc=exc,
+                )
+
+        self._submit_telemetry(send_safely)
 
     def _radio_feedback_track_id(self, track: Track) -> str:
         if track.album_id:

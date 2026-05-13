@@ -1,4 +1,5 @@
 import random
+from time import monotonic, sleep
 
 import pytest
 
@@ -59,6 +60,7 @@ class FakeMusicService:
         self.raise_on_play_audio = False
         self.raise_on_plays = False
         self.raise_on_station_feedback = False
+        self.play_audio_delay_seconds = 0.0
 
     def get_auth_session(self):
         from app.domain import AuthSession
@@ -264,6 +266,8 @@ class FakeMusicService:
         timestamp: str | None = None,
         client_now: str | None = None,
     ) -> None:
+        if self.play_audio_delay_seconds > 0:
+            sleep(self.play_audio_delay_seconds)
         if self.raise_on_play_audio:
             raise RuntimeError("play_audio failed")
         self.play_audio_reports.append(
@@ -883,6 +887,7 @@ def test_playback_service_reports_play_audio_start_only_until_terminal() -> None
     )
     engine.seek(15_000)
     service.refresh()
+    service.wait_for_pending_telemetry()
 
     assert music_service.play_audio_reports[0]["track_id"] == "one"
     assert music_service.play_audio_reports[0]["total_played_seconds"] == 0
@@ -895,6 +900,33 @@ def test_playback_service_reports_play_audio_start_only_until_terminal() -> None
     assert start_event.context == "playlist"
     assert start_event.context_item == "user-1:3"
     assert start_event.total_played_seconds == 0.0
+
+
+def test_playback_start_does_not_wait_for_telemetry() -> None:
+    music_service = FakeMusicService(stream_ref="resolved://one")
+    music_service.play_audio_delay_seconds = 0.35
+    service = PlaybackService(
+        playback_engine=FakePlaybackEngine(),
+        logger=TestLogger(),
+        music_service=music_service,
+    )
+
+    started_at = monotonic()
+    snapshot = service.play_track(
+        Track(
+            id="one",
+            title="One",
+            artists=("Artist",),
+            album_id="album-1",
+            duration_ms=120_000,
+        )
+    )
+    elapsed = monotonic() - started_at
+
+    assert snapshot.state.status is PlaybackStatus.PLAYING
+    assert elapsed < 0.2
+    service.wait_for_pending_telemetry(timeout=1.0)
+    assert music_service.play_audio_reports[0]["track_id"] == "one"
 
 
 def test_playback_service_seek_does_not_count_as_listened_time() -> None:
@@ -921,6 +953,7 @@ def test_playback_service_seek_does_not_count_as_listened_time() -> None:
     service.seek(205_000)
     engine.seek(220_000)
     service.refresh()
+    service.wait_for_pending_telemetry()
 
     assert len(music_service.play_audio_reports) == 1
     assert music_service.plays_reports[0]["events"][0].end_position_seconds == 0.0
@@ -954,6 +987,7 @@ def test_refresh_auto_advances_when_active_track_finishes() -> None:
 
     engine.stop()
     snapshot = service.refresh()
+    service.wait_for_pending_telemetry()
 
     assert snapshot.state.status is PlaybackStatus.PLAYING
     assert snapshot.state.active_index == 1
@@ -1128,6 +1162,7 @@ def test_play_station_loads_initial_station_queue_and_starts_playback() -> None:
     )
 
     snapshot = service.play_station("user:onyourwave")
+    service.wait_for_pending_telemetry()
 
     assert snapshot.state.status is PlaybackStatus.PLAYING
     assert [item.track.id for item in snapshot.queue] == ["w1", "w2", "w3", "w4"]
@@ -1237,6 +1272,7 @@ def test_station_skip_reports_feedback_when_user_skips_track() -> None:
     engine.seek(10_000)
 
     service.next()
+    service.wait_for_pending_telemetry()
 
     assert music_service.station_track_skipped_reports == [
         {
@@ -1287,6 +1323,7 @@ def test_station_finish_reports_feedback_when_track_ends_naturally() -> None:
     engine.stop()
 
     service.refresh()
+    service.wait_for_pending_telemetry()
 
     assert music_service.station_track_finished_reports == [
         {

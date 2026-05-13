@@ -65,6 +65,7 @@ class PlaybackController(QObject):
         self._shutdown_started = True
         self._worker_thread.quit()
         self._worker_thread.wait(3000)
+        self._playback_service.shutdown()
 
     def play(self) -> None:
         self._dispatch(self._playback_service.play)
