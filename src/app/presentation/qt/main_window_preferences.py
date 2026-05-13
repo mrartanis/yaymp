@@ -330,6 +330,12 @@ class MainWindowPreferencesMixin:
                 corner_style=self._stored_corner_style_preference(),
             )
         )
+        self._my_wave_top_button.set_visuals(
+            accent=self._accent_color,
+            accent_text=self._accent_text_color(),
+            trailing=self._my_wave_trailing_color(),
+            rounded=self._stored_corner_style_preference() == "rounded",
+        )
         self._refresh_theme_icons()
         if self._browser_dialog is not None:
             self._browser_dialog.setStyleSheet(self.styleSheet())

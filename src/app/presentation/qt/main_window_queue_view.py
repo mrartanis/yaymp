@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-from random import Random
-
 from PySide6.QtCore import QAbstractListModel, QModelIndex, QRect, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QDragEnterEvent, QDropEvent, QFont, QPainter
+from PySide6.QtGui import QColor, QDragEnterEvent, QDropEvent, QFont, QPainter, QPaintEvent
 from PySide6.QtWidgets import QListView, QStyledItemDelegate, QStyleOptionViewItem, QWidget
 
 from app.domain.playback import PlaybackStatus, QueueItem
@@ -136,6 +134,157 @@ class QueueListModel(QAbstractListModel):
             self.dataChanged.emit(model_index, model_index, roles)
 
 
+class QueueWaveformOverlay(QWidget):
+    _ANIMATION_FRAMES = (
+        (0.42, 0.70, 0.74, 0.48),
+        (0.44, 0.72, 0.76, 0.46),
+        (0.46, 0.74, 0.78, 0.44),
+        (0.48, 0.76, 0.80, 0.42),
+        (0.50, 0.78, 0.82, 0.40),
+        (0.52, 0.80, 0.84, 0.38),
+        (0.54, 0.82, 0.86, 0.36),
+        (0.52, 0.84, 0.88, 0.38),
+        (0.50, 0.86, 0.90, 0.40),
+        (0.48, 0.88, 0.92, 0.42),
+        (0.46, 0.90, 0.94, 0.44),
+        (0.44, 0.88, 0.92, 0.46),
+        (0.42, 0.86, 0.90, 0.48),
+        (0.40, 0.84, 0.88, 0.50),
+        (0.38, 0.82, 0.86, 0.52),
+        (0.36, 0.80, 0.84, 0.54),
+        (0.38, 0.78, 0.82, 0.56),
+        (0.40, 0.76, 0.80, 0.58),
+        (0.42, 0.74, 0.78, 0.60),
+        (0.44, 0.72, 0.76, 0.62),
+        (0.46, 0.70, 0.74, 0.64),
+        (0.48, 0.68, 0.72, 0.62),
+        (0.50, 0.66, 0.70, 0.60),
+        (0.52, 0.64, 0.68, 0.58),
+        (0.54, 0.62, 0.66, 0.56),
+        (0.52, 0.60, 0.64, 0.54),
+        (0.50, 0.58, 0.62, 0.52),
+        (0.48, 0.56, 0.60, 0.50),
+        (0.46, 0.58, 0.62, 0.48),
+        (0.44, 0.60, 0.64, 0.46),
+        (0.42, 0.62, 0.66, 0.44),
+        (0.40, 0.64, 0.68, 0.42),
+        (0.38, 0.66, 0.70, 0.44),
+        (0.36, 0.68, 0.72, 0.46),
+        (0.38, 0.70, 0.74, 0.48),
+        (0.40, 0.72, 0.76, 0.50),
+    )
+    _INDICATOR_WIDTH = 18
+    _INDICATOR_GAP = 8
+    _DURATION_WIDTH = 58
+    _ROW_INSET_X = 2
+    _ROW_INSET_Y = 1
+
+    def __init__(self, *, parent: "QueueListView", accent_provider) -> None:
+        super().__init__(parent.viewport())
+        self._view = parent
+        self._accent_provider = accent_provider
+        self._frame_index = 0
+        self._active_row: int | None = None
+        self._playback_status = PlaybackStatus.STOPPED
+        self._timer = QTimer(self)
+        self._timer.setInterval(150)
+        self._timer.timeout.connect(self._advance_animation)
+        self.hide()
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+
+    def sync_state(self, active_row: int | None, playback_status: PlaybackStatus) -> None:
+        self._active_row = active_row
+        self._playback_status = self._normalize_playback_status(playback_status)
+        if active_row is None:
+            self._timer.stop()
+            self._frame_index = 0
+            self.hide()
+            return
+        if self._playback_status == PlaybackStatus.PLAYING:
+            self._timer.start()
+        else:
+            self._timer.stop()
+            self._frame_index = 0
+        self._sync_geometry()
+        self.show()
+        self.update()
+
+    def refresh_position(self) -> None:
+        if self._active_row is None:
+            self.hide()
+            return
+        self._sync_geometry()
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        del event
+        painter = QPainter(self)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(self._accent_provider()))
+        bar_width = 3
+        gap = 1
+        baseline = self.height() - 1
+        min_height = 4
+        drawable_height = self.height() - 1
+        levels = self._ANIMATION_FRAMES[self._frame_index]
+        if self._playback_status != PlaybackStatus.PLAYING:
+            levels = (0.48, 0.68, 0.54, 0.78)
+        for index, factor in enumerate(levels):
+            height = max(min_height, int(drawable_height * factor))
+            x = index * (bar_width + gap) + 1
+            y = baseline - height
+            painter.drawRect(x, y, bar_width, height)
+
+    def _advance_animation(self) -> None:
+        self._frame_index = (self._frame_index + 1) % len(self._ANIMATION_FRAMES)
+        self.update()
+
+    def _sync_geometry(self) -> None:
+        if self._active_row is None:
+            self.hide()
+            return
+        model = self._view.model()
+        if model is None:
+            self.hide()
+            return
+        index = model.index(self._active_row, 0)
+        if not index.isValid():
+            self.hide()
+            return
+        row_rect = self._view.visualRect(index)
+        if not row_rect.isValid() or row_rect.isEmpty():
+            self.hide()
+            return
+        content_rect = row_rect.adjusted(
+            self._ROW_INSET_X + 6,
+            self._ROW_INSET_Y + 5,
+            -(self._ROW_INSET_X + 6),
+            -(self._ROW_INSET_Y + 5),
+        )
+        duration_rect = QRect(
+            content_rect.right() - self._DURATION_WIDTH + 1,
+            content_rect.top(),
+            self._DURATION_WIDTH,
+            content_rect.height(),
+        )
+        rect = QRect(
+            duration_rect.left() - self._INDICATOR_GAP - self._INDICATOR_WIDTH,
+            content_rect.center().y() - 7,
+            self._INDICATOR_WIDTH,
+            14,
+        )
+        self.setGeometry(rect.adjusted(-1, -1, 1, 1))
+
+    def _normalize_playback_status(self, value: object) -> PlaybackStatus:
+        if isinstance(value, PlaybackStatus):
+            return value
+        if isinstance(value, str):
+            try:
+                return PlaybackStatus(value)
+            except ValueError:
+                return PlaybackStatus.STOPPED
+        return PlaybackStatus.STOPPED
+
+
 class QueueRowDelegate(QStyledItemDelegate):
     _ROW_HEIGHT = 48
     _THUMB_SIZE = 38
@@ -166,13 +315,6 @@ class QueueRowDelegate(QStyledItemDelegate):
         self._accent_text_provider = accent_text_provider
         self._theme_provider = theme_provider
         self._corner_style_provider = corner_style_provider
-        self._rng = Random(0)
-        self._levels_by_row: dict[int, list[float]] = {}
-        self._active_row: int | None = None
-        self._playback_status = PlaybackStatus.STOPPED
-        self._timer = QTimer(self)
-        self._timer.setInterval(80)
-        self._timer.timeout.connect(self._advance_animation)
 
     def sizeHint(
         self,
@@ -187,23 +329,7 @@ class QueueRowDelegate(QStyledItemDelegate):
         active_row: int | None,
         playback_status: PlaybackStatus,
     ) -> None:
-        previous_row = self._active_row
-        previous_status = self._playback_status
-        self._active_row = active_row
-        self._playback_status = self._normalize_playback_status(playback_status)
-        if active_row is None or self._playback_status != PlaybackStatus.PLAYING:
-            self._timer.stop()
-        else:
-            self._levels_by_row.setdefault(active_row, [0.5, 0.78, 0.6, 0.88])
-            self._timer.start()
-        for row in {previous_row, active_row}:
-            if row is None:
-                continue
-            self._update_row(row)
-        if previous_row is not None and previous_row != active_row:
-            self._levels_by_row.pop(previous_row, None)
-        if previous_status != playback_status and active_row is not None:
-            self._update_row(active_row)
+        del active_row, playback_status
 
     def paint(
         self,
@@ -390,28 +516,17 @@ class QueueRowDelegate(QStyledItemDelegate):
                 self._INDICATOR_WIDTH,
                 14,
             )
-            self._paint_indicator(
-                painter,
-                indicator_rect,
-                index.row(),
-                indicator_color,
-                playback_status,
-            )
+            if playback_status != PlaybackStatus.PLAYING:
+                self._paint_indicator(painter, indicator_rect, indicator_color)
         painter.restore()
 
     def _paint_indicator(
         self,
         painter: QPainter,
         rect: QRect,
-        row: int,
         color: QColor,
-        playback_status: PlaybackStatus,
     ) -> None:
-        levels = self._levels_by_row.setdefault(row, [0.5, 0.78, 0.6, 0.88])
-        if playback_status != PlaybackStatus.PLAYING:
-            levels = [0.48, 0.68, 0.54, 0.78]
         painter.save()
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(color)
         bar_width = 3
@@ -419,28 +534,12 @@ class QueueRowDelegate(QStyledItemDelegate):
         baseline = rect.bottom()
         min_height = 4
         drawable_height = rect.height() - 1
-        for index, factor in enumerate(levels):
+        for index, factor in enumerate((0.48, 0.68, 0.54, 0.78)):
             height = max(min_height, int(drawable_height * factor))
             x = rect.left() + index * (bar_width + gap) + 1
             y = baseline - height
-            painter.drawRoundedRect(x, y, bar_width, height, 1.5, 1.5)
+            painter.drawRect(x, y, bar_width, height)
         painter.restore()
-
-    def _advance_animation(self) -> None:
-        if self._active_row is None:
-            return
-        levels = self._levels_by_row.setdefault(self._active_row, [0.5, 0.78, 0.6, 0.88])
-        next_levels: list[float] = []
-        for index, current in enumerate(levels):
-            floor = 0.32 if index % 2 == 0 else 0.42
-            ceiling = 0.96 if index in {1, 3} else 0.86
-            target = self._rng.uniform(floor, ceiling)
-            next_levels.append(current * 0.35 + target * 0.65)
-        if self._rng.random() < 0.3:
-            spike_index = self._rng.randrange(len(next_levels))
-            next_levels[spike_index] = min(0.98, next_levels[spike_index] + 0.14)
-        self._levels_by_row[self._active_row] = next_levels
-        self._update_row(self._active_row)
 
     def _normalize_playback_status(self, value: object) -> PlaybackStatus:
         if isinstance(value, PlaybackStatus):
@@ -468,19 +567,37 @@ class QueueRowDelegate(QStyledItemDelegate):
         index = model.index(row, 0)
         if not index.isValid():
             return
-        view.viewport().update(view.visualRect(index))
+        rect = view.visualRect(index)
+        if not rect.isValid():
+            return
+        view.viewport().update(rect)
 
 
 class QueueListView(QListView):
     reorder_requested = Signal(int, int)
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, parent: QWidget | None = None, *, accent_provider=None) -> None:
         super().__init__(parent)
         self.setDragEnabled(True)
         self.setAcceptDrops(True)
         self.setDropIndicatorShown(True)
         self.setDragDropMode(QListView.DragDropMode.DragDrop)
         self.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self._waveform_overlay = QueueWaveformOverlay(
+            parent=self,
+            accent_provider=accent_provider or (lambda: "#526ee8"),
+        )
+
+    def sync_waveform(self, active_row: int | None, playback_status: PlaybackStatus) -> None:
+        self._waveform_overlay.sync_state(active_row, playback_status)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._waveform_overlay.refresh_position()
+
+    def scrollContentsBy(self, dx: int, dy: int) -> None:
+        super().scrollContentsBy(dx, dy)
+        self._waveform_overlay.refresh_position()
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         event.acceptProposedAction()

@@ -27,6 +27,7 @@ class MainWindowQueueMixin:
         if queue_changed or active_changed or status_changed:
             self._queue_model.set_active_state(active_index, playback_status)
             self._queue_delegate.sync_animation(active_index, playback_status)
+            self._queue_list.sync_waveform(active_index, playback_status)
 
         if active_changed and active_index is not None and self._should_autoscroll_queue():
             self._queue_list.scrollTo(self._queue_model.index(active_index, 0))

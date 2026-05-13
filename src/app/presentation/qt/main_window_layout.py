@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 
 from app.domain import AudioQuality
 from app.presentation.qt.icon_utils import create_icon
+from app.presentation.qt.my_wave_button import MyWaveButton
 
 
 class MainWindowLayoutMixin:
@@ -127,7 +128,7 @@ class MainWindowLayoutMixin:
         self._sidebar_toggle_button.setObjectName("sidebar-toggle")
         self._sidebar_toggle_button.setToolTip(self._t("action.toggle_navigation"))
         self._sidebar_toggle_button.setFixedSize(30, 28)
-        self._my_wave_top_button = QPushButton(self._t("nav.my_wave"))
+        self._my_wave_top_button = MyWaveButton(self._t("nav.my_wave"))
         self._my_wave_top_button.setObjectName("my-wave-button")
         self._my_wave_top_button.setFixedHeight(28)
         self._auth_label = self._panel_label(self._t("label.login_required"), align_right=True)

@@ -8,7 +8,7 @@ from pathlib import Path
 from time import monotonic
 
 from PySide6.QtCore import QEvent, QModelIndex, QPoint, Qt, QTimer
-from PySide6.QtGui import QColor, QPixmap
+from PySide6.QtGui import QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager
 from PySide6.QtWidgets import (
     QApplication,
@@ -143,8 +143,6 @@ class MainWindow(
         self._updating_resize_cursor = False
         self._my_wave_pending = False
         self._my_wave_active = False
-        self._my_wave_animation_phase = 0.0
-        self._my_wave_animation_direction = 1.0
         self._pending_artwork_track: Track | None = None
         self._pending_system_media_snapshot = None
         self._artwork_render_timer = QTimer(self)
@@ -157,9 +155,6 @@ class MainWindow(
         self._system_media_timer.timeout.connect(self._flush_system_media_update)
         self._playback_poll_timer = QTimer(self)
         self._playback_poll_timer.setInterval(1000)
-        self._my_wave_animation_timer = QTimer(self)
-        self._my_wave_animation_timer.setInterval(200)
-        self._my_wave_animation_timer.timeout.connect(self._advance_my_wave_animation)
         self.setWindowTitle(self._t("app.title"))
         self._build_ui()
         self._system_media = build_system_media_integration(
@@ -343,7 +338,7 @@ class MainWindow(
         self._queue_separator.setObjectName("queue-separator")
         self._queue_separator.setFixedHeight(1)
         layout.addWidget(self._queue_separator)
-        self._queue_list = QueueListView()
+        self._queue_list = QueueListView(accent_provider=lambda: self._accent_color)
         self._queue_list.setObjectName("queue-list")
         self._queue_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._queue_list.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
@@ -677,61 +672,15 @@ class MainWindow(
         self._stop_my_wave_animation()
 
     def _start_my_wave_animation(self) -> None:
-        if not self._my_wave_animation_timer.isActive():
-            self._my_wave_animation_timer.start()
-        self._apply_my_wave_button_animation()
+        self._my_wave_top_button.set_animated(True)
 
     def _stop_my_wave_animation(self) -> None:
-        self._my_wave_animation_timer.stop()
-        self._my_wave_top_button.setStyleSheet("")
-
-    def _advance_my_wave_animation(self) -> None:
-        self._my_wave_animation_phase += self._my_wave_animation_direction * 1.5
-        if self._my_wave_animation_phase >= 100.0:
-            self._my_wave_animation_phase = 100.0
-            self._my_wave_animation_direction = -1.0
-        elif self._my_wave_animation_phase <= 0.0:
-            self._my_wave_animation_phase = 0.0
-            self._my_wave_animation_direction = 1.0
-        self._apply_my_wave_button_animation()
-
-    def _apply_my_wave_button_animation(self) -> None:
-        phase = self._my_wave_animation_phase / 100.0
-        accent = self._accent_color
-        trailing = self._my_wave_trailing_color()
-        leading = self._mix_colors(trailing, accent, 0.45 + phase * 0.45)
-        ending = self._mix_colors(trailing, accent, 0.12 + phase * 0.36)
-        radius = 9 if self._stored_corner_style_preference() == "rounded" else 0
-        self._my_wave_top_button.setStyleSheet(
-            f"""
-            QPushButton#my-wave-button {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 {leading}, stop:1 {ending});
-                border: 1px solid {accent};
-                border-radius: {radius}px;
-                color: {self._accent_text_color()};
-                font-size: 13px;
-                font-weight: 750;
-                padding: 8px;
-            }}
-            """
-        )
+        self._my_wave_top_button.set_animated(False)
 
     def _my_wave_trailing_color(self) -> str:
         if self._resolved_theme_mode() == "light":
             return "#d8e2f8"
         return "#2c355f"
-
-    def _mix_colors(self, first: str, second: str, ratio: float) -> str:
-        first_color = QColor(first)
-        second_color = QColor(second)
-        ratio = max(0.0, min(1.0, ratio))
-        inverse = 1.0 - ratio
-        return "#{:02x}{:02x}{:02x}".format(
-            round(first_color.red() * inverse + second_color.red() * ratio),
-            round(first_color.green() * inverse + second_color.green() * ratio),
-            round(first_color.blue() * inverse + second_color.blue() * ratio),
-        )
 
     def _render_error(self, message: str) -> None:
         self._my_wave_pending = False
