@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import colorsys
+import math
 from pathlib import Path
 
 import shiboken6
@@ -98,8 +99,6 @@ class MainWindowArtworkMixin:
             return
 
         cache_path = self._container.services.artwork_cache.cache_path_for_url(artwork_url)
-        if track.accent_color and self._has_usable_accent_contrast(track.accent_color):
-            self._set_accent_color(track.accent_color)
         cached_accent = self._container.services.artwork_cache.load_accent_color(cache_path)
         if cached_accent:
             self._set_accent_color(cached_accent)
@@ -183,14 +182,38 @@ class MainWindowArtworkMixin:
             return
         accent = self._container.services.artwork_cache.load_accent_color(path)
         if accent is None:
-            if preferred_accent and self._has_usable_accent_contrast(preferred_accent):
-                accent = preferred_accent
-            else:
-                accent = self._extract_accent_color(pixmap)
-                self._container.logger.info(
-                    "Computed artwork accent from pixels: image=%s color=%s",
+            pixel_accent = self._extract_accent_color(pixmap)
+            if pixel_accent and self._has_usable_accent_contrast(pixel_accent):
+                accent = pixel_accent
+                self._container.logger.debug(
+                    "Artwork accent source=pixels image=%s color=%s preferred=%s",
                     path.name,
                     accent,
+                    preferred_accent or "none",
+                )
+            elif preferred_accent and self._has_usable_accent_contrast(preferred_accent):
+                accent = preferred_accent
+                self._container.logger.debug(
+                    (
+                        "Artwork accent source=api-fallback image=%s color=%s "
+                        "pixel_candidate=%s preferred=%s"
+                    ),
+                    path.name,
+                    accent,
+                    pixel_accent,
+                    preferred_accent,
+                )
+            else:
+                accent = "#526ee8"
+                self._container.logger.debug(
+                    (
+                        "Artwork accent source=default-fallback image=%s color=%s "
+                        "pixel_candidate=%s preferred=%s"
+                    ),
+                    path.name,
+                    accent,
+                    pixel_accent,
+                    preferred_accent or "none",
                 )
             try:
                 self._container.services.artwork_cache.save_accent_color(path, accent)
@@ -210,32 +233,96 @@ class MainWindowArtworkMixin:
         self._artwork_label.clear()
         self._artwork_label.setText("No cover")
 
-    def _extract_accent_color(self, pixmap: QPixmap) -> str:
-        image = pixmap.toImage().scaled(
-            24,
-            24,
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.FastTransformation,
-        )
-        samples: list[tuple[float, float, float]] = []
-        for y in range(image.height()):
-            for x in range(image.width()):
-                color = QColor(image.pixel(x, y))
-                if color.alpha() < 180:
+    def _extract_accent_color(self, pixmap: QPixmap) -> str | None:
+        image = pixmap.toImage()
+        width = image.width()
+        height = image.height()
+        if width <= 0 or height <= 0:
+            return None
+        step = self._accent_sampling_step(width, height)
+        origin_x = width % step
+        origin_y = height % step
+        center_x = (width - 1) / 2.0
+        center_y = (height - 1) / 2.0
+        max_distance = math.hypot(center_x, center_y) or 1.0
+        buckets: dict[tuple[int, int, int], dict[str, float]] = {}
+
+        for y in range(origin_y, height, step):
+            for x in range(origin_x, width, step):
+                color = image.pixelColor(x, y)
+                if color.alpha() < 40:
                     continue
-                r, g, b = color.redF(), color.greenF(), color.blueF()
-                h, lightness, saturation = colorsys.rgb_to_hls(r, g, b)
-                if saturation < 0.12 or lightness < 0.12 or lightness > 0.88:
+                red = color.red()
+                green = color.green()
+                blue = color.blue()
+                hue, lightness, saturation = colorsys.rgb_to_hls(
+                    red / 255.0,
+                    green / 255.0,
+                    blue / 255.0,
+                )
+                if lightness < 0.08 or lightness > 0.94:
                     continue
-                samples.append((h, lightness, saturation))
-        if not samples:
-            return "#526ee8"
-        hue, lightness, saturation = max(samples, key=lambda item: item[2] * 1.4 + item[1])
-        saturation = min(0.65, max(0.25, saturation))
-        lightness = min(0.70, max(0.35, lightness))
-        r, g, b = colorsys.hls_to_rgb(hue, lightness, saturation)
-        candidate = QColor.fromRgbF(r, g, b).name()
-        return candidate if self._has_usable_accent_contrast(candidate) else "#526ee8"
+                if saturation < 0.12:
+                    continue
+                key = (
+                    min(35, int(hue * 36)),
+                    min(7, int(lightness * 8)),
+                    min(5, int(saturation * 6)),
+                )
+                distance = math.hypot(x - center_x, y - center_y) / max_distance
+                center_weight = 1.0 - max(0.0, min(1.0, distance))
+                bucket = buckets.setdefault(
+                    key,
+                    {
+                        "count": 0.0,
+                        "red": 0.0,
+                        "green": 0.0,
+                        "blue": 0.0,
+                        "saturation": 0.0,
+                        "lightness": 0.0,
+                        "center": 0.0,
+                    },
+                )
+                bucket["count"] += 1.0
+                bucket["red"] += red
+                bucket["green"] += green
+                bucket["blue"] += blue
+                bucket["saturation"] += saturation
+                bucket["lightness"] += lightness
+                bucket["center"] += center_weight
+
+        if not buckets:
+            return None
+        total_count = sum(bucket["count"] for bucket in buckets.values()) or 1.0
+        best_score = -1.0
+        best_rgb = (82, 110, 232)
+        for bucket in buckets.values():
+            count = bucket["count"] or 1.0
+            area = count / total_count
+            saturation = bucket["saturation"] / count
+            lightness = bucket["lightness"] / count
+            center = bucket["center"] / count
+            lightness_score = 1.0 - abs(lightness - 0.55) / 0.45
+            lightness_score = max(0.0, min(1.0, lightness_score))
+            score = (
+                (area**0.55)
+                * (saturation**1.45)
+                * (0.25 + 0.75 * lightness_score)
+                * (0.75 + 0.25 * center)
+            )
+            if score <= best_score:
+                continue
+            best_score = score
+            best_rgb = (
+                int(bucket["red"] / count),
+                int(bucket["green"] / count),
+                int(bucket["blue"] / count),
+            )
+        return "#{:02x}{:02x}{:02x}".format(*best_rgb)
+
+    def _accent_sampling_step(self, width: int, height: int) -> int:
+        longest_side = max(width, height)
+        return max(3, min(8, longest_side // 220 or 3))
 
     def _has_usable_accent_contrast(self, color: str) -> bool:
         qcolor = QColor(color)
