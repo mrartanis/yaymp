@@ -199,7 +199,7 @@ def _build_playback_engine(logger: logging.Logger) -> FakePlaybackEngine | MpvPl
         return FakePlaybackEngine()
 
     try:
-        engine = MpvPlaybackEngine()
+        engine = MpvPlaybackEngine(logger=logger)
         logger.info("Using MPV playback backend: %s", engine.library_path)
         return engine
     except PlaybackBackendError as exc:

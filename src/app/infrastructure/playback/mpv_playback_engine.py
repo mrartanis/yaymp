@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import logging
+
 from app.domain import PlaybackEngine, PlaybackState, PlaybackStatus, Track
 from app.domain.errors import PlaybackBackendError
 from app.infrastructure.playback.mpv_loader import ensure_mpv_available
 
 
 class MpvPlaybackEngine(PlaybackEngine):
-    def __init__(self) -> None:
+    def __init__(self, *, logger: logging.Logger | None = None) -> None:
+        self._logger = logger or logging.getLogger("yaymp")
         mpv_module, library_path = ensure_mpv_available()
         self._library_path = library_path
         self._player = mpv_module.MPV()
@@ -141,14 +144,38 @@ class MpvPlaybackEngine(PlaybackEngine):
         return self._library_path
 
     def _register_ready_for_seek_events(self) -> None:
+        @self._player.event_callback("start-file", "end-file")
+        def handle_lifecycle_event(event) -> None:
+            self._logger.debug("MPV event %s", self._event_name(event))
+
         @self._player.event_callback("file-loaded", "playback-restart")
-        def handle_ready_event(_event) -> None:
+        def handle_ready_event(event) -> None:
+            self._logger.debug("MPV event %s", self._event_name(event))
             self._emit_ready_for_seek()
 
         @self._player.property_observer("seekable")
         def handle_seekable_change(_name, value) -> None:
+            self._logger.debug("MPV property seekable=%s", value)
             if value:
                 self._emit_ready_for_seek()
+
+        for property_name in (
+            "cache-buffering-state",
+            "paused-for-cache",
+        ):
+            self._register_property_logger(property_name)
+
+    def _register_property_logger(self, property_name: str) -> None:
+        @self._player.property_observer(property_name)
+        def handle_property_change(_name, value) -> None:
+            self._logger.debug("MPV property %s=%s", property_name, value)
+
+    def _event_name(self, event) -> str:
+        if isinstance(event, dict):
+            value = event.get("event")
+            if value is not None:
+                return str(value)
+        return str(event)
 
     def _emit_ready_for_seek(self) -> None:
         if self._ready_for_seek_callback is not None:

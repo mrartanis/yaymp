@@ -8,7 +8,7 @@ from pathlib import Path
 from time import monotonic
 
 from PySide6.QtCore import QEvent, QModelIndex, QPoint, Qt, QTimer
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QColor, QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager
 from PySide6.QtWidgets import (
     QApplication,
@@ -73,6 +73,7 @@ class MainWindow(
     _QUEUE_PANEL_MIN_HEIGHT = 172
     _WINDOW_MIN_HEIGHT = 704
     _QUEUE_AUTOSCROLL_IDLE_SECONDS = 1.6
+    _MY_WAVE_STATION_ID = "user:onyourwave"
 
     def __init__(self, *, container: AppContainer) -> None:
         super().__init__()
@@ -140,6 +141,10 @@ class MainWindow(
         self._track_like_overrides: dict[str, bool] = {}
         self._track_label_base_sizes: dict[QLabel, int] = {}
         self._updating_resize_cursor = False
+        self._my_wave_pending = False
+        self._my_wave_active = False
+        self._my_wave_animation_phase = 0.0
+        self._my_wave_animation_direction = 1.0
         self._pending_artwork_track: Track | None = None
         self._pending_system_media_snapshot = None
         self._artwork_render_timer = QTimer(self)
@@ -152,6 +157,9 @@ class MainWindow(
         self._system_media_timer.timeout.connect(self._flush_system_media_update)
         self._playback_poll_timer = QTimer(self)
         self._playback_poll_timer.setInterval(1000)
+        self._my_wave_animation_timer = QTimer(self)
+        self._my_wave_animation_timer.setInterval(200)
+        self._my_wave_animation_timer.timeout.connect(self._advance_my_wave_animation)
         self.setWindowTitle(self._t("app.title"))
         self._build_ui()
         self._system_media = build_system_media_integration(
@@ -525,7 +533,9 @@ class MainWindow(
         )
 
     def _start_my_wave(self) -> None:
-        self._controller.play_station("user:onyourwave")
+        self._my_wave_pending = True
+        self._start_my_wave_animation()
+        self._controller.play_station(self._MY_WAVE_STATION_ID)
 
     def _render_snapshot(self, snapshot) -> None:
         current_item = snapshot.current_item
@@ -570,6 +580,7 @@ class MainWindow(
             self._set_accent_color("#526ee8")
 
         self._render_play_pause_button(state.status)
+        self._render_my_wave_button_state(current_item, state.status)
         self._seek_slider.blockSignals(True)
         self._seek_slider.setMaximum(state.duration_ms or 300_000)
         self._seek_slider.setValue(state.position_ms)
@@ -651,7 +662,81 @@ class MainWindow(
         self._play_pause_button.setToolTip(self._t("action.play"))
         self._play_pause_button.setAccessibleName(self._t("action.play"))
 
+    def _render_my_wave_button_state(self, current_item, status: PlaybackStatus) -> None:
+        is_my_wave = (
+            current_item is not None
+            and current_item.source_type == "station"
+            and current_item.source_id == self._MY_WAVE_STATION_ID
+        )
+        self._my_wave_active = is_my_wave and status is PlaybackStatus.PLAYING
+        if is_my_wave:
+            self._my_wave_pending = False
+        if self._my_wave_pending or self._my_wave_active:
+            self._start_my_wave_animation()
+            return
+        self._stop_my_wave_animation()
+
+    def _start_my_wave_animation(self) -> None:
+        if not self._my_wave_animation_timer.isActive():
+            self._my_wave_animation_timer.start()
+        self._apply_my_wave_button_animation()
+
+    def _stop_my_wave_animation(self) -> None:
+        self._my_wave_animation_timer.stop()
+        self._my_wave_top_button.setStyleSheet("")
+
+    def _advance_my_wave_animation(self) -> None:
+        self._my_wave_animation_phase += self._my_wave_animation_direction * 1.5
+        if self._my_wave_animation_phase >= 100.0:
+            self._my_wave_animation_phase = 100.0
+            self._my_wave_animation_direction = -1.0
+        elif self._my_wave_animation_phase <= 0.0:
+            self._my_wave_animation_phase = 0.0
+            self._my_wave_animation_direction = 1.0
+        self._apply_my_wave_button_animation()
+
+    def _apply_my_wave_button_animation(self) -> None:
+        phase = self._my_wave_animation_phase / 100.0
+        accent = self._accent_color
+        trailing = self._my_wave_trailing_color()
+        leading = self._mix_colors(trailing, accent, 0.45 + phase * 0.45)
+        ending = self._mix_colors(trailing, accent, 0.12 + phase * 0.36)
+        radius = 9 if self._stored_corner_style_preference() == "rounded" else 0
+        self._my_wave_top_button.setStyleSheet(
+            f"""
+            QPushButton#my-wave-button {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 {leading}, stop:1 {ending});
+                border: 1px solid {accent};
+                border-radius: {radius}px;
+                color: {self._accent_text_color()};
+                font-size: 13px;
+                font-weight: 750;
+                padding: 8px;
+            }}
+            """
+        )
+
+    def _my_wave_trailing_color(self) -> str:
+        if self._resolved_theme_mode() == "light":
+            return "#d8e2f8"
+        return "#2c355f"
+
+    def _mix_colors(self, first: str, second: str, ratio: float) -> str:
+        first_color = QColor(first)
+        second_color = QColor(second)
+        ratio = max(0.0, min(1.0, ratio))
+        inverse = 1.0 - ratio
+        return "#{:02x}{:02x}{:02x}".format(
+            round(first_color.red() * inverse + second_color.red() * ratio),
+            round(first_color.green() * inverse + second_color.green() * ratio),
+            round(first_color.blue() * inverse + second_color.blue() * ratio),
+        )
+
     def _render_error(self, message: str) -> None:
+        self._my_wave_pending = False
+        self._my_wave_active = False
+        self._stop_my_wave_animation()
         self._status_label.setText(self._t("status.playback_error", message=message))
 
     def _render_auth_state(self) -> None:

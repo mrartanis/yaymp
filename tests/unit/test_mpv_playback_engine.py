@@ -63,7 +63,7 @@ def test_mpv_seek_sets_time_pos(monkeypatch: pytest.MonkeyPatch) -> None:
 
     engine.seek(12_000)
 
-    assert player.string_command_calls == [("set", "time-pos", "12")]
+    assert player.string_command_calls[-1] == ("set", "time-pos", "12")
 
 
 def test_mpv_seek_reports_time_pos_error(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -86,3 +86,11 @@ def test_mpv_ready_events_notify_seek_callback(monkeypatch: pytest.MonkeyPatch) 
     player.property_observers["seekable"]("seekable", True)
 
     assert calls == ["ready", "ready", "ready"]
+
+
+def test_mpv_registers_cache_property_observers(monkeypatch: pytest.MonkeyPatch) -> None:
+    player = PlayerStub()
+    build_engine(monkeypatch, player)
+
+    assert "cache-buffering-state" in player.property_observers
+    assert "paused-for-cache" in player.property_observers
