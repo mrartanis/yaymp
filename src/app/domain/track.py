@@ -9,6 +9,7 @@ class Track:
     id: str
     title: str
     artists: tuple[str, ...]
+    version: str | None = None
     artist_ids: tuple[str, ...] = ()
     album_id: str | None = None
     album_title: str | None = None

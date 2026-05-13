@@ -588,6 +588,7 @@ class PlaybackService:
                 id=item.track.id,
                 title=item.track.title,
                 artists=item.track.artists,
+                version=item.track.version,
                 artist_ids=item.track.artist_ids,
                 album_id=item.track.album_id,
                 album_title=item.track.album_title,

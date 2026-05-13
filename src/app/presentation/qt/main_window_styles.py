@@ -123,6 +123,11 @@ def build_main_window_stylesheet(
                 font-size: 28px;
                 font-weight: 800;
             }}
+            QLabel#track-version {{
+                color: {palette.text_secondary};
+                font-size: 12px;
+                font-weight: 600;
+            }}
             QLabel#track-artist {{
                 color: {palette.text_primary};
                 font-size: 16px;

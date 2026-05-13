@@ -57,11 +57,13 @@ class TrackStub:
         *,
         track_id: str,
         title: str = "Track",
+        version: str | None = None,
         available: bool = True,
         duration_ms: int = 180_000,
     ) -> None:
         self.id = track_id
         self.title = title
+        self.version = version
         self.available = available
         self.duration_ms = duration_ms
         self.artists = [ArtistStub("Artist")]
@@ -183,7 +185,7 @@ class FakeYandexClient:
     def __init__(self) -> None:
         self.base_url = "https://api.music.yandex.net"
         self.report_unknown_fields = False
-        self.track = TrackStub(track_id="track-1", title="Remote")
+        self.track = TrackStub(track_id="track-1", title="Remote", version="Live Version")
         self.album = AlbumStub("Album", album_id="album-1")
         self.single = AlbumStub("Single", album_id="single-1", album_type="single")
         self.compilation = AlbumStub(
@@ -243,6 +245,7 @@ class FakeYandexClient:
             return {
                 "id": self._client.track.id,
                 "title": self._client.track.title,
+                "version": self._client.track.version,
                 "available": self._client.track.available,
                 "durationMs": self._client.track.duration_ms,
                 "artists": [{"name": artist.name} for artist in self._client.track.artists],
@@ -597,6 +600,7 @@ def test_yandex_music_service_loads_playlist_tracks_with_owner_context() -> None
     tracks = service.get_playlist_tracks("164404", owner_id="music-blog")
 
     assert [track.id for track in tracks] == ["track-1"]
+    assert tracks[0].version == "Live Version"
     assert client.playlist_requests == [("164404", "music-blog")]
 
 
@@ -762,6 +766,7 @@ def test_yandex_music_service_uses_radio_session_flow() -> None:
                 id="track-1",
                 title="Remote",
                 artists=("Artist",),
+                version="Live Version",
                 artist_ids=(),
                 album_id="album-1",
                 album_title="Album",

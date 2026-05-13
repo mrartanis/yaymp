@@ -13,6 +13,7 @@ from app.application.playback_service import PlaybackSnapshot
 from app.domain import Logger, PlaybackStatus, RepeatMode
 from app.infrastructure.persistence.file_artwork_cache import FileArtworkCache
 from app.presentation.qt.playback_controller import PlaybackController
+from app.presentation.qt.track_display import display_track_title
 
 try:
     from PySide6.QtDBus import (
@@ -175,7 +176,10 @@ class MacOSSystemMediaIntegration(SystemMediaIntegration):
 
         info = self._foundation.alloc().init()
         track = current_item.track
-        info.setObject_forKey_(track.title, self._media_player.MPMediaItemPropertyTitle)
+        info.setObject_forKey_(
+            display_track_title(track),
+            self._media_player.MPMediaItemPropertyTitle,
+        )
         info.setObject_forKey_(
             ", ".join(track.artists),
             self._media_player.MPMediaItemPropertyArtist,
@@ -353,7 +357,7 @@ class LinuxMprisIntegration(SystemMediaIntegration):
     def _metadata_for_snapshot(self, snapshot: PlaybackSnapshot, track) -> dict[str, Any]:
         metadata: dict[str, Any] = {
             "mpris:trackid": self._track_object_path(track.id),
-            "xesam:title": track.title,
+            "xesam:title": display_track_title(track),
             "xesam:artist": list(track.artists),
         }
         if track.album_title:

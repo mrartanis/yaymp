@@ -25,6 +25,7 @@ def test_file_library_cache_repo_round_trips_track_metadata_and_artwork(tmp_path
         id="track-1",
         title="Signal",
         artists=("Artist",),
+        version="Live Version",
         album_title="Album",
         album_year=2024,
         duration_ms=123_000,

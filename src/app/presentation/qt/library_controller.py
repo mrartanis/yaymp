@@ -10,6 +10,7 @@ from app.application.library_service import LibraryService
 from app.application.search_service import SearchService
 from app.domain import Album, Artist, CatalogSearchResults, Logger, Playlist, Station, Track
 from app.domain.errors import DomainError
+from app.presentation.qt.track_display import display_track_title
 
 
 @dataclass(frozen=True, slots=True)
@@ -840,7 +841,7 @@ class LibraryController(QObject):
         return tuple(
             BrowserItem(
                 kind="track",
-                title=track.title,
+                title=display_track_title(track),
                 subtitle=self._track_subtitle(track, source_type=source_type),
                 payload=track,
                 source_type=source_type,

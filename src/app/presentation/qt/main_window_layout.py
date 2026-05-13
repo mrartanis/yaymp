@@ -71,6 +71,16 @@ class MainWindowLayoutMixin:
             QSizePolicy.Policy.Preferred,
         )
         self._track_title_label.setMaximumHeight(108)
+        self._track_version_label = self._panel_label("")
+        self._track_version_label.setObjectName("track-version")
+        self._track_version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._track_version_label.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Preferred,
+        )
+        self._track_version_label.setMaximumHeight(28)
+        self._track_version_label.setWordWrap(True)
+        self._track_version_label.setVisible(False)
         self._track_meta_label = self._panel_label(self._t("label.artist_metadata"))
         self._track_meta_label.setObjectName("track-artist")
         self._track_meta_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -180,6 +190,8 @@ class MainWindowLayoutMixin:
         self._text_block_layout.addStretch(1)
         self._track_title_label.installEventFilter(self)
         self._text_block_layout.addWidget(self._track_title_label)
+        self._track_version_label.installEventFilter(self)
+        self._text_block_layout.addWidget(self._track_version_label)
         self._track_meta_label.installEventFilter(self)
         self._text_block_layout.addWidget(self._track_meta_label)
         self._track_album_label.installEventFilter(self)
@@ -249,6 +261,7 @@ class MainWindowLayoutMixin:
         self._build_volume_popup()
         self._track_label_base_sizes = {
             self._track_title_label: 28,
+            self._track_version_label: 12,
             self._track_meta_label: 16,
             self._track_album_label: 13,
         }
@@ -616,6 +629,7 @@ class MainWindowLayoutMixin:
 
     def _fit_track_text_labels(self) -> None:
         self._fit_track_text_label(self._track_title_label, min_point_size=20, max_lines=3)
+        self._fit_track_text_label(self._track_version_label, min_point_size=10, max_lines=1)
         self._fit_track_text_label(self._track_meta_label, min_point_size=12, max_lines=3)
         self._fit_track_text_label(self._track_album_label, min_point_size=11, max_lines=3)
 

@@ -825,6 +825,7 @@ class YandexMusicService(MusicService):
             id=track_id,
             title=title,
             artists=artists or ("Unknown Artist",),
+            version=getattr(raw_track, "version", None),
             artist_ids=artist_ids,
             album_id=str(getattr(album, "id", "")) or None,
             album_title=getattr(album, "title", None),

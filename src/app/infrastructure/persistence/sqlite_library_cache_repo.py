@@ -125,6 +125,7 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                 id=str(row["id"]),
                 title=str(row["title"]),
                 artists=tuple(str(artist) for artist in artists),
+                version=row["version"],
                 artist_ids=tuple(str(artist_id) for artist_id in artist_ids),
                 album_id=row["album_id"],
                 album_title=row["album_title"],
@@ -417,6 +418,7 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                     create table if not exists tracks (
                         id text primary key,
                         title text not null,
+                        version text,
                         artists_json text not null,
                         artist_ids_json text not null default '[]',
                         album_id text,
@@ -479,6 +481,12 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                         primary key (cache_key, user_id)
                     );
                     """
+                )
+                self._ensure_column(
+                    connection,
+                    table="tracks",
+                    column="version",
+                    definition="text",
                 )
                 self._ensure_column(
                     connection,
@@ -556,13 +564,14 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
         connection.execute(
             (
                 "insert into tracks("
-                "id, title, artists_json, artist_ids_json, album_id, album_title, "
+                "id, title, version, artists_json, artist_ids_json, album_id, album_title, "
                 "album_year, duration_ms, "
                 "stream_ref, stream_ref_cached_at, artwork_ref, accent_color, available, "
                 "is_liked, cached_at"
-                ") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                ") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 "on conflict(id) do update set "
                 "title = excluded.title, "
+                "version = excluded.version, "
                 "artists_json = excluded.artists_json, "
                 "artist_ids_json = excluded.artist_ids_json, "
                 "album_id = excluded.album_id, "
@@ -580,6 +589,7 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
             (
                 track.id,
                 track.title,
+                track.version,
                 json.dumps(list(track.artists), ensure_ascii=True),
                 json.dumps(list(track.artist_ids), ensure_ascii=True),
                 track.album_id,
@@ -806,6 +816,7 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
         return {
             "id": track.id,
             "title": track.title,
+            "version": track.version,
             "artists": list(track.artists),
             "artist_ids": list(track.artist_ids),
             "album_id": track.album_id,
@@ -832,6 +843,7 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                 id=str(raw_track["id"]),
                 title=str(raw_track["title"]),
                 artists=tuple(str(artist) for artist in raw_track.get("artists", ())),
+                version=self._optional_str(raw_track.get("version")),
                 artist_ids=tuple(
                     str(artist_id) for artist_id in raw_track.get("artist_ids", ())
                 ),

@@ -320,16 +320,45 @@ class QueueRowDelegate(QStyledItemDelegate):
 
         painter.setPen(title_color)
         painter.setFont(title_font)
+        title_metrics = painter.fontMetrics()
+        version = queue_item.track.version or ""
+        version_font = QFont(option.font)
+        version_font.setPointSize(max(9, option.font.pointSize() - 2))
+        version_text = f" · {version}" if version else ""
+        version_width = 0
+        if version_text:
+            painter.setFont(version_font)
+            version_width = painter.fontMetrics().horizontalAdvance(version_text)
+            painter.setFont(title_font)
         title_text = painter.fontMetrics().elidedText(
             queue_item.track.title,
             Qt.TextElideMode.ElideRight,
-            title_rect.width(),
+            max(10, title_rect.width() - version_width),
         )
+        title_width = min(title_metrics.horizontalAdvance(title_text), title_rect.width())
         painter.drawText(
             title_rect,
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
             title_text,
         )
+        if version_text and title_width < title_rect.width():
+            version_rect = QRect(
+                title_rect.left() + title_width,
+                title_rect.top(),
+                max(0, title_rect.width() - title_width),
+                title_rect.height(),
+            )
+            painter.setPen(secondary_color)
+            painter.setFont(version_font)
+            painter.drawText(
+                version_rect,
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                painter.fontMetrics().elidedText(
+                    version_text,
+                    Qt.TextElideMode.ElideRight,
+                    version_rect.width(),
+                ),
+            )
 
         subtitle_parts = (", ".join(queue_item.track.artists), queue_item.track.album_title or "")
         subtitle_text = " · ".join(part for part in subtitle_parts if part)

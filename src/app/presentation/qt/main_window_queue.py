@@ -60,11 +60,15 @@ class MainWindowQueueMixin:
         finally:
             selection_model.blockSignals(False)
 
-    def _queue_key(self, queue: tuple[QueueItem, ...]) -> tuple[tuple[str, str, str, str], ...]:
+    def _queue_key(
+        self,
+        queue: tuple[QueueItem, ...],
+    ) -> tuple[tuple[str, str, str, str, str], ...]:
         return tuple(
             (
                 item.track.id,
                 item.track.title,
+                item.track.version or "",
                 item.track.album_title or "",
                 ",".join(item.track.artists),
             )

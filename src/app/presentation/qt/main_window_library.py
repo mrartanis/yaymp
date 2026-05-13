@@ -14,6 +14,7 @@ from PySide6.QtWidgets import QApplication, QFileDialog, QMenu
 from app.domain import Album, Artist, Playlist, Station, Track
 from app.domain.playback import QueueItem
 from app.presentation.qt.library_controller import BrowserItem
+from app.presentation.qt.track_display import display_track_title
 
 
 class MainWindowLibraryMixin:
@@ -27,7 +28,9 @@ class MainWindowLibraryMixin:
             self._render_current_track_like_button(True)
         self._replace_content_track(track)
         self._update_queue_track_like(track)
-        self._status_label.setText(self._t("status.track.like", title=track.title))
+        self._status_label.setText(
+            self._t("status.track.like", title=display_track_title(track))
+        )
 
     def _render_track_unliked(self, track: Track) -> None:
         self._track_like_overrides[track.id] = False
@@ -36,7 +39,9 @@ class MainWindowLibraryMixin:
             self._render_current_track_like_button(False)
         self._replace_content_track(track)
         self._update_queue_track_like(track)
-        self._status_label.setText(self._t("status.track.unlike", title=track.title))
+        self._status_label.setText(
+            self._t("status.track.unlike", title=display_track_title(track))
+        )
 
     def _render_album_liked(self, album: Album) -> None:
         self._replace_content_entity(album)
@@ -128,7 +133,7 @@ class MainWindowLibraryMixin:
                 continue
             if browser_item.payload.id != track.id:
                 continue
-            title = track.title
+            title = display_track_title(track)
             text = title
             subtitle = ", ".join(track.artists)
             if track.album_title:
@@ -533,7 +538,7 @@ class MainWindowLibraryMixin:
             {
                 "artist": ", ".join(queue_item.track.artists),
                 "album": queue_item.track.album_title or "",
-                "track": queue_item.track.title,
+                "track": display_track_title(queue_item.track),
                 "link": self._track_share_link(queue_item.track) or "",
             }
             for queue_item in queue_items

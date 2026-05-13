@@ -43,6 +43,7 @@ from app.presentation.qt.main_window_queue_view import (
 from app.presentation.qt.main_window_windowing import MainWindowWindowingMixin
 from app.presentation.qt.playback_controller import PlaybackController
 from app.presentation.qt.system_media import build_system_media_integration
+from app.presentation.qt.track_display import display_track_title
 
 
 class MainWindow(
@@ -535,12 +536,16 @@ class MainWindow(
             current_track = self._track_with_like_override(current_item.track)
             self._current_track = current_track
             artists = ", ".join(current_track.artists)
+            track_title = display_track_title(current_track)
             album_text = (
                 f"{current_track.album_title or 'Single'}"
                 f"{self._format_year(current_track.album_year)}"
             )
             self._track_title_label.setText(current_track.title)
-            self._track_title_label.setToolTip(current_track.title)
+            self._track_title_label.setToolTip(track_title)
+            self._track_version_label.setText(current_track.version or "")
+            self._track_version_label.setToolTip(current_track.version or "")
+            self._track_version_label.setVisible(bool(current_track.version))
             self._track_meta_label.setText(artists or self._t("label.unknown_artist"))
             self._track_meta_label.setToolTip(artists)
             self._track_album_label.setText(
@@ -553,6 +558,8 @@ class MainWindow(
         else:
             self._current_track = None
             self._track_title_label.setText(self._t("label.no_track_selected"))
+            self._track_version_label.setText("")
+            self._track_version_label.setVisible(False)
             self._track_meta_label.setText(self._t("track.choose_music"))
             self._track_album_label.setText("")
             self._fit_track_text_labels()
