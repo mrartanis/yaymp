@@ -5,6 +5,7 @@ from collections.abc import Callable, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from threading import Lock
 from time import monotonic
 from uuid import uuid4
 
@@ -113,16 +114,33 @@ class PlaybackService:
             thread_name_prefix="yaymp-telemetry",
         )
         self._telemetry_shutdown = False
+        self._stream_prefetch_executor = ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="yaymp-stream-prefetch",
+        )
+        self._stream_prefetch_shutdown = False
+        self._stream_prefetch_lock = Lock()
+        self._stream_prefetch_in_flight: set[str] = set()
+        self._stream_prefetch_results: dict[str, tuple[str, datetime]] = {}
         self._playback_engine.on_ready_for_seek(self._apply_pending_restore_seek)
 
     def shutdown(self) -> None:
         self._telemetry_shutdown = True
+        self._stream_prefetch_shutdown = True
         self._telemetry_executor.shutdown(wait=False, cancel_futures=True)
+        self._stream_prefetch_executor.shutdown(wait=False, cancel_futures=True)
 
     def wait_for_pending_telemetry(self, *, timeout: float = 5.0) -> None:
         if self._telemetry_shutdown:
             return
         future = self._submit_telemetry(lambda: None)
+        if future is not None:
+            future.result(timeout=timeout)
+
+    def wait_for_pending_stream_prefetch(self, *, timeout: float = 5.0) -> None:
+        if self._stream_prefetch_shutdown:
+            return
+        future = self._submit_stream_prefetch(lambda: None)
         if future is not None:
             future.result(timeout=timeout)
 
@@ -279,13 +297,26 @@ class PlaybackService:
     def play(self) -> PlaybackSnapshot:
         if self.current_item() is None:
             raise PlaybackBackendError("No active queue item to play")
+        started_at = monotonic()
         if not self._active_item_loaded:
             self._pending_restore_seek_ms = self._restored_position_ms
+            load_started_at = monotonic()
             self._load_current_item()
+            self._logger.debug(
+                "Playback load_current_item took %.3fs",
+                monotonic() - load_started_at,
+            )
+        engine_play_started_at = monotonic()
         self._playback_engine.play()
+        self._logger.debug(
+            "Playback engine play took %.3fs",
+            monotonic() - engine_play_started_at,
+        )
         self._report_playback_started()
         self._logger.info("Playback started for index %s", self._active_index)
-        return self.snapshot()
+        snapshot = self.snapshot()
+        self._logger.debug("Playback start path took %.3fs", monotonic() - started_at)
+        return snapshot
 
     def pause(self) -> PlaybackSnapshot:
         self._playback_engine.pause()
@@ -349,9 +380,15 @@ class PlaybackService:
     def play_station(self, station_id: str) -> PlaybackSnapshot:
         if self._music_service is None:
             raise PlaybackBackendError("Music service is not configured")
+        started_at = monotonic()
         radio_session = self._music_service.start_radio_session(
             station_id,
             limit=self._STATION_QUEUE_BATCH_SIZE,
+        )
+        self._logger.debug(
+            "Station session start took %.3fs for %s",
+            monotonic() - started_at,
+            station_id,
         )
         tracks = merge_cached_liked_states(
             radio_session.tracks,
@@ -564,10 +601,22 @@ class PlaybackService:
 
     def _activate_index(self, index: int, *, preserve_restored_position: bool = False) -> None:
         current_item = self._queue[index]
+        prepare_started_at = monotonic()
         prepared_item = self._prepare_queue_item(current_item)
+        self._logger.debug(
+            "Playback prepare queue item took %.3fs for track %s",
+            monotonic() - prepare_started_at,
+            prepared_item.track.id,
+        )
         self._queue[index] = prepared_item
         stream_ref = prepared_item.track.stream_ref or ""
+        load_started_at = monotonic()
         self._playback_engine.load(prepared_item.track, stream_ref=stream_ref)
+        self._logger.debug(
+            "Playback engine load took %.3fs for track %s",
+            monotonic() - load_started_at,
+            prepared_item.track.id,
+        )
         self._playback_engine.set_volume(self._volume)
         self._active_index = index
         self._active_item_loaded = True
@@ -590,16 +639,40 @@ class PlaybackService:
     def _prepare_queue_item(self, item: QueueItem) -> QueueItem:
         stream_ref = item.track.stream_ref
         if not self._has_fresh_stream_ref(item.track):
-            if self._music_service is None:
+            prefetched = self._take_prefetched_stream_ref(item.track.id)
+            if prefetched is not None:
+                stream_ref, stream_ref_cached_at = prefetched
+                self._logger.debug("Using prefetched stream for track %s", item.track.id)
+            elif self._music_service is None:
                 raise StreamResolveError("Track has no stream reference")
-            stream_ref = self._music_service.resolve_stream_ref(item.track)
-            stream_ref_cached_at = datetime.now(tz=UTC)
+            else:
+                resolve_started_at = monotonic()
+                stream_ref = self._music_service.resolve_stream_ref(item.track)
+                stream_ref_cached_at = datetime.now(tz=UTC)
+                self._logger.debug(
+                    "Synchronous stream resolve took %.3fs for track %s",
+                    monotonic() - resolve_started_at,
+                    item.track.id,
+                )
         else:
             stream_ref_cached_at = item.track.stream_ref_cached_at
         if not stream_ref:
             raise StreamResolveError("Track has no stream reference")
         if stream_ref_cached_at is not None and stream_ref_cached_at.tzinfo is None:
             stream_ref_cached_at = stream_ref_cached_at.replace(tzinfo=UTC)
+        return self._queue_item_with_stream_ref(
+            item,
+            stream_ref=stream_ref,
+            stream_ref_cached_at=stream_ref_cached_at,
+        )
+
+    def _queue_item_with_stream_ref(
+        self,
+        item: QueueItem,
+        *,
+        stream_ref: str,
+        stream_ref_cached_at: datetime | None,
+    ) -> QueueItem:
         return QueueItem(
             track=Track(
                 id=item.track.id,
@@ -790,16 +863,79 @@ class PlaybackService:
         )
         for index in range(self._active_index + 1, last_index):
             item = self._queue[index]
-            if item.track.stream_ref:
+            if self._has_fresh_stream_ref(item.track):
                 continue
+            if self._apply_prefetched_stream_ref(index, item):
+                continue
+            self._schedule_stream_prefetch(item.track)
+
+    def _submit_stream_prefetch(self, callback: Callable[[], None]) -> Future | None:
+        if self._stream_prefetch_shutdown:
+            return None
+        try:
+            return self._stream_prefetch_executor.submit(callback)
+        except RuntimeError:
+            return None
+
+    def _schedule_stream_prefetch(self, track: Track) -> None:
+        if self._music_service is None:
+            return
+        if self._has_fresh_stream_ref(track):
+            return
+        music_service = self._music_service
+        with self._stream_prefetch_lock:
+            if track.id in self._stream_prefetch_results:
+                return
+            if track.id in self._stream_prefetch_in_flight:
+                return
+            self._stream_prefetch_in_flight.add(track.id)
+
+        def prefetch_safely() -> None:
             try:
-                self._queue[index] = self._prepare_queue_item(item)
-            except StreamResolveError as exc:
+                started_at = monotonic()
+                stream_ref = music_service.resolve_stream_ref(track)
+                cached_at = datetime.now(tz=UTC)
+                elapsed = monotonic() - started_at
+                if not stream_ref:
+                    raise StreamResolveError("Track has no stream reference")
+                with self._stream_prefetch_lock:
+                    self._stream_prefetch_results[track.id] = (stream_ref, cached_at)
+                self._logger.debug(
+                    "Async stream prefetch took %.3fs for track %s",
+                    elapsed,
+                    track.id,
+                )
+            except Exception as exc:
                 self._logger.warning(
                     "Failed to prefetch stream for track %s: %s",
-                    item.track.id,
+                    track.id,
                     exc,
                 )
+            finally:
+                with self._stream_prefetch_lock:
+                    self._stream_prefetch_in_flight.discard(track.id)
+
+        future = self._submit_stream_prefetch(prefetch_safely)
+        if future is None:
+            with self._stream_prefetch_lock:
+                self._stream_prefetch_in_flight.discard(track.id)
+
+    def _take_prefetched_stream_ref(self, track_id: str) -> tuple[str, datetime] | None:
+        with self._stream_prefetch_lock:
+            return self._stream_prefetch_results.pop(track_id, None)
+
+    def _apply_prefetched_stream_ref(self, index: int, item: QueueItem) -> bool:
+        prefetched = self._take_prefetched_stream_ref(item.track.id)
+        if prefetched is None:
+            return False
+        stream_ref, cached_at = prefetched
+        self._queue[index] = self._queue_item_with_stream_ref(
+            item,
+            stream_ref=stream_ref,
+            stream_ref_cached_at=cached_at,
+        )
+        self._logger.debug("Applied prefetched stream for track %s", item.track.id)
+        return True
 
     def _trim_station_queue(self) -> None:
         current_item = self.current_item()

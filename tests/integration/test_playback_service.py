@@ -61,6 +61,7 @@ class FakeMusicService:
         self.raise_on_plays = False
         self.raise_on_station_feedback = False
         self.play_audio_delay_seconds = 0.0
+        self.resolve_stream_delay_seconds = 0.0
 
     def get_auth_session(self):
         from app.domain import AuthSession
@@ -248,6 +249,8 @@ class FakeMusicService:
         return ()
 
     def resolve_stream_ref(self, track: Track) -> str:
+        if self.resolve_stream_delay_seconds > 0:
+            sleep(self.resolve_stream_delay_seconds)
         self.resolved_track_ids.append(track.id)
         if self.stream_ref is None:
             raise StreamResolveError("Stream resolution failed")
@@ -1108,6 +1111,44 @@ def test_replace_queue_resolves_missing_stream_refs_through_music_service() -> N
     assert snapshot.current_item is not None
     assert snapshot.current_item.track.stream_ref == "resolved://one"
     assert music_service.resolved_track_ids == ["one"]
+
+
+def test_refresh_schedules_stream_prefetch_without_waiting() -> None:
+    music_service = FakeMusicService(stream_ref="resolved://prefetched")
+    music_service.resolve_stream_delay_seconds = 0.35
+    service = PlaybackService(
+        playback_engine=FakePlaybackEngine(),
+        logger=TestLogger(),
+        music_service=music_service,
+    )
+    service.replace_queue(
+        (
+            Track(
+                id="one",
+                title="One",
+                artists=("Artist",),
+                stream_ref="local://one",
+            ),
+            Track(id="two", title="Two", artists=("Artist",)),
+        ),
+        start_index=0,
+        source_type="test",
+    )
+
+    started_at = monotonic()
+    service.refresh()
+    elapsed = monotonic() - started_at
+
+    assert elapsed < 0.2
+    service.wait_for_pending_stream_prefetch(timeout=1.0)
+    assert music_service.resolved_track_ids == ["two"]
+
+    snapshot = service.next()
+
+    assert snapshot.current_item is not None
+    assert snapshot.current_item.track.id == "two"
+    assert snapshot.current_item.track.stream_ref == "resolved://prefetched"
+    assert music_service.resolved_track_ids == ["two"]
 
 
 def test_replace_queue_raises_when_stream_cannot_be_resolved() -> None:
