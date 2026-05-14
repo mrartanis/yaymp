@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 
 from PySide6.QtCore import QEvent, Qt, QTimer
-from PySide6.QtGui import QCloseEvent, QMouseEvent, QResizeEvent, QShowEvent
+from PySide6.QtGui import QCloseEvent, QMouseEvent, QResizeEvent, QShowEvent, QWheelEvent
 
 
 class MainWindowWindowingMixin:
@@ -49,6 +49,7 @@ class MainWindowWindowingMixin:
         settings_popup = getattr(self, "_settings_popup", None)
         volume_button = getattr(self, "_volume_button", None)
         volume_popup = getattr(self, "_volume_popup", None)
+        volume_slider = getattr(self, "_volume_slider", None)
         queue_list = getattr(self, "_queue_list", None)
         player_panel_frame = getattr(self, "_player_panel_frame", None)
         track_metadata_zone = getattr(self, "_track_metadata_zone", None)
@@ -105,10 +106,31 @@ class MainWindowWindowingMixin:
         if watched is volume_button:
             if event.type() == QEvent.Type.Enter:
                 self._show_volume_popup()
+            if event.type() == QEvent.Type.Wheel:
+                wheel_event = self._as_wheel_event(event)
+                if wheel_event is not None:
+                    self._adjust_volume_by_steps(self._wheel_steps(wheel_event))
+                    return True
             return False
         if watched is volume_popup:
             if event.type() == QEvent.Type.Leave:
                 self._hide_volume_popup_if_idle()
+            if event.type() == QEvent.Type.Wheel:
+                wheel_event = self._as_wheel_event(event)
+                if wheel_event is not None:
+                    self._adjust_volume_by_steps(self._wheel_steps(wheel_event))
+                    return True
+            return False
+        if watched is volume_slider:
+            if event.type() == QEvent.Type.Enter:
+                self._show_volume_popup()
+            if event.type() == QEvent.Type.Leave:
+                self._hide_volume_popup_if_idle()
+            if event.type() == QEvent.Type.Wheel:
+                wheel_event = self._as_wheel_event(event)
+                if wheel_event is not None:
+                    self._adjust_volume_by_steps(self._wheel_steps(wheel_event))
+                    return True
             return False
         if watched in {queue_list, queue_viewport}:
             if event.type() in {
@@ -123,6 +145,15 @@ class MainWindowWindowingMixin:
 
     def _as_mouse_event(self, event: QEvent) -> QMouseEvent | None:
         return event if isinstance(event, QMouseEvent) else None
+
+    def _as_wheel_event(self, event: QEvent) -> QWheelEvent | None:
+        return event if isinstance(event, QWheelEvent) else None
+
+    def _wheel_steps(self, event: QWheelEvent) -> int:
+        delta = event.angleDelta().y()
+        if delta == 0:
+            return 0
+        return int(delta / 120) if abs(delta) >= 120 else (1 if delta > 0 else -1)
 
     def _is_macos_window_controls(self) -> bool:
         return sys.platform == "darwin"

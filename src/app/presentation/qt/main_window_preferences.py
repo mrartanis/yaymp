@@ -153,6 +153,7 @@ class MainWindowPreferencesMixin:
         layout.setContentsMargins(8, 8, 8, 8)
         layout.addWidget(self._volume_slider, 0, Qt.AlignmentFlag.AlignCenter)
         self._volume_popup.installEventFilter(self)
+        self._volume_slider.installEventFilter(self)
         self._volume_popup.hide()
 
     def _show_settings_popup(self) -> None:
@@ -190,7 +191,12 @@ class MainWindowPreferencesMixin:
     def _hide_volume_popup_if_idle(self) -> None:
         if self._volume_popup is None:
             return
+        if getattr(self, "_volume_slider_drag_active", False):
+            return
         if self._volume_popup.geometry().contains(QCursor.pos()):
+            return
+        button_pos = self._volume_button.mapFromGlobal(QCursor.pos())
+        if self._volume_button.geometry().contains(button_pos):
             return
         self._volume_popup.hide()
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import random
 from collections.abc import Callable, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -462,7 +463,7 @@ class PlaybackService:
     def set_volume(self, volume: int) -> PlaybackSnapshot:
         bounded_volume = max(0, min(100, volume))
         self._volume = bounded_volume
-        self._playback_engine.set_volume(bounded_volume)
+        self._playback_engine.set_volume(self._ui_volume_to_engine_volume(bounded_volume))
         return self.snapshot()
 
     def set_repeat_mode(self, repeat_mode: RepeatMode) -> PlaybackSnapshot:
@@ -617,7 +618,7 @@ class PlaybackService:
             monotonic() - load_started_at,
             prepared_item.track.id,
         )
-        self._playback_engine.set_volume(self._volume)
+        self._playback_engine.set_volume(self._ui_volume_to_engine_volume(self._volume))
         self._active_index = index
         self._active_item_loaded = True
         if not preserve_restored_position:
@@ -756,12 +757,18 @@ class PlaybackService:
             active_index=self._active_index,
             position_ms=position_ms,
             duration_ms=engine_state.duration_ms,
-            volume=engine_state.volume,
+            volume=self._volume,
             shuffle_enabled=self._shuffle_enabled,
             repeat_mode=self._repeat_mode,
             audio_codec=engine_state.audio_codec,
             audio_bitrate=engine_state.audio_bitrate,
         )
+
+    def _ui_volume_to_engine_volume(self, volume: int) -> int:
+        if volume <= 0:
+            return 0
+        normalized = max(0.0, min(1.0, volume / 100.0))
+        return round(math.sqrt(normalized) * 100)
 
     def _build_snapshot(self, engine_state: PlaybackState) -> PlaybackSnapshot:
         state = self._compose_state(engine_state)

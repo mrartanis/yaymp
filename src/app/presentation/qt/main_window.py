@@ -141,6 +141,7 @@ class MainWindow(
         self._track_like_overrides: dict[str, bool] = {}
         self._track_label_base_sizes: dict[QLabel, int] = {}
         self._updating_resize_cursor = False
+        self._volume_slider_drag_active = False
         self._my_wave_pending = False
         self._my_wave_active = False
         self._pending_artwork_track: Track | None = None
@@ -405,6 +406,8 @@ class MainWindow(
         self._play_pause_button.clicked.connect(self._toggle_play_pause)
         self._next_button.clicked.connect(self._controller.next)
         self._seek_slider.sliderReleased.connect(self._apply_seek)
+        self._volume_slider.sliderPressed.connect(self._on_volume_slider_pressed)
+        self._volume_slider.sliderReleased.connect(self._on_volume_slider_released)
         self._volume_slider.valueChanged.connect(self._apply_volume)
         self._queue_list.doubleClicked.connect(self._select_queue_item)
         self._queue_list.reorder_requested.connect(self._reorder_queue_item)
@@ -492,6 +495,24 @@ class MainWindow(
     def _apply_volume(self, volume: int) -> None:
         self._controller.set_volume(volume)
         self._container.services.settings_service.save_volume(volume)
+
+    def _on_volume_slider_pressed(self) -> None:
+        self._volume_slider_drag_active = True
+        self._show_volume_popup()
+
+    def _on_volume_slider_released(self) -> None:
+        self._volume_slider_drag_active = False
+        self._hide_volume_popup_if_idle()
+
+    def _adjust_volume_by_steps(self, steps: int) -> None:
+        if steps == 0:
+            return
+        current = self._volume_slider.value()
+        target = max(0, min(100, current + steps * 2))
+        if target == current:
+            return
+        self._volume_slider.setValue(target)
+        self._show_volume_popup()
 
     def _select_queue_item(self, index: QModelIndex) -> None:
         if not index.isValid():
