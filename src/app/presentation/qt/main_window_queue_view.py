@@ -187,7 +187,7 @@ class QueueWaveformOverlay(QWidget):
         self._active_row: int | None = None
         self._playback_status = PlaybackStatus.STOPPED
         self._timer = QTimer(self)
-        self._timer.setInterval(150)
+        self._timer.setInterval(300)
         self._timer.timeout.connect(self._advance_animation)
         self.hide()
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)

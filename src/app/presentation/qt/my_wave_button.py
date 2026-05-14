@@ -18,7 +18,7 @@ class MyWaveButton(QPushButton):
         self._animation_direction = 1.0
         self._animated = False
         self._timer = QTimer(self)
-        self._timer.setInterval(200)
+        self._timer.setInterval(500)
         self._timer.timeout.connect(self._advance_animation)
 
     def set_visuals(
@@ -84,7 +84,7 @@ class MyWaveButton(QPushButton):
         return leading, ending
 
     def _advance_animation(self) -> None:
-        self._animation_phase += self._animation_direction * 1.5
+        self._animation_phase += self._animation_direction * 4.0
         if self._animation_phase >= 100.0:
             self._animation_phase = 100.0
             self._animation_direction = -1.0
