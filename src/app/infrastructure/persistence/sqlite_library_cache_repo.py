@@ -121,6 +121,9 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
             artist_ids = json.loads(row["artist_ids_json"] or "[]")
             if not isinstance(artist_ids, list):
                 raise TypeError("artist_ids_json must be a list")
+            waveform_bins = json.loads(row["waveform_bins_json"] or "[]")
+            if not isinstance(waveform_bins, list):
+                raise TypeError("waveform_bins_json must be a list")
             return Track(
                 id=str(row["id"]),
                 title=str(row["title"]),
@@ -135,6 +138,9 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                 stream_ref_cached_at=self._optional_datetime(row["stream_ref_cached_at"]),
                 artwork_ref=row["artwork_ref"],
                 accent_color=row["accent_color"],
+                waveform_bins=tuple(
+                    float(value) for value in waveform_bins if isinstance(value, (int, float))
+                ),
                 available=bool(row["available"]),
                 is_liked=bool(row["is_liked"]),
             )
@@ -429,6 +435,7 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                         stream_ref_cached_at text,
                         artwork_ref text,
                         accent_color text,
+                        waveform_bins_json text not null default '[]',
                         available integer not null,
                         is_liked integer not null,
                         cached_at text not null
@@ -512,6 +519,12 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                     column="accent_color",
                     definition="text",
                 )
+                self._ensure_column(
+                    connection,
+                    table="tracks",
+                    column="waveform_bins_json",
+                    definition="text not null default '[]'",
+                )
         except (OSError, sqlite3.Error) as exc:
             raise StorageError("Failed to initialize library cache database") from exc
 
@@ -566,9 +579,9 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                 "insert into tracks("
                 "id, title, version, artists_json, artist_ids_json, album_id, album_title, "
                 "album_year, duration_ms, "
-                "stream_ref, stream_ref_cached_at, artwork_ref, accent_color, available, "
-                "is_liked, cached_at"
-                ") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "stream_ref, stream_ref_cached_at, artwork_ref, accent_color, waveform_bins_json, "
+                "available, is_liked, cached_at"
+                ") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 "on conflict(id) do update set "
                 "title = excluded.title, "
                 "version = excluded.version, "
@@ -582,6 +595,7 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                 "stream_ref_cached_at = excluded.stream_ref_cached_at, "
                 "artwork_ref = excluded.artwork_ref, "
                 "accent_color = excluded.accent_color, "
+                "waveform_bins_json = excluded.waveform_bins_json, "
                 "available = excluded.available, "
                 "is_liked = excluded.is_liked, "
                 "cached_at = excluded.cached_at"
@@ -604,6 +618,7 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                 ),
                 track.artwork_ref,
                 track.accent_color,
+                json.dumps([float(value) for value in track.waveform_bins], ensure_ascii=True),
                 int(track.available),
                 int(track.is_liked),
                 self._now_iso(),
@@ -831,6 +846,7 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
             ),
             "artwork_ref": track.artwork_ref,
             "accent_color": track.accent_color,
+            "waveform_bins": [float(value) for value in track.waveform_bins],
             "available": track.available,
             "is_liked": track.is_liked,
         }
@@ -857,6 +873,11 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                 ),
                 artwork_ref=self._optional_str(raw_track.get("artwork_ref")),
                 accent_color=self._optional_str(raw_track.get("accent_color")),
+                waveform_bins=tuple(
+                    float(value)
+                    for value in raw_track.get("waveform_bins", ())
+                    if isinstance(value, (int, float))
+                ),
                 available=bool(raw_track.get("available", True)),
                 is_liked=bool(raw_track.get("is_liked", False)),
             )

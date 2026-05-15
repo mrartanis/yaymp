@@ -31,6 +31,7 @@ from app.infrastructure.persistence import (
 )
 from app.infrastructure.playback.fake_playback_engine import FakePlaybackEngine
 from app.infrastructure.playback.mpv_playback_engine import MpvPlaybackEngine
+from app.infrastructure.playback.stream_proxy_service import StreamProxyService
 from app.infrastructure.yandex.yandex_music_service import YandexMusicService
 
 
@@ -43,6 +44,7 @@ class AppServices:
     library_service: LibraryService
     music_service: MusicService
     playback_engine: FakePlaybackEngine | MpvPlaybackEngine
+    stream_proxy_service: StreamProxyService
     playback_service: PlaybackService
     search_service: SearchService
     demo_tracks: tuple[Track, ...]
@@ -100,12 +102,18 @@ def build_container(config: AppConfig, logger: logging.Logger) -> AppContainer:
         logger.warning("Failed to refresh liked track index: %s", exc)
 
     playback_engine = _build_playback_engine(logger)
+    stream_proxy_service = StreamProxyService(
+        logger=logger,
+        library_cache_repo=library_cache_repo,
+    )
     playback_service = PlaybackService(
         playback_engine=playback_engine,
         logger=logger,
         music_service=music_service,
         library_cache_repo=library_cache_repo,
         playback_state_repo=playback_state_repo,
+        stream_proxy_service=stream_proxy_service,
+        waveform_progress_enabled=settings_service.load_waveform_progress_enabled(),
     )
     demo_tracks = build_demo_tracks()
     playback_service.restore_saved_queue()
@@ -121,6 +129,7 @@ def build_container(config: AppConfig, logger: logging.Logger) -> AppContainer:
             library_service=library_service,
             music_service=music_service,
             playback_engine=playback_engine,
+            stream_proxy_service=stream_proxy_service,
             playback_service=playback_service,
             search_service=search_service,
             demo_tracks=demo_tracks,

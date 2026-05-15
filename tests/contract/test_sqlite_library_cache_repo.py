@@ -29,6 +29,7 @@ def test_sqlite_library_cache_repo_round_trips_track_metadata_and_artwork(tmp_pa
         duration_ms=123_000,
         stream_ref="stream",
         artwork_ref="covers/track.jpg",
+        waveform_bins=(0.1, 0.3, 0.6),
         is_liked=True,
     )
 

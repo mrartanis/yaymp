@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -135,6 +136,32 @@ class MainWindowPreferencesMixin:
             language_row.addWidget(button)
         layout.addLayout(language_row)
 
+        self._settings_waveform_progress_label = QLabel(
+            self._t("settings.section.waveform_progress")
+        )
+        self._settings_waveform_progress_label.setObjectName("settings-section")
+        layout.addWidget(self._settings_waveform_progress_label)
+        waveform_row = QHBoxLayout()
+        waveform_row.setContentsMargins(0, 0, 0, 0)
+        waveform_row.setSpacing(6)
+        self._waveform_progress_buttons: dict[bool, QPushButton] = {}
+        for enabled, title in (
+            (False, self._t("settings.option.waveform_progress.disabled")),
+            (True, self._t("settings.option.waveform_progress.enabled")),
+        ):
+            button = QPushButton(title)
+            button.setObjectName("quality-option")
+            button.setCheckable(True)
+            button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+            button.clicked.connect(
+                lambda checked=False, selected=enabled: self._set_waveform_progress_enabled(
+                    selected
+                )
+            )
+            self._waveform_progress_buttons[enabled] = button
+            waveform_row.addWidget(button)
+        layout.addLayout(waveform_row)
+
         self._logout_button = QPushButton(self._t("action.logout"))
         self._logout_button.setObjectName("settings-action")
         self._logout_button.clicked.connect(self._logout)
@@ -244,6 +271,21 @@ class MainWindowPreferencesMixin:
             )
         )
 
+    def _set_waveform_progress_enabled(self, enabled: bool) -> None:
+        self._container.services.settings_service.save_waveform_progress_enabled(enabled)
+        self._render_waveform_progress_enabled(enabled)
+        if hasattr(self, "_seek_slider"):
+            self._seek_slider.set_waveform_enabled(enabled)
+        self._controller.set_waveform_progress_enabled(enabled)
+        option_key = (
+            "settings.option.waveform_progress.enabled"
+            if enabled
+            else "settings.option.waveform_progress.disabled"
+        )
+        self._status_label.setText(
+            self._t("settings.waveform_progress", value=self._t(option_key))
+        )
+
     def _render_theme_preference(self, theme: str) -> None:
         for candidate, button in self._theme_buttons.items():
             button.setChecked(candidate == theme)
@@ -255,6 +297,10 @@ class MainWindowPreferencesMixin:
     def _render_language_preference(self, language: str) -> None:
         for candidate, button in self._language_buttons.items():
             button.setChecked(candidate == language)
+
+    def _render_waveform_progress_enabled(self, enabled: bool) -> None:
+        for candidate, button in getattr(self, "_waveform_progress_buttons", {}).items():
+            button.setChecked(candidate == enabled)
 
     def _logout(self) -> None:
         self._container.services.auth_service.clear_session()
@@ -275,8 +321,31 @@ class MainWindowPreferencesMixin:
         self._render_theme_preference(self._stored_theme_preference())
         self._render_corner_style_preference(self._stored_corner_style_preference())
         self._render_language_preference(self._stored_language_preference())
+        self._render_waveform_progress_enabled(
+            self._container.services.settings_service.load_waveform_progress_enabled()
+        )
+        if hasattr(self, "_seek_slider"):
+            self._seek_slider.set_waveform_enabled(
+                self._container.services.settings_service.load_waveform_progress_enabled()
+            )
+        self._normalize_settings_option_button_widths()
         self._refresh_localized_texts()
         self._apply_theme()
+
+    def _normalize_settings_option_button_widths(self) -> None:
+        button_groups = (
+            getattr(self, "_quality_buttons", {}).values(),
+            getattr(self, "_theme_buttons", {}).values(),
+            getattr(self, "_corner_style_buttons", {}).values(),
+            getattr(self, "_language_buttons", {}).values(),
+            getattr(self, "_waveform_progress_buttons", {}).values(),
+        )
+        buttons = [button for group in button_groups for button in group]
+        if not buttons:
+            return
+        common_width = max(button.sizeHint().width() for button in buttons)
+        for button in buttons:
+            button.setMinimumWidth(common_width)
 
     def _maybe_start_auth_flow(self) -> None:
         if self._container.services.auth_service.current_session() is not None:
@@ -343,6 +412,12 @@ class MainWindowPreferencesMixin:
             rounded=self._stored_corner_style_preference() == "rounded",
             theme_mode=self._resolved_theme_mode(),
         )
+        if hasattr(self, "_seek_slider"):
+            self._seek_slider.set_visuals(
+                accent=self._accent_color,
+                theme_mode=self._resolved_theme_mode(),
+                rounded=self._stored_corner_style_preference() == "rounded",
+            )
         self._refresh_theme_icons()
         if self._browser_dialog is not None:
             self._browser_dialog.setStyleSheet(self.styleSheet())
@@ -424,6 +499,10 @@ class MainWindowPreferencesMixin:
             self._settings_corner_label.setText(self._t("settings.section.corners"))
         if hasattr(self, "_settings_language_label"):
             self._settings_language_label.setText(self._t("settings.section.language"))
+        if hasattr(self, "_settings_waveform_progress_label"):
+            self._settings_waveform_progress_label.setText(
+                self._t("settings.section.waveform_progress")
+            )
         if hasattr(self, "_logout_button"):
             self._logout_button.setText(self._t("action.logout"))
         for theme_id, button in getattr(self, "_theme_buttons", {}).items():
@@ -432,6 +511,14 @@ class MainWindowPreferencesMixin:
             button.setText(self._t(f"settings.option.corner.{corner_style}"))
         for language, button in getattr(self, "_language_buttons", {}).items():
             button.setText(self._t(f"settings.option.language.{language}"))
+        for enabled, button in getattr(self, "_waveform_progress_buttons", {}).items():
+            key = (
+                "settings.option.waveform_progress.enabled"
+                if enabled
+                else "settings.option.waveform_progress.disabled"
+            )
+            button.setText(self._t(key))
+        self._normalize_settings_option_button_widths()
         if getattr(self, "_auth_dialog", None) is not None:
             self._auth_dialog.apply_texts(
                 window_title=self._t("app.auth_dialog.title"),

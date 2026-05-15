@@ -603,6 +603,12 @@ class MainWindow(
         self._seek_slider.blockSignals(True)
         self._seek_slider.setMaximum(state.duration_ms or 300_000)
         self._seek_slider.setValue(state.position_ms)
+        self._seek_slider.set_waveform_state(
+            buffered_position_ms=state.waveform.buffered_position_ms,
+            waveform_bins=state.waveform.waveform_bins,
+            waveform_known_position_ms=state.waveform.waveform_known_position_ms,
+            waveform_mode=state.waveform.waveform_mode,
+        )
         self._seek_slider.blockSignals(False)
         self._seek_label.setText(
             f"{self._format_ms(state.position_ms)} / {self._format_ms(state.duration_ms)}"

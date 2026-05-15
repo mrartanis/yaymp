@@ -18,6 +18,7 @@ from app.domain.playback import (
     QueueItem,
     RepeatMode,
     SavedPlaybackQueue,
+    WaveformState,
 )
 from app.domain.playlist import Playlist
 from app.domain.protocols import (
@@ -67,4 +68,5 @@ __all__ = [
     "StreamResolveError",
     "Track",
     "TrackUnavailableError",
+    "WaveformState",
 ]

@@ -88,6 +88,9 @@ class PlaybackController(QObject):
     def set_shuffle_enabled(self, enabled: bool) -> None:
         self._dispatch(lambda: self._playback_service.set_shuffle_enabled(enabled))
 
+    def set_waveform_progress_enabled(self, enabled: bool) -> None:
+        self._dispatch(lambda: self._playback_service.set_waveform_progress_enabled(enabled))
+
     def select_index(self, index: int) -> None:
         self._dispatch(lambda: self._playback_service.select_index(index))
 

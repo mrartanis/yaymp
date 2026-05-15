@@ -95,6 +95,11 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
                 ),
                 artwork_ref=self._optional_str(raw_track.get("artwork_ref")),
                 accent_color=self._optional_str(raw_track.get("accent_color")),
+                waveform_bins=tuple(
+                    float(value)
+                    for value in raw_track.get("waveform_bins", ())
+                    if isinstance(value, (int, float))
+                ),
                 available=bool(raw_track.get("available", True)),
                 is_liked=bool(raw_track.get("is_liked", False)),
             )
@@ -124,6 +129,7 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
             ),
             "artwork_ref": track.artwork_ref,
             "accent_color": track.accent_color,
+            "waveform_bins": [float(value) for value in track.waveform_bins],
             "available": track.available,
             "is_liked": track.is_liked,
             "cached_at": self._now_iso(),
@@ -443,6 +449,7 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
             ),
             "artwork_ref": track.artwork_ref,
             "accent_color": track.accent_color,
+            "waveform_bins": [float(value) for value in track.waveform_bins],
             "available": track.available,
             "is_liked": track.is_liked,
         }
@@ -469,6 +476,11 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
                 ),
                 artwork_ref=self._optional_str(raw_track.get("artwork_ref")),
                 accent_color=self._optional_str(raw_track.get("accent_color")),
+                waveform_bins=tuple(
+                    float(value)
+                    for value in raw_track.get("waveform_bins", ())
+                    if isinstance(value, (int, float))
+                ),
                 available=bool(raw_track.get("available", True)),
                 is_liked=bool(raw_track.get("is_liked", False)),
             )

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 
 from app.domain.track import Track
@@ -60,6 +60,14 @@ class SavedPlaybackQueue:
 
 
 @dataclass(frozen=True, slots=True)
+class WaveformState:
+    buffered_position_ms: int | None = None
+    waveform_bins: tuple[float, ...] = ()
+    waveform_known_position_ms: int = 0
+    waveform_mode: str = "plain"
+
+
+@dataclass(frozen=True, slots=True)
 class PlaybackState:
     status: PlaybackStatus = PlaybackStatus.STOPPED
     active_index: int | None = None
@@ -70,3 +78,4 @@ class PlaybackState:
     repeat_mode: RepeatMode = RepeatMode.OFF
     audio_codec: str | None = None
     audio_bitrate: int | None = None
+    waveform: WaveformState = field(default_factory=WaveformState)

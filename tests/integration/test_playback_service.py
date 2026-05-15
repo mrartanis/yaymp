@@ -1,4 +1,5 @@
 import random
+from datetime import UTC, datetime
 from time import monotonic, sleep
 
 import pytest
@@ -21,6 +22,7 @@ from app.domain import (
     StationTrackBatch,
     StreamResolveError,
     Track,
+    WaveformState,
 )
 from app.infrastructure.playback.fake_playback_engine import FakePlaybackEngine
 
@@ -569,6 +571,32 @@ class InMemoryLibraryCacheRepo:
 
     def save_artwork_ref(self, item_id: str, artwork_ref: str):
         del item_id, artwork_ref
+
+
+class FakeStreamProxyService:
+    def __init__(self) -> None:
+        self.created_sessions: list[tuple[str, str]] = []
+        self.closed_track_ids: list[str] = []
+        self.waveform_state = WaveformState(
+            buffered_position_ms=42_000,
+            waveform_bins=(0.2, 0.6, 0.4),
+            waveform_known_position_ms=57_000,
+            waveform_mode="mp3_partial",
+        )
+
+    def create_session(self, *, track: Track, stream_ref: str) -> str:
+        self.created_sessions.append((track.id, stream_ref))
+        return f"http://127.0.0.1:9999/stream/{track.id}"
+
+    def close_track_session(self, track_id: str) -> None:
+        self.closed_track_ids.append(track_id)
+
+    def get_waveform_state(self, track_id: str | None) -> WaveformState:
+        del track_id
+        return self.waveform_state
+
+    def shutdown(self) -> None:
+        return None
 
 
 def build_tracks() -> tuple[Track, ...]:
@@ -1510,3 +1538,27 @@ def test_seek_and_volume_persist_across_track_transitions() -> None:
     assert snapshot.state.position_ms == 0
     assert snapshot.current_item is not None
     assert snapshot.current_item.track.id == "two"
+
+
+def test_snapshot_includes_stream_proxy_waveform_state() -> None:
+    proxy = FakeStreamProxyService()
+    http_track = Track(
+        id="http-one",
+        title="HTTP One",
+        artists=("Artist",),
+        album_id="album-1",
+        duration_ms=120_000,
+        stream_ref="https://example.test/http-one.mp3",
+        stream_ref_cached_at=datetime.now(tz=UTC),
+    )
+    service = PlaybackService(
+        playback_engine=FakePlaybackEngine(),
+        logger=TestLogger(),
+        stream_proxy_service=proxy,
+        waveform_progress_enabled=True,
+    )
+
+    snapshot = service.replace_queue((http_track,), start_index=0, source_type="test")
+
+    assert proxy.created_sessions == [("http-one", "https://example.test/http-one.mp3")]
+    assert snapshot.state.waveform == proxy.waveform_state

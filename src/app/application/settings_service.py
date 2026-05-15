@@ -11,6 +11,7 @@ class SettingsService:
     _CORNER_STYLE_KEY = "corner_style"
     _LANGUAGE_KEY = "language"
     _MY_WAVE_HISTORY_KEY = "my_wave_history"
+    _WAVEFORM_PROGRESS_KEY = "waveform_progress"
 
     def __init__(self, *, settings_repo: SettingsRepo, logger: Logger) -> None:
         self._settings_repo = settings_repo
@@ -110,6 +111,15 @@ class SettingsService:
             if len(value) == 7 and value.startswith("#"):
                 normalized.append(value.lower())
         self._save_value(self._MY_WAVE_HISTORY_KEY, normalized)
+
+    def load_waveform_progress_enabled(self, *, default: bool = False) -> bool:
+        value = self._load_value(self._WAVEFORM_PROGRESS_KEY)
+        if not isinstance(value, bool):
+            return default
+        return value
+
+    def save_waveform_progress_enabled(self, enabled: bool) -> None:
+        self._save_value(self._WAVEFORM_PROGRESS_KEY, bool(enabled))
 
     def _load_value(self, key: str) -> object | None:
         try:

@@ -4,7 +4,7 @@ import math
 import random
 from collections.abc import Callable, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from threading import Lock
 from time import monotonic
@@ -24,9 +24,11 @@ from app.domain import (
     RadioSession,
     RepeatMode,
     Track,
+    WaveformState,
 )
 from app.domain.errors import PlaybackBackendError, StreamResolveError
 from app.domain.protocols import MusicService
+from app.infrastructure.playback.stream_proxy_service import StreamProxyService
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,6 +91,8 @@ class PlaybackService:
         music_service: MusicService | None = None,
         library_cache_repo: LibraryCacheRepo | None = None,
         playback_state_repo: PlaybackStateRepo | None = None,
+        stream_proxy_service: StreamProxyService | None = None,
+        waveform_progress_enabled: bool = False,
         randomizer: random.Random | None = None,
     ) -> None:
         self._playback_engine = playback_engine
@@ -96,6 +100,8 @@ class PlaybackService:
         self._music_service = music_service
         self._library_cache_repo = library_cache_repo
         self._playback_state_repo = playback_state_repo
+        self._stream_proxy_service = stream_proxy_service
+        self._waveform_progress_enabled = waveform_progress_enabled
         self._randomizer = randomizer or random.Random()
         self._queue: list[QueueItem] = []
         self._active_index: int | None = None
@@ -130,6 +136,8 @@ class PlaybackService:
         self._stream_prefetch_shutdown = True
         self._telemetry_executor.shutdown(wait=False, cancel_futures=True)
         self._stream_prefetch_executor.shutdown(wait=False, cancel_futures=True)
+        if self._stream_proxy_service is not None:
+            self._stream_proxy_service.shutdown()
 
     def wait_for_pending_telemetry(self, *, timeout: float = 5.0) -> None:
         if self._telemetry_shutdown:
@@ -470,6 +478,10 @@ class PlaybackService:
         self._repeat_mode = repeat_mode
         return self.snapshot()
 
+    def set_waveform_progress_enabled(self, enabled: bool) -> PlaybackSnapshot:
+        self._waveform_progress_enabled = enabled
+        return self.snapshot()
+
     def set_shuffle_enabled(self, enabled: bool) -> PlaybackSnapshot:
         self._shuffle_enabled = enabled
         self._rebuild_play_order(anchor_index=self._active_index)
@@ -611,8 +623,20 @@ class PlaybackService:
         )
         self._queue[index] = prepared_item
         stream_ref = prepared_item.track.stream_ref or ""
+        playback_stream_ref = stream_ref
+        if (
+            self._waveform_progress_enabled
+            and (
+            self._stream_proxy_service is not None
+            and stream_ref.startswith(("http://", "https://"))
+            )
+        ):
+            playback_stream_ref = self._stream_proxy_service.create_session(
+                track=prepared_item.track,
+                stream_ref=stream_ref,
+            )
         load_started_at = monotonic()
-        self._playback_engine.load(prepared_item.track, stream_ref=stream_ref)
+        self._playback_engine.load(prepared_item.track, stream_ref=playback_stream_ref)
         self._logger.debug(
             "Playback engine load took %.3fs for track %s",
             monotonic() - load_started_at,
@@ -689,6 +713,7 @@ class PlaybackService:
                 stream_ref_cached_at=stream_ref_cached_at,
                 artwork_ref=item.track.artwork_ref,
                 accent_color=item.track.accent_color,
+                waveform_bins=item.track.waveform_bins,
                 available=item.track.available,
                 is_liked=item.track.is_liked,
             ),
@@ -752,6 +777,37 @@ class PlaybackService:
         position_ms = engine_state.position_ms
         if self.current_item() is not None and not self._active_item_loaded:
             position_ms = self._restored_position_ms
+        waveform = WaveformState()
+        current_item = self.current_item()
+        if (
+            self._waveform_progress_enabled
+            and self._stream_proxy_service is not None
+            and current_item is not None
+        ):
+            waveform = self._stream_proxy_service.get_waveform_state(current_item.track.id)
+            if (
+                waveform.waveform_bins
+                and current_item.track.duration_ms
+                and waveform.waveform_known_position_ms >= current_item.track.duration_ms
+                and not current_item.track.waveform_bins
+            ):
+                self._promote_cached_waveform_to_queue(
+                    track_id=current_item.track.id,
+                    waveform_bins=waveform.waveform_bins,
+                )
+                current_item = self.current_item()
+        if (
+            self._waveform_progress_enabled
+            and current_item is not None
+            and current_item.track.waveform_bins
+            and (not waveform.waveform_bins or waveform.waveform_mode == "plain")
+        ):
+            waveform = WaveformState(
+                buffered_position_ms=waveform.buffered_position_ms,
+                waveform_bins=current_item.track.waveform_bins,
+                waveform_known_position_ms=current_item.track.duration_ms or 0,
+                waveform_mode="cached",
+            )
         return PlaybackState(
             status=engine_state.status,
             active_index=self._active_index,
@@ -762,7 +818,25 @@ class PlaybackService:
             repeat_mode=self._repeat_mode,
             audio_codec=engine_state.audio_codec,
             audio_bitrate=engine_state.audio_bitrate,
+            waveform=waveform,
         )
+
+    def _promote_cached_waveform_to_queue(
+        self,
+        *,
+        track_id: str,
+        waveform_bins: tuple[float, ...],
+    ) -> None:
+        updated = False
+        new_queue: list[QueueItem] = []
+        for item in self._queue:
+            if item.track.id != track_id or item.track.waveform_bins:
+                new_queue.append(item)
+                continue
+            new_queue.append(replace(item, track=replace(item.track, waveform_bins=waveform_bins)))
+            updated = True
+        if updated:
+            self._queue = new_queue
 
     def _ui_volume_to_engine_volume(self, volume: int) -> int:
         if volume <= 0:
@@ -1088,6 +1162,7 @@ class PlaybackService:
         radio_origin: str | None = None,
         radio_queue_anchor_track_id: str | None = None,
     ) -> QueueItem:
+        track = self._hydrate_cached_waveform(track)
         return QueueItem(
             track=track,
             source_type=source_type,
@@ -1097,6 +1172,31 @@ class PlaybackService:
             radio_session_id=radio_session_id,
             radio_origin=radio_origin,
             radio_queue_anchor_track_id=radio_queue_anchor_track_id,
+        )
+
+    def _hydrate_cached_waveform(self, track: Track) -> Track:
+        if track.waveform_bins or self._library_cache_repo is None:
+            return track
+        cached_track = self._library_cache_repo.load_track_metadata(track.id)
+        if cached_track is None or not cached_track.waveform_bins:
+            return track
+        return Track(
+            id=track.id,
+            title=track.title,
+            artists=track.artists,
+            version=track.version,
+            artist_ids=track.artist_ids,
+            album_id=track.album_id,
+            album_title=track.album_title,
+            album_year=track.album_year,
+            duration_ms=track.duration_ms,
+            stream_ref=track.stream_ref,
+            stream_ref_cached_at=track.stream_ref_cached_at,
+            artwork_ref=track.artwork_ref,
+            accent_color=track.accent_color,
+            waveform_bins=cached_track.waveform_bins,
+            available=track.available,
+            is_liked=track.is_liked,
         )
 
     def _advance_to_next_track(
@@ -1169,55 +1269,59 @@ class PlaybackService:
         natural_end: bool,
         engine_state: PlaybackState | None = None,
     ) -> None:
-        session = self._telemetry_session
         current_item = self.current_item()
-        if (
-            session is None
-            or current_item is None
-            or session.terminal_reported
-            or not session.started
-        ):
+        if current_item is None:
             return
-        current_engine_state = engine_state or self._playback_engine.get_state()
-        self._update_telemetry_position(current_engine_state)
-        played_ms = session.accumulated_played_ms
-        played_seconds = max(0.0, played_ms / 1000.0)
-        played_seconds_int = max(0, int(played_ms // 1000))
-        track_length_seconds = self._track_length_seconds(current_item.track)
-        if natural_end and track_length_seconds > 0:
-            terminal_position_seconds = track_length_seconds
-        else:
-            terminal_position_seconds = min(
-                played_seconds_int,
-                track_length_seconds or played_seconds_int,
-            )
-        self._report_play_audio(
-            current_item.track,
-            origin=session.origin,
-            play_id=session.play_id,
-            track_length_seconds=track_length_seconds,
-            total_played_seconds=played_seconds_int,
-            end_position_seconds=terminal_position_seconds,
-            playlist_id=self._play_audio_playlist_id(current_item),
-            timestamp_iso=self._utc_now_iso(),
-        )
-        self._report_plays_event(
-            current_item,
-            timestamp_iso=self._utc_now_iso(),
-            total_played_seconds=played_seconds,
-            end_position_seconds=float(terminal_position_seconds),
-            change_reason="finish" if natural_end else "skip",
-        )
-        if current_item.source_type == "station":
-            if self._should_treat_station_track_as_finished(
-                current_item.track,
-                played_seconds=played_seconds,
-                natural_end=natural_end,
-            ):
-                self._report_radio_track_finished(current_item, played_seconds)
+        session = self._telemetry_session
+        try:
+            if session is None or session.terminal_reported or not session.started:
+                return
+            current_engine_state = engine_state or self._playback_engine.get_state()
+            self._update_telemetry_position(current_engine_state)
+            played_ms = session.accumulated_played_ms
+            played_seconds = max(0.0, played_ms / 1000.0)
+            played_seconds_int = max(0, int(played_ms // 1000))
+            track_length_seconds = self._track_length_seconds(current_item.track)
+            if natural_end and track_length_seconds > 0:
+                terminal_position_seconds = track_length_seconds
             else:
-                self._report_radio_track_skipped(current_item, played_seconds)
-        session.terminal_reported = True
+                terminal_position_seconds = min(
+                    played_seconds_int,
+                    track_length_seconds or played_seconds_int,
+                )
+            self._report_play_audio(
+                current_item.track,
+                origin=session.origin,
+                play_id=session.play_id,
+                track_length_seconds=track_length_seconds,
+                total_played_seconds=played_seconds_int,
+                end_position_seconds=terminal_position_seconds,
+                playlist_id=self._play_audio_playlist_id(current_item),
+                timestamp_iso=self._utc_now_iso(),
+            )
+            self._report_plays_event(
+                current_item,
+                timestamp_iso=self._utc_now_iso(),
+                total_played_seconds=played_seconds,
+                end_position_seconds=float(terminal_position_seconds),
+                change_reason="finish" if natural_end else "skip",
+            )
+            if current_item.source_type == "station":
+                if self._should_treat_station_track_as_finished(
+                    current_item.track,
+                    played_seconds=played_seconds,
+                    natural_end=natural_end,
+                ):
+                    self._report_radio_track_finished(current_item, played_seconds)
+                else:
+                    self._report_radio_track_skipped(current_item, played_seconds)
+            session.terminal_reported = True
+        finally:
+            self._close_stream_proxy_for_track(current_item.track.id)
+
+    def _close_stream_proxy_for_track(self, track_id: str) -> None:
+        if self._stream_proxy_service is not None:
+            self._stream_proxy_service.close_track_session(track_id)
 
     def _should_treat_station_track_as_finished(
         self,

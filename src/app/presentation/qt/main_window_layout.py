@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 from app.domain import AudioQuality
 from app.presentation.qt.icon_utils import create_icon
 from app.presentation.qt.my_wave_button import MyWaveButton
+from app.presentation.qt.waveform_seek_bar import WaveformSeekBar
 
 
 class MainWindowLayoutMixin:
@@ -28,8 +29,8 @@ class MainWindowLayoutMixin:
         layout = frame.layout()
         assert layout is not None
 
-        self._seek_slider = QSlider(Qt.Orientation.Horizontal)
-        self._seek_slider.setRange(0, 300_000)
+        self._seek_slider = WaveformSeekBar()
+        self._seek_slider.setMaximum(300_000)
         self._seek_slider.setSingleStep(1_000)
         self._seek_slider.setPageStep(10_000)
         self._seek_slider.setObjectName("seek-slider")

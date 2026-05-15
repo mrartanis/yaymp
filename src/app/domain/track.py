@@ -19,6 +19,7 @@ class Track:
     stream_ref_cached_at: datetime | None = None
     artwork_ref: str | None = None
     accent_color: str | None = None
+    waveform_bins: tuple[float, ...] = ()
     available: bool = True
     is_liked: bool = False
 
