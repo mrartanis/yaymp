@@ -341,6 +341,7 @@ class MainWindowPreferencesMixin:
             accent_text=self._accent_text_color(),
             trailing=self._my_wave_trailing_color(),
             rounded=self._stored_corner_style_preference() == "rounded",
+            theme_mode=self._resolved_theme_mode(),
         )
         self._refresh_theme_icons()
         if self._browser_dialog is not None:

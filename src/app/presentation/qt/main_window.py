@@ -74,6 +74,7 @@ class MainWindow(
     _WINDOW_MIN_HEIGHT = 704
     _QUEUE_AUTOSCROLL_IDLE_SECONDS = 1.6
     _MY_WAVE_STATION_ID = "user:onyourwave"
+    _MY_WAVE_PERSIST_INTERVAL_MS = 5_000
 
     def __init__(self, *, container: AppContainer) -> None:
         super().__init__()
@@ -144,6 +145,8 @@ class MainWindow(
         self._volume_slider_drag_active = False
         self._my_wave_pending = False
         self._my_wave_active = False
+        self._my_wave_history_dirty = False
+        self._last_my_wave_persist_bucket: int | None = None
         self._pending_artwork_track: Track | None = None
         self._pending_system_media_snapshot = None
         self._artwork_render_timer = QTimer(self)
@@ -168,6 +171,7 @@ class MainWindow(
         self.setMinimumHeight(self._WINDOW_MIN_HEIGHT)
         self.resize(self.minimumWidth(), 720)
         self._apply_saved_settings_to_ui()
+        self._restore_my_wave_history()
         self._wire_controller()
         self._system_media.initialize()
         self._controller.initialize()
@@ -550,7 +554,6 @@ class MainWindow(
 
     def _start_my_wave(self) -> None:
         self._my_wave_pending = True
-        self._start_my_wave_animation()
         self._controller.play_station(self._MY_WAVE_STATION_ID)
 
     def _render_snapshot(self, snapshot) -> None:
@@ -596,7 +599,7 @@ class MainWindow(
             self._set_accent_color("#526ee8")
 
         self._render_play_pause_button(state.status)
-        self._render_my_wave_button_state(current_item, state.status)
+        self._render_my_wave_button_state(current_item, state.status, state.position_ms)
         self._seek_slider.blockSignals(True)
         self._seek_slider.setMaximum(state.duration_ms or 300_000)
         self._seek_slider.setValue(state.position_ms)
@@ -678,7 +681,12 @@ class MainWindow(
         self._play_pause_button.setToolTip(self._t("action.play"))
         self._play_pause_button.setAccessibleName(self._t("action.play"))
 
-    def _render_my_wave_button_state(self, current_item, status: PlaybackStatus) -> None:
+    def _render_my_wave_button_state(
+        self,
+        current_item,
+        status: PlaybackStatus,
+        position_ms: int,
+    ) -> None:
         is_my_wave = (
             current_item is not None
             and current_item.source_type == "station"
@@ -687,16 +695,17 @@ class MainWindow(
         self._my_wave_active = is_my_wave and status is PlaybackStatus.PLAYING
         if is_my_wave:
             self._my_wave_pending = False
-        if self._my_wave_pending or self._my_wave_active:
-            self._start_my_wave_animation()
-            return
-        self._stop_my_wave_animation()
-
-    def _start_my_wave_animation(self) -> None:
-        self._my_wave_top_button.set_animated(True)
-
-    def _stop_my_wave_animation(self) -> None:
-        self._my_wave_top_button.set_animated(False)
+        if self._my_wave_top_button.sync_playback(
+            enabled=self._my_wave_active,
+            track_id=current_item.track.id if is_my_wave else None,
+            position_ms=position_ms,
+            accent=self._accent_color,
+        ):
+            self._my_wave_history_dirty = True
+        self._maybe_persist_my_wave_history(
+            status=status,
+            position_ms=position_ms,
+        )
 
     def _my_wave_trailing_color(self) -> str:
         if self._resolved_theme_mode() == "light":
@@ -706,8 +715,40 @@ class MainWindow(
     def _render_error(self, message: str) -> None:
         self._my_wave_pending = False
         self._my_wave_active = False
-        self._stop_my_wave_animation()
         self._status_label.setText(self._t("status.playback_error", message=message))
+
+    def _restore_my_wave_history(self) -> None:
+        samples = self._container.services.settings_service.load_my_wave_history()
+        self._my_wave_top_button.restore_history(samples)
+        self._my_wave_history_dirty = False
+        self._last_my_wave_persist_bucket = None
+
+    def _persist_my_wave_history(self) -> None:
+        self._container.services.settings_service.save_my_wave_history(
+            self._my_wave_top_button.export_history()
+        )
+        self._my_wave_history_dirty = False
+
+    def _maybe_persist_my_wave_history(
+        self,
+        *,
+        status: PlaybackStatus,
+        position_ms: int,
+    ) -> None:
+        if not self._my_wave_history_dirty:
+            return
+        if status is PlaybackStatus.PLAYING:
+            bucket = max(0, position_ms) // self._MY_WAVE_PERSIST_INTERVAL_MS
+            if bucket == self._last_my_wave_persist_bucket:
+                return
+            self._persist_my_wave_history()
+            self._last_my_wave_persist_bucket = bucket
+            return
+        self._persist_my_wave_history()
+
+    def _flush_my_wave_history(self) -> None:
+        if self._my_wave_history_dirty:
+            self._persist_my_wave_history()
 
     def _render_auth_state(self) -> None:
         session = self._container.services.auth_service.current_session()

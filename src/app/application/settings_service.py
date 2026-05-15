@@ -10,6 +10,7 @@ class SettingsService:
     _THEME_KEY = "theme"
     _CORNER_STYLE_KEY = "corner_style"
     _LANGUAGE_KEY = "language"
+    _MY_WAVE_HISTORY_KEY = "my_wave_history"
 
     def __init__(self, *, settings_repo: SettingsRepo, logger: Logger) -> None:
         self._settings_repo = settings_repo
@@ -86,6 +87,29 @@ class SettingsService:
         if language not in {"system", "en", "ru"}:
             language = "system"
         self._save_value(self._LANGUAGE_KEY, language)
+
+    def load_my_wave_history(self) -> list[str]:
+        value = self._load_value(self._MY_WAVE_HISTORY_KEY)
+        if not isinstance(value, list):
+            return []
+        result: list[str] = []
+        for entry in value:
+            if not isinstance(entry, str):
+                continue
+            normalized = entry.strip()
+            if len(normalized) == 7 and normalized.startswith("#"):
+                result.append(normalized.lower())
+        return result
+
+    def save_my_wave_history(self, samples: list[str]) -> None:
+        normalized: list[str] = []
+        for sample in samples:
+            if not isinstance(sample, str):
+                continue
+            value = sample.strip()
+            if len(value) == 7 and value.startswith("#"):
+                normalized.append(value.lower())
+        self._save_value(self._MY_WAVE_HISTORY_KEY, normalized)
 
     def _load_value(self, key: str) -> object | None:
         try:

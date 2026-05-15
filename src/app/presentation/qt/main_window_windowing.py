@@ -35,6 +35,9 @@ class MainWindowWindowingMixin:
             refresh_window_button()
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        flush_my_wave_history = getattr(self, "_flush_my_wave_history", None)
+        if callable(flush_my_wave_history):
+            flush_my_wave_history()
         self._system_media.shutdown()
         self._controller.shutdown()
         self._library_controller.shutdown()
