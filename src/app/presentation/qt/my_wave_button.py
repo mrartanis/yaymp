@@ -9,6 +9,7 @@ class MyWaveButton(QPushButton):
     _HISTORY_WINDOW_SECONDS = 12 * 60
     _STEP_SECONDS = 2
     _MAX_PROGRESS_DELTA_MS = 5_000
+    _DISPLAY_BUCKETS = 48
     _LIGHT_OUTLINE = QColor("#101116")
     _DARK_OUTLINE = QColor("#f5f7fb")
 
@@ -109,7 +110,7 @@ class MyWaveButton(QPushButton):
             color = self._interactive_color(QColor(self._accent))
             return [(0.0, color), (1.0, color)]
 
-        colors = [self._interactive_color(color) for color in self._smoothed_history()]
+        colors = [self._interactive_color(color) for color in self._display_history()]
         count = len(colors)
         cell = 1.0 / max(1, count)
         blend_half = cell * 0.9
@@ -129,21 +130,19 @@ class MyWaveButton(QPushButton):
             adjusted = self._mix_colors(adjusted, QColor("#ffffff"), 0.08)
         return adjusted
 
-    def _smoothed_history(self) -> list[QColor]:
-        if len(self._history_samples) < 2:
-            return list(self._history_samples)
+    def _display_history(self) -> list[QColor]:
+        bucketed = self._bucketed_history()
+        if len(bucketed) < 2:
+            return bucketed
 
-        weights = (1, 2, 3, 2, 1)
+        weights = (1, 2, 3, 4, 3, 2, 1)
         radius = len(weights) // 2
         smoothed: list[QColor] = []
-        for index in range(len(self._history_samples)):
+        for index in range(len(bucketed)):
             red = green = blue = total = 0
             for offset, weight in enumerate(weights, start=-radius):
-                sample_index = min(
-                    max(index + offset, 0),
-                    len(self._history_samples) - 1,
-                )
-                color = self._history_samples[sample_index]
+                sample_index = min(max(index + offset, 0), len(bucketed) - 1)
+                color = bucketed[sample_index]
                 red += color.red() * weight
                 green += color.green() * weight
                 blue += color.blue() * weight
@@ -156,6 +155,27 @@ class MyWaveButton(QPushButton):
                 )
             )
         return smoothed
+
+    def _bucketed_history(self) -> list[QColor]:
+        if len(self._history_samples) < 2:
+            return list(self._history_samples)
+
+        bucket_size = max(1, len(self._history_samples) // self._DISPLAY_BUCKETS)
+        bucketed: list[QColor] = []
+        for start in range(0, len(self._history_samples), bucket_size):
+            chunk = self._history_samples[start : start + bucket_size]
+            red = sum(color.red() for color in chunk)
+            green = sum(color.green() for color in chunk)
+            blue = sum(color.blue() for color in chunk)
+            count = len(chunk)
+            bucketed.append(
+                QColor(
+                    round(red / count),
+                    round(green / count),
+                    round(blue / count),
+                )
+            )
+        return bucketed
 
     def _seed_history(self) -> None:
         self._history_has_playback = False
