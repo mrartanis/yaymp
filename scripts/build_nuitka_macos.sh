@@ -61,6 +61,9 @@ xattr -c "${VENDORED_MPV_LIBRARY}" 2>/dev/null || true
     --macos-app-name="${APP_NAME}" \
     --macos-app-icon="${APP_ICON}" \
     --plugin-enable=pyside6 \
+    --include-module=_cffi_backend \
+    --include-package=cffi \
+    --include-package=miniaudio \
     --include-package=app \
     --include-package-data=app.presentation.qt \
     --include-data-files="${VENDORED_MPV_LIBRARY}=lib/libmpv.2.dylib" \

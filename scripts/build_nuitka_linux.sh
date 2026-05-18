@@ -57,6 +57,9 @@ rm -rf \
 "${VENV_PYTHON}" -m nuitka \
     --standalone \
     --plugin-enable=pyside6 \
+    --include-module=_cffi_backend \
+    --include-package=cffi \
+    --include-package=miniaudio \
     --include-package=app \
     --include-package-data=app.presentation.qt \
     --include-data-files="${MPV_LIBRARY}=lib/${MPV_LIBRARY_NAME}" \
