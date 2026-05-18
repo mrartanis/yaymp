@@ -9,6 +9,7 @@ description = "Desktop Yandex Music player bootstrap."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "certifi>=2025.0.0,<2027.0.0",
     "platformdirs>=4.3,<5.0",
     "miniaudio>=1.71,<2.0",
     "python-mpv>=1.0.8,<2.0",

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import http.server
+import os
+import ssl
 import threading
 import urllib.error
 import urllib.request
@@ -9,6 +11,7 @@ from dataclasses import dataclass, field
 from socketserver import ThreadingMixIn
 from uuid import uuid4
 
+import certifi
 import miniaudio
 
 from app.domain import LibraryCacheRepo, Logger, Track, WaveformState
@@ -68,6 +71,7 @@ class StreamProxyService:
         self._lock = threading.Lock()
         self._server: _ThreadingHTTPServer | None = None
         self._server_thread: threading.Thread | None = None
+        self._ssl_context = self._build_ssl_context()
 
     @property
     def port(self) -> int:
@@ -151,6 +155,11 @@ class StreamProxyService:
         self._server_thread.start()
         return True
 
+    def _build_ssl_context(self) -> ssl.SSLContext:
+        if os.environ.get("SSL_CERT_FILE") or os.environ.get("SSL_CERT_DIR"):
+            return ssl.create_default_context()
+        return ssl.create_default_context(cafile=certifi.where())
+
     def _build_handler(self):
         service = self
 
@@ -185,7 +194,11 @@ class StreamProxyService:
             request.add_header("Range", range_header)
 
         try:
-            with urllib.request.urlopen(request, timeout=20) as response:
+            with urllib.request.urlopen(
+                request,
+                timeout=20,
+                context=self._ssl_context,
+            ) as response:
                 self._forward_headers(handler, response)
                 if not send_body:
                     return
