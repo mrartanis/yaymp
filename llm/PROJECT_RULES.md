@@ -176,6 +176,7 @@ Practical recommendation:
 - Prefer a debuggable standalone/app-bundle build before attempting one-file packaging.
 - For Linux AppImage verification in CI, prefer `APPIMAGE_EXTRACT_AND_RUN=1` over assuming FUSE is available on the runner.
 - Release publication should be tag-driven and reproducible from workflow inputs; do not depend on interactive local release creation.
+- If packaged runtime adds HTTPS proxying or other direct TLS traffic, do not rely on host-specific OpenSSL CA paths; bundle a reproducible CA source and wire runtime lookup explicitly.
 
 Bundle contents must include:
 
@@ -183,6 +184,7 @@ Bundle contents must include:
 - Python runtime
 - icons and styles
 - `libmpv` and required binary dependencies
+- CA bundle / certificate data for any packaged HTTPS client path that does not reliably inherit platform trust stores
 - required fonts if used
 - third-party licenses if needed
 

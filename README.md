@@ -30,6 +30,10 @@
 - `My Tracks`, `My Albums`, `My Artists`, плейлисты и `My Wave`;
 - очередь воспроизведения с shuffle / repeat;
 - лайки для треков, альбомов, артистов и плейлистов;
+- телеметрия воспроизведения и улучшенная работа `My Wave` / station-flow;
+- опциональный `Waveformed Progress`:
+  - выключен по умолчанию;
+  - при включении показывает waveform + buffered/download progress прямо в seek bar;
 - переключение темной/светлой темы, языка интерфейса и стиля оформления;
 - сборки для macOS и Linux через Nuitka.
 
@@ -75,6 +79,8 @@
 
 Требуется Python `3.12+`.
 
+Практически актуальные сборки и CI сейчас крутятся на Python `3.14`.
+
 Установка зависимостей для разработки:
 
 ```bash
@@ -101,6 +107,12 @@ python -m pip install -e '.[dev]'
 ./scripts/build_nuitka_linux.sh
 ```
 
+### Важное про packaged build
+
+- waveform/proxy path использует `miniaudio`;
+- self-contained сборки дополнительно включают `cffi`, `_cffi_backend` и `certifi`;
+- packaged stream proxy HTTPS опирается на bundled CA bundle, а не на внешний системный OpenSSL path.
+
 ## Как устроен проект
 
 Архитектура остаётся сравнительно простой:
@@ -108,6 +120,7 @@ python -m pip install -e '.[dev]'
 - `domain` — контракты и сущности;
 - `application` — orchestration и use-case логика;
 - `infrastructure` — доступ к Яндекс Музыке, кешам, persistence и playback backend;
+- `infrastructure.playback.stream_proxy_service` — локальный proxy/waveform path для опционального waveform-progress режима;
 - `presentation` — Qt UI.
 
 Важная практическая деталь: бизнес-логика сознательно выносится из самих Qt-виджетов.
