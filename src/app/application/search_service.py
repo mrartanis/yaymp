@@ -40,7 +40,11 @@ class SearchService:
         try:
             cached_results = self._library_cache_repo.load_catalog_search(normalized_query)
         except StorageError as exc:
-            self._logger.warning("Catalog search cache load failed for %s: %s", normalized_query, exc)
+            self._logger.warning(
+                "Catalog search cache load failed for %s: %s",
+                normalized_query,
+                exc,
+            )
             cached_results = None
         cache_hit = cached_results is not None
         results = cached_results

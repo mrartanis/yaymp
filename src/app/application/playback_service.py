@@ -26,7 +26,7 @@ from app.domain import (
     Track,
     WaveformState,
 )
-from app.domain.errors import PlaybackBackendError, StreamResolveError
+from app.domain.errors import PlaybackBackendError, StorageError, StreamResolveError
 from app.domain.protocols import MusicService
 from app.infrastructure.playback.stream_proxy_service import StreamProxyService
 

@@ -6,8 +6,7 @@ from collections.abc import Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
-from typing import Iterator
+from typing import Any, Iterator
 
 from app.domain import (
     Album,
