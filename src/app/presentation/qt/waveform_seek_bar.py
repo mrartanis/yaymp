@@ -8,7 +8,7 @@ from PySide6.QtWidgets import QSizePolicy, QWidget
 
 
 class WaveformSeekBar(QWidget):
-    _PLACEHOLDER_BINS = tuple(0.32 + ((index % 7) * 0.05) for index in range(100))
+    _PLACEHOLDER_BINS = tuple(0.2 for _ in range(100))
 
     sliderReleased = Signal()
 
