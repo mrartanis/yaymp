@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import replace
 from os import environ
@@ -75,6 +76,8 @@ class MainWindow(
     _QUEUE_AUTOSCROLL_IDLE_SECONDS = 1.6
     _MY_WAVE_STATION_ID = "user:onyourwave"
     _MY_WAVE_PERSIST_INTERVAL_MS = 5_000
+    _THUMB_SOURCE_PIXMAP_CACHE_LIMIT = 576
+    _THUMB_SCALED_PIXMAP_CACHE_LIMIT = 1152
 
     def __init__(self, *, container: AppContainer) -> None:
         super().__init__()
@@ -103,8 +106,8 @@ class MainWindow(
         self._queued_thumb_downloads: list[tuple[str, Path]] = []
         self._active_thumb_downloads = 0
         self._max_active_thumb_downloads = 4
-        self._thumb_source_pixmap_cache: dict[str, QPixmap] = {}
-        self._thumb_scaled_pixmap_cache: dict[tuple[str, int], QPixmap] = {}
+        self._thumb_source_pixmap_cache: OrderedDict[str, QPixmap] = OrderedDict()
+        self._thumb_scaled_pixmap_cache: OrderedDict[tuple[str, int], QPixmap] = OrderedDict()
         self._auth_dialog: AuthDialog | None = None
         self._auth_flow_checked = False
         self._browser_tab_ids: tuple[str, ...] = ()

@@ -1177,7 +1177,11 @@ class PlaybackService:
     def _hydrate_cached_waveform(self, track: Track) -> Track:
         if track.waveform_bins or self._library_cache_repo is None:
             return track
-        cached_track = self._library_cache_repo.load_track_metadata(track.id)
+        try:
+            cached_track = self._library_cache_repo.load_track_metadata(track.id)
+        except StorageError as exc:
+            self._logger.warning("Waveform cache load failed for %s: %s", track.id, exc)
+            return track
         if cached_track is None or not cached_track.waveform_bins:
             return track
         return Track(

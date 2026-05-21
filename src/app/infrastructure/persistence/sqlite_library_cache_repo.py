@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections.abc import Sequence
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from typing import Iterator
 
 from app.domain import (
     Album,
@@ -528,10 +530,19 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
         except (OSError, sqlite3.Error) as exc:
             raise StorageError("Failed to initialize library cache database") from exc
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
+        self._db_path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(self._db_path)
         connection.row_factory = sqlite3.Row
-        return connection
+        try:
+            yield connection
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
 
     def _now_iso(self) -> str:
         return datetime.now(tz=UTC).isoformat()

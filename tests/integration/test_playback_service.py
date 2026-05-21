@@ -581,7 +581,7 @@ class FakeStreamProxyService:
             buffered_position_ms=42_000,
             waveform_bins=(0.2, 0.6, 0.4),
             waveform_known_position_ms=57_000,
-            waveform_mode="mp3_partial",
+            waveform_mode="ready",
         )
 
     def create_session(self, *, track: Track, stream_ref: str) -> str:

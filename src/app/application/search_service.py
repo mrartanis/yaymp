@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.application.track_metadata import merge_cached_liked_states
 from app.domain import CatalogSearchResults, LibraryCacheRepo, Logger, MusicService, Track
+from app.domain.errors import StorageError
 
 
 class SearchService:
@@ -36,13 +37,24 @@ class SearchService:
         if not normalized_query:
             return CatalogSearchResults()
 
-        cached_results = self._library_cache_repo.load_catalog_search(normalized_query)
+        try:
+            cached_results = self._library_cache_repo.load_catalog_search(normalized_query)
+        except StorageError as exc:
+            self._logger.warning("Catalog search cache load failed for %s: %s", normalized_query, exc)
+            cached_results = None
         cache_hit = cached_results is not None
         results = cached_results
         if results is None:
             results = self._music_service.search_catalog(normalized_query, limit=limit)
             results = self._with_artist_albums(results, limit=limit)
-            self._library_cache_repo.save_catalog_search(normalized_query, results)
+            try:
+                self._library_cache_repo.save_catalog_search(normalized_query, results)
+            except StorageError as exc:
+                self._logger.warning(
+                    "Catalog search cache save failed for %s: %s",
+                    normalized_query,
+                    exc,
+                )
         results = CatalogSearchResults(
             tracks=merge_cached_liked_states(
                 results.tracks,
@@ -125,17 +137,32 @@ class SearchService:
         albums_by_id.setdefault(album.id, album)
 
     def load_recent_searches(self) -> tuple[str, ...]:
-        return tuple(self._library_cache_repo.load_recent_searches())
+        try:
+            return tuple(self._library_cache_repo.load_recent_searches())
+        except StorageError as exc:
+            self._logger.warning("Recent searches cache load failed: %s", exc)
+            return ()
 
     def _remember_recent_search(self, query: str) -> None:
-        current = [
-            item for item in self._library_cache_repo.load_recent_searches() if item != query
-        ]
+        try:
+            current = [
+                item for item in self._library_cache_repo.load_recent_searches() if item != query
+            ]
+        except StorageError as exc:
+            self._logger.warning("Recent searches cache load failed for %s: %s", query, exc)
+            current = []
         current.insert(0, query)
-        self._library_cache_repo.save_recent_searches(tuple(current[:10]))
+        try:
+            self._library_cache_repo.save_recent_searches(tuple(current[:10]))
+        except StorageError as exc:
+            self._logger.warning("Recent searches cache save failed for %s: %s", query, exc)
 
     def _cache_tracks(self, tracks: tuple[Track, ...]) -> None:
         for track in tracks:
-            self._library_cache_repo.save_track_metadata(track)
-            if track.artwork_ref:
-                self._library_cache_repo.save_artwork_ref(track.id, track.artwork_ref)
+            try:
+                self._library_cache_repo.save_track_metadata(track)
+                if track.artwork_ref:
+                    self._library_cache_repo.save_artwork_ref(track.id, track.artwork_ref)
+            except StorageError as exc:
+                self._logger.warning("Track cache save failed for %s: %s", track.id, exc)
+                return

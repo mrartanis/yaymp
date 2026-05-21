@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 from app.domain import LibraryCacheRepo, Track
+from app.domain.errors import StorageError
 
 
 def merge_cached_liked_state(
@@ -14,15 +15,18 @@ def merge_cached_liked_state(
     if cache_repo is None or track.is_liked:
         return track
 
-    if user_id is not None:
-        liked_tracks = cache_repo.load_liked_track_ids(user_id)
-        if liked_tracks is not None:
-            return replace(
-                track,
-                is_liked=_normalize_track_id(track.id) in liked_tracks.track_ids,
-            )
+    try:
+        if user_id is not None:
+            liked_tracks = cache_repo.load_liked_track_ids(user_id)
+            if liked_tracks is not None:
+                return replace(
+                    track,
+                    is_liked=_normalize_track_id(track.id) in liked_tracks.track_ids,
+                )
 
-    cached_track = cache_repo.load_track_metadata(track.id)
+        cached_track = cache_repo.load_track_metadata(track.id)
+    except StorageError:
+        return track
     if cached_track is None or not cached_track.is_liked:
         return track
     return replace(track, is_liked=True)

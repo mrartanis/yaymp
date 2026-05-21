@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import logging
+from collections import OrderedDict
 from pathlib import Path
 from types import SimpleNamespace
 
-from PySide6.QtGui import QColor, QImage
+from PySide6.QtGui import QColor, QImage, QPixmap
 from PySide6.QtWidgets import QLabel, QWidget
 
 from app.infrastructure.persistence.file_artwork_cache import FileArtworkCache
@@ -21,6 +22,8 @@ class _ArtworkHarness(MainWindowArtworkMixin, QWidget):
         self._accent_color = "#526ee8"
         self._artwork_label = QLabel()
         self._pending_artwork_track_id = None
+        self._thumb_source_pixmap_cache = OrderedDict()
+        self._thumb_scaled_pixmap_cache = OrderedDict()
 
     def _apply_theme(self) -> None:
         return
@@ -84,3 +87,56 @@ def test_artwork_cache_has_priority_over_pixels_and_api(qtbot, tmp_path) -> None
     window._set_artwork_pixmap(image_path, preferred_accent="#22aaee")
 
     assert window._accent_color == "#556677"
+
+
+def test_thumb_source_pixmap_is_normalized_before_caching(qtbot, tmp_path) -> None:
+    window = _ArtworkHarness(cache_dir=tmp_path)
+    qtbot.addWidget(window)
+    image_path = tmp_path / "large-thumb.png"
+    image = QImage(512, 256, QImage.Format.Format_ARGB32)
+    image.fill(QColor("#224466"))
+    assert image.save(str(image_path))
+    artwork_url = "https://example.test/large-thumb"
+
+    cache_path = window._container.services.artwork_cache.cache_path_for_url(artwork_url)
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    image_path.replace(cache_path)
+
+    pixmap = window._thumb_source_pixmap(artwork_url)
+
+    assert pixmap is not None
+    assert pixmap.width() == 64
+    assert pixmap.height() == 32
+    assert window._thumb_source_pixmap_cache[artwork_url].width() == 64
+
+
+def test_thumb_source_pixmap_cache_evicts_oldest_entries(qtbot, tmp_path) -> None:
+    window = _ArtworkHarness(cache_dir=tmp_path)
+    qtbot.addWidget(window)
+    window._THUMB_SOURCE_PIXMAP_CACHE_LIMIT = 2
+
+    for index in range(3):
+        pixmap = QPixmap(64, 64)
+        pixmap.fill(QColor(f"#{index + 1:02x}{index + 1:02x}{index + 1:02x}"))
+        window._store_thumb_source_pixmap(f"url-{index}", pixmap)
+
+    assert list(window._thumb_source_pixmap_cache) == ["url-1", "url-2"]
+
+
+def test_thumb_scaled_pixmap_cache_evicts_oldest_entries(qtbot, tmp_path) -> None:
+    window = _ArtworkHarness(cache_dir=tmp_path)
+    qtbot.addWidget(window)
+    window._THUMB_SCALED_PIXMAP_CACHE_LIMIT = 2
+    artwork_url = "https://example.test/thumb"
+    pixmap = QPixmap(128, 128)
+    pixmap.fill(QColor("#336699"))
+    window._store_thumb_source_pixmap(artwork_url, pixmap)
+
+    window._thumb_pixmap_for_url(artwork_url, size=32)
+    window._thumb_pixmap_for_url(artwork_url, size=48)
+    window._thumb_pixmap_for_url(artwork_url, size=64)
+
+    assert list(window._thumb_scaled_pixmap_cache) == [
+        (artwork_url, 48),
+        (artwork_url, 64),
+    ]

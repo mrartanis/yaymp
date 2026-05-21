@@ -3,14 +3,18 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections.abc import Sequence
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Iterator
 
 from app.domain import PlaybackStateRepo, QueueItem, SavedPlaybackQueue, Track
 from app.domain.errors import StorageError
 
 
 class SQLitePlaybackStateRepo(PlaybackStateRepo):
+    _QUEUE_ID = 1
+
     def __init__(self, *, db_path: Path) -> None:
         self._db_path = db_path
         self._initialize()
@@ -21,29 +25,38 @@ class SQLitePlaybackStateRepo(PlaybackStateRepo):
                 row = connection.execute(
                     (
                         "select queue_json, active_index, position_ms "
-                        "from playback_queue where id = 1"
-                    )
+                        "from playback_queue where id = ?"
+                    ),
+                    (self._QUEUE_ID,),
                 ).fetchone()
+                if row is None:
+                    return None
+                item_rows = connection.execute(
+                    (
+                        "select * from playback_queue_items "
+                        "where queue_id = ? order by position asc"
+                    ),
+                    (self._QUEUE_ID,),
+                ).fetchall()
         except sqlite3.Error as exc:
             raise StorageError("Failed to load playback queue") from exc
 
-        if row is None:
-            return None
+        active_index = row["active_index"]
+        if active_index is not None:
+            active_index = int(active_index)
+        position_ms = max(0, int(row["position_ms"] or 0))
         try:
-            payload = json.loads(row["queue_json"])
-            if not isinstance(payload, list):
-                raise TypeError("queue_json must be a list")
-            queue = tuple(self._decode_queue_item(item) for item in payload)
-            active_index = row["active_index"]
-            if active_index is not None:
-                active_index = int(active_index)
-            return SavedPlaybackQueue(
-                queue=queue,
-                active_index=active_index,
-                position_ms=max(0, int(row["position_ms"] or 0)),
-            )
+            if item_rows:
+                queue = tuple(self._decode_queue_item_row(item_row) for item_row in item_rows)
+            else:
+                queue = self._decode_legacy_queue_json(row["queue_json"])
         except (TypeError, ValueError, json.JSONDecodeError, KeyError) as exc:
             raise StorageError("Saved playback queue is invalid") from exc
+        return SavedPlaybackQueue(
+            queue=queue,
+            active_index=active_index,
+            position_ms=position_ms,
+        )
 
     def save_playback_queue(
         self,
@@ -54,12 +67,14 @@ class SQLitePlaybackStateRepo(PlaybackStateRepo):
     ) -> None:
         try:
             with self._connect() as connection:
+                now = datetime.now(tz=UTC).isoformat()
+                connection.execute("begin")
                 connection.execute(
                     (
                         "insert into playback_queue("
                         "id, queue_json, active_index, position_ms, updated_at"
                         ") "
-                        "values (1, ?, ?, ?, ?) "
+                        "values (?, ?, ?, ?, ?) "
                         "on conflict(id) do update set "
                         "queue_json = excluded.queue_json, "
                         "active_index = excluded.active_index, "
@@ -67,22 +82,49 @@ class SQLitePlaybackStateRepo(PlaybackStateRepo):
                         "updated_at = excluded.updated_at"
                     ),
                     (
-                        json.dumps(
-                            [self._encode_queue_item(item) for item in queue],
-                            ensure_ascii=True,
-                        ),
+                        self._QUEUE_ID,
+                        "[]",
                         active_index,
                         max(0, position_ms),
-                        datetime.now(tz=UTC).isoformat(),
+                        now,
                     ),
                 )
-        except (sqlite3.Error, TypeError) as exc:
+                connection.execute(
+                    "delete from playback_queue_items where queue_id = ?",
+                    (self._QUEUE_ID,),
+                )
+                connection.executemany(
+                    (
+                        "insert into playback_queue_items("
+                        "queue_id, position, track_id, title, artists_json, version, "
+                        "artist_ids_json, album_id, album_title, album_year, duration_ms, "
+                        "artwork_ref, accent_color, available, is_liked, source_type, "
+                        "source_id, source_index, station_batch_id, radio_session_id, "
+                        "radio_origin, radio_queue_anchor_track_id"
+                        ") values ("
+                        "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?"
+                        ")"
+                    ),
+                    [
+                        self._encode_queue_item_row(position=position, item=item)
+                        for position, item in enumerate(queue)
+                    ],
+                )
+        except (sqlite3.Error, TypeError, ValueError) as exc:
             raise StorageError("Failed to save playback queue") from exc
 
     def clear_playback_queue(self) -> None:
         try:
             with self._connect() as connection:
-                connection.execute("delete from playback_queue where id = 1")
+                connection.execute("begin")
+                connection.execute(
+                    "delete from playback_queue_items where queue_id = ?",
+                    (self._QUEUE_ID,),
+                )
+                connection.execute(
+                    "delete from playback_queue where id = ?",
+                    (self._QUEUE_ID,),
+                )
         except sqlite3.Error as exc:
             raise StorageError("Failed to clear playback queue") from exc
 
@@ -90,14 +132,42 @@ class SQLitePlaybackStateRepo(PlaybackStateRepo):
         try:
             self._db_path.parent.mkdir(parents=True, exist_ok=True)
             with self._connect() as connection:
+                connection.execute("pragma foreign_keys = on")
                 connection.executescript(
                     """
                     create table if not exists playback_queue (
                         id integer primary key check (id = 1),
-                        queue_json text not null,
+                        queue_json text not null default '[]',
                         active_index integer,
                         position_ms integer not null default 0,
                         updated_at text not null
+                    );
+
+                    create table if not exists playback_queue_items (
+                        queue_id integer not null,
+                        position integer not null,
+                        track_id text not null,
+                        title text not null,
+                        artists_json text not null,
+                        version text,
+                        artist_ids_json text not null default '[]',
+                        album_id text,
+                        album_title text,
+                        album_year integer,
+                        duration_ms integer,
+                        artwork_ref text,
+                        accent_color text,
+                        available integer not null default 1,
+                        is_liked integer not null default 0,
+                        source_type text,
+                        source_id text,
+                        source_index integer,
+                        station_batch_id text,
+                        radio_session_id text,
+                        radio_origin text,
+                        radio_queue_anchor_track_id text,
+                        primary key (queue_id, position),
+                        foreign key(queue_id) references playback_queue(id) on delete cascade
                     );
                     """
                 )
@@ -110,10 +180,18 @@ class SQLitePlaybackStateRepo(PlaybackStateRepo):
         except (OSError, sqlite3.Error) as exc:
             raise StorageError("Failed to initialize playback state database") from exc
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
         connection = sqlite3.connect(self._db_path)
         connection.row_factory = sqlite3.Row
-        return connection
+        try:
+            yield connection
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
 
     def _ensure_column(
         self,
@@ -130,33 +208,15 @@ class SQLitePlaybackStateRepo(PlaybackStateRepo):
         if column not in columns:
             connection.execute(f"alter table {table} add column {column} {definition}")
 
-    def _encode_queue_item(self, item: QueueItem) -> dict[str, object]:
-        return {
-            "track": {
-                "id": item.track.id,
-                "title": item.track.title,
-                "artists": list(item.track.artists),
-                "version": item.track.version,
-                "artist_ids": list(item.track.artist_ids),
-                "album_id": item.track.album_id,
-                "album_title": item.track.album_title,
-                "album_year": item.track.album_year,
-                "duration_ms": item.track.duration_ms,
-                "artwork_ref": item.track.artwork_ref,
-                "accent_color": item.track.accent_color,
-                "available": item.track.available,
-                "is_liked": item.track.is_liked,
-            },
-            "source_type": item.source_type,
-            "source_id": item.source_id,
-            "source_index": item.source_index,
-            "station_batch_id": item.station_batch_id,
-            "radio_session_id": item.radio_session_id,
-            "radio_origin": item.radio_origin,
-            "radio_queue_anchor_track_id": item.radio_queue_anchor_track_id,
-        }
+    def _decode_legacy_queue_json(self, queue_json: object) -> tuple[QueueItem, ...]:
+        if queue_json is None:
+            return ()
+        payload = json.loads(str(queue_json))
+        if not isinstance(payload, list):
+            raise TypeError("queue_json must be a list")
+        return tuple(self._decode_legacy_queue_item(item) for item in payload)
 
-    def _decode_queue_item(self, payload: object) -> QueueItem:
+    def _decode_legacy_queue_item(self, payload: object) -> QueueItem:
         if not isinstance(payload, dict):
             raise TypeError("queue item must be a dict")
         raw_track = payload["track"]
@@ -195,4 +255,63 @@ class SQLitePlaybackStateRepo(PlaybackStateRepo):
             radio_session_id=payload.get("radio_session_id"),
             radio_origin=payload.get("radio_origin"),
             radio_queue_anchor_track_id=payload.get("radio_queue_anchor_track_id"),
+        )
+
+    def _encode_queue_item_row(self, *, position: int, item: QueueItem) -> tuple[object, ...]:
+        return (
+            self._QUEUE_ID,
+            position,
+            item.track.id,
+            item.track.title,
+            json.dumps(list(item.track.artists), ensure_ascii=True),
+            item.track.version,
+            json.dumps(list(item.track.artist_ids), ensure_ascii=True),
+            item.track.album_id,
+            item.track.album_title,
+            item.track.album_year,
+            item.track.duration_ms,
+            item.track.artwork_ref,
+            item.track.accent_color,
+            int(bool(item.track.available)),
+            int(bool(item.track.is_liked)),
+            item.source_type,
+            item.source_id,
+            item.source_index,
+            item.station_batch_id,
+            item.radio_session_id,
+            item.radio_origin,
+            item.radio_queue_anchor_track_id,
+        )
+
+    def _decode_queue_item_row(self, row: sqlite3.Row) -> QueueItem:
+        artists = json.loads(row["artists_json"])
+        artist_ids = json.loads(row["artist_ids_json"] or "[]")
+        if not isinstance(artists, list):
+            raise TypeError("artists_json must be a list")
+        if not isinstance(artist_ids, list):
+            raise TypeError("artist_ids_json must be a list")
+        return QueueItem(
+            track=Track(
+                id=str(row["track_id"]),
+                title=str(row["title"]),
+                artists=tuple(str(artist) for artist in artists),
+                version=row["version"],
+                artist_ids=tuple(str(artist_id) for artist_id in artist_ids),
+                album_id=row["album_id"],
+                album_title=row["album_title"],
+                album_year=row["album_year"],
+                duration_ms=row["duration_ms"],
+                stream_ref=None,
+                artwork_ref=row["artwork_ref"],
+                accent_color=row["accent_color"],
+                available=bool(row["available"]),
+                is_liked=bool(row["is_liked"]),
+            ),
+            source_type=row["source_type"],
+            source_id=row["source_id"],
+            source_index=row["source_index"],
+            station_batch_id=row["station_batch_id"],
+            radio_session_id=row["radio_session_id"],
+            radio_origin=row["radio_origin"],
+            radio_queue_anchor_track_id=row["radio_queue_anchor_track_id"],
         )

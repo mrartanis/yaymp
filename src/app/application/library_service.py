@@ -12,6 +12,7 @@ from app.domain import (
     Station,
     Track,
 )
+from app.domain.errors import StorageError
 
 
 class LibraryService:
@@ -31,18 +32,10 @@ class LibraryService:
 
     def load_liked_tracks(self, *, limit: int = 100) -> tuple[Track, ...]:
         user_id = self._current_user_id()
-        cached_snapshot = (
-            self._library_cache_repo.load_liked_track_snapshot(user_id)
-            if user_id is not None
-            else None
-        )
+        cached_snapshot = self._safe_load_liked_track_snapshot(user_id)
         cached_tracks = cached_snapshot.tracks[:limit] if cached_snapshot is not None else ()
         current_revision = cached_snapshot.revision if cached_snapshot is not None else 0
-        cached_liked_ids = (
-            self._library_cache_repo.load_liked_track_ids(user_id)
-            if user_id is not None
-            else None
-        )
+        cached_liked_ids = self._safe_load_liked_track_ids(user_id)
         total_cached_tracks = len(cached_snapshot.tracks) if cached_snapshot is not None else 0
         total_known_tracks = (
             len(cached_liked_ids.track_ids) if cached_liked_ids is not None else total_cached_tracks
@@ -73,7 +66,7 @@ class LibraryService:
         snapshot_revision = (
             liked_tracks.revision if liked_tracks is not None else current_revision
         )
-        self._library_cache_repo.save_liked_track_snapshot(
+        self._safe_save_liked_track_snapshot(
             LikedTrackSnapshot(
                 user_id=user_id,
                 revision=snapshot_revision,
@@ -81,22 +74,14 @@ class LibraryService:
             )
         )
         if liked_tracks is not None:
-            self._library_cache_repo.save_liked_track_ids(liked_tracks)
+            self._safe_save_liked_track_ids(liked_tracks)
         self._logger.info("Loaded %s liked tracks", len(tracks))
         return tracks
 
     def load_all_liked_tracks(self) -> tuple[Track, ...]:
         user_id = self._current_user_id()
-        cached_snapshot = (
-            self._library_cache_repo.load_liked_track_snapshot(user_id)
-            if user_id is not None
-            else None
-        )
-        cached_liked_ids = (
-            self._library_cache_repo.load_liked_track_ids(user_id)
-            if user_id is not None
-            else None
-        )
+        cached_snapshot = self._safe_load_liked_track_snapshot(user_id)
+        cached_liked_ids = self._safe_load_liked_track_ids(user_id)
         current_revision = cached_snapshot.revision if cached_snapshot is not None else 0
 
         if user_id is None:
@@ -129,7 +114,7 @@ class LibraryService:
         )
         self._cache_tracks(tracks)
         snapshot_revision = liked_tracks.revision if liked_tracks is not None else current_revision
-        self._library_cache_repo.save_liked_track_snapshot(
+        self._safe_save_liked_track_snapshot(
             LikedTrackSnapshot(
                 user_id=user_id,
                 revision=snapshot_revision,
@@ -137,7 +122,7 @@ class LibraryService:
             )
         )
         if liked_tracks is not None:
-            self._library_cache_repo.save_liked_track_ids(liked_tracks)
+            self._safe_save_liked_track_ids(liked_tracks)
         self._logger.info("Loaded %s liked tracks for bulk playback", len(tracks))
         return tracks
 
@@ -145,7 +130,7 @@ class LibraryService:
         user_id = self._current_user_id()
         if user_id is None:
             return
-        cached_likes = self._library_cache_repo.load_liked_track_ids(user_id)
+        cached_likes = self._safe_load_liked_track_ids(user_id)
         revision = 0 if force or cached_likes is None else cached_likes.revision
         liked_tracks = self._music_service.get_liked_track_ids(
             if_modified_since_revision=revision
@@ -153,7 +138,7 @@ class LibraryService:
         if liked_tracks is None:
             self._logger.info("Liked track index is up to date at revision %s", revision)
             return
-        self._library_cache_repo.save_liked_track_ids(liked_tracks)
+        self._safe_save_liked_track_ids(liked_tracks)
         self._logger.info(
             "Refreshed liked track index: %s ids at revision %s",
             len(liked_tracks.track_ids),
@@ -471,13 +456,59 @@ class LibraryService:
         return unliked_playlist
 
     def cached_track(self, track_id: str) -> Track | None:
-        return self._library_cache_repo.load_track_metadata(track_id)
+        try:
+            return self._library_cache_repo.load_track_metadata(track_id)
+        except StorageError as exc:
+            self._logger.warning("Track cache load failed for %s: %s", track_id, exc)
+            return None
 
     def _cache_tracks(self, tracks: tuple[Track, ...]) -> None:
         for track in tracks:
-            self._library_cache_repo.save_track_metadata(track)
-            if track.artwork_ref:
-                self._library_cache_repo.save_artwork_ref(track.id, track.artwork_ref)
+            try:
+                self._library_cache_repo.save_track_metadata(track)
+                if track.artwork_ref:
+                    self._library_cache_repo.save_artwork_ref(track.id, track.artwork_ref)
+            except StorageError as exc:
+                self._logger.warning("Track cache save failed for %s: %s", track.id, exc)
+                return
+
+    def _safe_load_liked_track_snapshot(self, user_id: str | None) -> LikedTrackSnapshot | None:
+        if user_id is None:
+            return None
+        try:
+            return self._library_cache_repo.load_liked_track_snapshot(user_id)
+        except StorageError as exc:
+            self._logger.warning("Liked track snapshot cache load failed for %s: %s", user_id, exc)
+            return None
+
+    def _safe_save_liked_track_snapshot(self, snapshot: LikedTrackSnapshot) -> None:
+        try:
+            self._library_cache_repo.save_liked_track_snapshot(snapshot)
+        except StorageError as exc:
+            self._logger.warning(
+                "Liked track snapshot cache save failed for %s: %s",
+                snapshot.user_id,
+                exc,
+            )
+
+    def _safe_load_liked_track_ids(self, user_id: str | None):
+        if user_id is None:
+            return None
+        try:
+            return self._library_cache_repo.load_liked_track_ids(user_id)
+        except StorageError as exc:
+            self._logger.warning("Liked track id cache load failed for %s: %s", user_id, exc)
+            return None
+
+    def _safe_save_liked_track_ids(self, liked_tracks) -> None:
+        try:
+            self._library_cache_repo.save_liked_track_ids(liked_tracks)
+        except StorageError as exc:
+            self._logger.warning(
+                "Liked track id cache save failed for %s: %s",
+                liked_tracks.user_id,
+                exc,
+            )
 
     def _current_user_id(self) -> str | None:
         session = self._music_service.get_auth_session()

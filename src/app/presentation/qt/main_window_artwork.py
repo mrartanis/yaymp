@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import colorsys
 import math
+from collections import OrderedDict
 from pathlib import Path
 
 import shiboken6
@@ -15,6 +16,10 @@ from app.domain.playback import QueueItem
 
 
 class MainWindowArtworkMixin:
+    _THUMB_SOURCE_PIXMAP_CACHE_LIMIT = 576
+    _THUMB_SCALED_PIXMAP_CACHE_LIMIT = 1152
+    _THUMB_SOURCE_MAX_EDGE = 64
+
     def _thumb_pixmap_for_artwork_ref(
         self,
         artwork_ref: str | None,
@@ -51,6 +56,7 @@ class MainWindowArtworkMixin:
         cache_key = (artwork_url, size)
         cached_scaled = self._thumb_scaled_pixmap_cache.get(cache_key)
         if cached_scaled is not None:
+            self._thumb_scaled_pixmap_cache.move_to_end(cache_key)
             return cached_scaled
         source_pixmap = self._thumb_source_pixmap(artwork_url)
         if source_pixmap is None:
@@ -61,12 +67,18 @@ class MainWindowArtworkMixin:
             Qt.AspectRatioMode.KeepAspectRatioByExpanding,
             Qt.TransformationMode.SmoothTransformation,
         )
-        self._thumb_scaled_pixmap_cache[cache_key] = scaled
+        self._lru_store_pixmap(
+            self._thumb_scaled_pixmap_cache,
+            cache_key,
+            scaled,
+            limit=self._THUMB_SCALED_PIXMAP_CACHE_LIMIT,
+        )
         return scaled
 
     def _thumb_source_pixmap(self, artwork_url: str) -> QPixmap | None:
         cached_source = self._thumb_source_pixmap_cache.get(artwork_url)
         if cached_source is not None:
+            self._thumb_source_pixmap_cache.move_to_end(artwork_url)
             return cached_source
         cache_path = self._container.services.artwork_cache.cache_path_for_url(artwork_url)
         if not cache_path.exists():
@@ -74,17 +86,55 @@ class MainWindowArtworkMixin:
         pixmap = QPixmap(str(cache_path))
         if pixmap.isNull():
             return None
-        self._thumb_source_pixmap_cache[artwork_url] = pixmap
-        return pixmap
+        normalized = self._normalized_thumb_source_pixmap(pixmap)
+        self._lru_store_pixmap(
+            self._thumb_source_pixmap_cache,
+            artwork_url,
+            normalized,
+            limit=self._THUMB_SOURCE_PIXMAP_CACHE_LIMIT,
+        )
+        return normalized
 
     def _store_thumb_source_pixmap(self, artwork_url: str, pixmap: QPixmap) -> None:
-        self._thumb_source_pixmap_cache[artwork_url] = pixmap
+        self._lru_store_pixmap(
+            self._thumb_source_pixmap_cache,
+            artwork_url,
+            self._normalized_thumb_source_pixmap(pixmap),
+            limit=self._THUMB_SOURCE_PIXMAP_CACHE_LIMIT,
+        )
         stale_keys = [
             key for key in self._thumb_scaled_pixmap_cache
             if key[0] == artwork_url
         ]
         for key in stale_keys:
             del self._thumb_scaled_pixmap_cache[key]
+
+    def _normalized_thumb_source_pixmap(self, pixmap: QPixmap) -> QPixmap:
+        max_edge = max(pixmap.width(), pixmap.height())
+        if max_edge <= self._THUMB_SOURCE_MAX_EDGE:
+            return pixmap
+        if pixmap.width() >= pixmap.height():
+            return pixmap.scaledToWidth(
+                self._THUMB_SOURCE_MAX_EDGE,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        return pixmap.scaledToHeight(
+            self._THUMB_SOURCE_MAX_EDGE,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+
+    def _lru_store_pixmap(
+        self,
+        cache: OrderedDict,
+        key: object,
+        pixmap: QPixmap,
+        *,
+        limit: int,
+    ) -> None:
+        cache[key] = pixmap
+        cache.move_to_end(key)
+        while len(cache) > limit:
+            cache.popitem(last=False)
 
     def _render_artwork(self, track: Track) -> None:
         if not track.artwork_ref:
