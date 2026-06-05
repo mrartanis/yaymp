@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QEvent, QPointF, Qt
 from PySide6.QtGui import QMouseEvent
-from PySide6.QtWidgets import QLabel, QWidget
+from PySide6.QtWidgets import QApplication, QLabel, QWidget
 
 from app.domain import Track
 from app.presentation.qt.main_window import MainWindow
@@ -20,14 +20,26 @@ class _LibraryControllerStub:
     def open_album(self, album) -> None:
         self.opened_album = album
 
+    def shutdown(self) -> None:
+        return None
+
+
+class _ShutdownStub:
+    def shutdown(self) -> None:
+        return None
+
 
 class _NavigationHarness(MainWindowWindowingMixin, QWidget):
     def __init__(self) -> None:
         super().__init__()
+        self._system_media = _ShutdownStub()
+        self._controller = _ShutdownStub()
         self._library_controller = _LibraryControllerStub()
         self._current_track = None
         self._pending_system_move = False
         self._system_move_calls = 0
+        self._manual_window_drag_active = False
+        self._manual_window_drag_origin = QPointF()
         self._title_bar = QLabel("title", self)
         self._title_drag_handle = QLabel("drag", self)
         self._player_panel_frame = QLabel("panel", self)
@@ -62,14 +74,18 @@ class _NavigationHarness(MainWindowWindowingMixin, QWidget):
 def _mouse_event(
     event_type: QEvent.Type,
     *,
+    position: tuple[float, float] = (10, 10),
+    global_position: tuple[float, float] = (10, 10),
     button: Qt.MouseButton = Qt.MouseButton.NoButton,
     buttons: Qt.MouseButton = Qt.MouseButton.NoButton,
 ) -> QMouseEvent:
+    local = QPointF(*position)
+    global_pos = QPointF(*global_position)
     return QMouseEvent(
         event_type,
-        QPointF(10, 10),
-        QPointF(10, 10),
-        QPointF(10, 10),
+        local,
+        global_pos,
+        global_pos,
         button,
         buttons,
         Qt.KeyboardModifier.NoModifier,
@@ -119,23 +135,36 @@ def test_clicking_track_album_label_opens_album(qtbot) -> None:
 def test_dragging_player_header_starts_system_move_on_mouse_move(qtbot) -> None:
     window = _NavigationHarness()
     qtbot.addWidget(window)
+    threshold = QApplication.startDragDistance()
 
     press_event = _mouse_event(
         QEvent.Type.MouseButtonPress,
+        global_position=(10, 10),
         button=Qt.MouseButton.LeftButton,
+        buttons=Qt.MouseButton.LeftButton,
+    )
+    small_move_event = _mouse_event(
+        QEvent.Type.MouseMove,
+        global_position=(10 + max(1, threshold - 1), 10),
         buttons=Qt.MouseButton.LeftButton,
     )
     move_event = _mouse_event(
         QEvent.Type.MouseMove,
+        global_position=(10 + threshold + 2, 10),
         buttons=Qt.MouseButton.LeftButton,
     )
     release_event = _mouse_event(
         QEvent.Type.MouseButtonRelease,
+        global_position=(10 + threshold + 2, 10),
         button=Qt.MouseButton.LeftButton,
         buttons=Qt.MouseButton.NoButton,
     )
 
     assert window.eventFilter(window._artwork_label, press_event) is True
+    assert window._pending_system_move is True
+    assert window._system_move_calls == 0
+
+    assert window.eventFilter(window._artwork_label, small_move_event) is True
     assert window._pending_system_move is True
     assert window._system_move_calls == 0
 

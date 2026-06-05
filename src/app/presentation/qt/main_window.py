@@ -8,7 +8,7 @@ from os import environ
 from pathlib import Path
 from time import monotonic
 
-from PySide6.QtCore import QEvent, QModelIndex, QPoint, Qt, QTimer
+from PySide6.QtCore import QEvent, QModelIndex, QPoint, QPointF, Qt, QTimer
 from PySide6.QtGui import QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager
 from PySide6.QtWidgets import (
@@ -146,6 +146,10 @@ class MainWindow(
         self._track_label_base_sizes: dict[QLabel, int] = {}
         self._updating_resize_cursor = False
         self._pending_system_move = False
+        self._pending_system_move_origin = QPointF()
+        self._manual_window_drag_active = False
+        self._manual_window_drag_origin = QPointF()
+        self._manual_window_drag_window_pos = QPoint()
         self._volume_slider_drag_active = False
         self._my_wave_pending = False
         self._my_wave_active = False
@@ -959,10 +963,11 @@ class MainWindow(
             return Qt.CursorShape.SizeFDiagCursor
         return Qt.CursorShape.SizeBDiagCursor
 
-    def _start_system_move(self) -> None:
+    def _start_system_move(self) -> bool:
         window_handle = self.windowHandle()
         if window_handle is not None:
-            window_handle.startSystemMove()
+            return bool(window_handle.startSystemMove())
+        return False
 
     def _start_system_resize(self, edges: Qt.Edge) -> None:
         window_handle = self.windowHandle()
