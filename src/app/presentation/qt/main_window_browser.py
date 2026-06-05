@@ -12,9 +12,9 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListView,
     QListWidget,
     QListWidgetItem,
-    QListView,
     QProgressBar,
     QPushButton,
     QSizePolicy,
@@ -76,7 +76,13 @@ class _CenteredGridListWidget(QListWidget):
 
 
 class _ElidedWrapLabel(QLabel):
-    def __init__(self, text: str = "", *, max_lines: int = 1, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        text: str = "",
+        *,
+        max_lines: int = 1,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self._max_lines = max_lines
         self._full_text = ""
