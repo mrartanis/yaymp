@@ -434,7 +434,6 @@ class MainWindow(
         self._queue_list.customContextMenuRequested.connect(self._show_queue_context_menu)
         self._search_button.clicked.connect(self._run_search)
         self._search_input.returnPressed.connect(self._run_search)
-        self._recent_searches_combo.activated.connect(self._apply_recent_search)
         self._search_nav_button.clicked.connect(self._show_search)
         self._popup_search_nav_button.clicked.connect(self._show_search)
         self._liked_nav_button.clicked.connect(self._library_controller.load_liked_tracks)
@@ -834,9 +833,6 @@ class MainWindow(
         self._play_all_button.setText(self._t("action.play_all"))
         self._append_all_button.setText(self._t("action.append_all"))
         self._search_input.setPlaceholderText(self._t("browser.placeholder.search"))
-        self._recent_searches_combo.setPlaceholderText(
-            self._t("browser.placeholder.recent_searches")
-        )
         self._browser_back_button.setToolTip(self._t("action.back"))
         self._browser_close_button.setToolTip(self._t("action.close"))
         self._browser_dialog.setWindowTitle(self._t("window.search_library"))

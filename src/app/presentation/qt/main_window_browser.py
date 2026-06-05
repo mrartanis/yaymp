@@ -7,7 +7,6 @@ from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QPixmap
 from PySide6.QtNetwork import QNetworkRequest
 from PySide6.QtWidgets import (
-    QComboBox,
     QDialog,
     QFrame,
     QHBoxLayout,
@@ -48,9 +47,6 @@ class MainWindowBrowserMixin:
         self._search_loading.setFixedWidth(30)
         self._search_loading.setFixedHeight(12)
         self._search_loading.hide()
-        self._recent_searches_combo = QComboBox()
-        self._recent_searches_combo.setPlaceholderText(self._t("browser.placeholder.recent_searches"))
-        self._recent_searches_combo.addItem(self._t("browser.placeholder.recent_searches"))
         self._browser_title_label = self._panel_label(self._t("library.search"))
         self._browser_title_label.setObjectName("browser-title")
         self._browser_back_button = QPushButton("‹")
@@ -83,7 +79,6 @@ class MainWindowBrowserMixin:
         search_row.addWidget(self._search_input, 1)
         search_row.addWidget(self._search_button)
         search_row.addWidget(self._search_loading, 0, Qt.AlignmentFlag.AlignVCenter)
-        search_row.addWidget(self._recent_searches_combo)
         browser_footer = QWidget()
         browser_footer.setFixedHeight(32)
         like_row = QHBoxLayout(browser_footer)
@@ -186,14 +181,6 @@ class MainWindowBrowserMixin:
             return
         self._library_controller.show_browser_tab(self._browser_tab_ids[index])
 
-    def _apply_recent_search(self, index: int) -> None:
-        if index <= 0:
-            return
-        query = self._recent_searches_combo.itemText(index)
-        self._search_input.setText(query)
-        self._show_browser_panel()
-        self._library_controller.search_tracks(query)
-
     def _render_content(self, content: BrowserContent) -> None:
         if self._browser_auto_open_enabled:
             self._show_browser_panel()
@@ -206,12 +193,6 @@ class MainWindowBrowserMixin:
         self._search_button.setEnabled(not content.is_loading)
         if content.search_query is not None:
             self._search_input.setText(content.search_query)
-        self._recent_searches_combo.blockSignals(True)
-        self._recent_searches_combo.clear()
-        self._recent_searches_combo.addItem(self._t("browser.placeholder.recent_searches"))
-        for query in content.recent_searches:
-            self._recent_searches_combo.addItem(query)
-        self._recent_searches_combo.blockSignals(False)
 
         self._content_list.blockSignals(True)
         self._content_list.clear()
