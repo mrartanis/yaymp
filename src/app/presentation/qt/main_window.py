@@ -145,6 +145,7 @@ class MainWindow(
         self._track_like_overrides: dict[str, bool] = {}
         self._track_label_base_sizes: dict[QLabel, int] = {}
         self._updating_resize_cursor = False
+        self._pending_system_move = False
         self._volume_slider_drag_active = False
         self._my_wave_pending = False
         self._my_wave_active = False

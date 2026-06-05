@@ -72,6 +72,7 @@ class MainWindowWindowingMixin:
             return False
         if watched in {title_bar, title_drag_handle}:
             if event.type() == QEvent.Type.MouseButtonDblClick:
+                self._pending_system_move = False
                 self._toggle_maximized()
                 return True
             if event.type() == QEvent.Type.MouseButtonPress:
@@ -81,8 +82,21 @@ class MainWindowWindowingMixin:
                     and mouse_event.button() == Qt.MouseButton.LeftButton
                     and not self.isMaximized()
                 ):
+                    self._pending_system_move = True
+                    return True
+            if event.type() == QEvent.Type.MouseMove:
+                mouse_event = self._as_mouse_event(event)
+                if (
+                    self._pending_system_move
+                    and mouse_event is not None
+                    and bool(mouse_event.buttons() & Qt.MouseButton.LeftButton)
+                    and not self.isMaximized()
+                ):
+                    self._pending_system_move = False
                     self._start_system_move()
                     return True
+            if event.type() == QEvent.Type.MouseButtonRelease:
+                self._pending_system_move = False
             return False
         if watched in {
             player_panel_frame,
@@ -97,8 +111,21 @@ class MainWindowWindowingMixin:
                     and mouse_event.button() == Qt.MouseButton.LeftButton
                     and not self.isMaximized()
                 ):
+                    self._pending_system_move = True
+                    return True
+            if event.type() == QEvent.Type.MouseMove:
+                mouse_event = self._as_mouse_event(event)
+                if (
+                    self._pending_system_move
+                    and mouse_event is not None
+                    and bool(mouse_event.buttons() & Qt.MouseButton.LeftButton)
+                    and not self.isMaximized()
+                ):
+                    self._pending_system_move = False
                     self._start_system_move()
                     return True
+            if event.type() == QEvent.Type.MouseButtonRelease:
+                self._pending_system_move = False
             return False
         if watched is track_meta_label:
             if event.type() == QEvent.Type.MouseButtonRelease:
