@@ -106,8 +106,8 @@ class MainWindow(
         self._queued_thumb_downloads: list[tuple[str, Path]] = []
         self._active_thumb_downloads = 0
         self._max_active_thumb_downloads = 4
-        self._thumb_source_pixmap_cache: OrderedDict[str, QPixmap] = OrderedDict()
-        self._thumb_scaled_pixmap_cache: OrderedDict[tuple[str, int], QPixmap] = OrderedDict()
+        self._thumb_source_pixmap_cache: OrderedDict[tuple[str, int], QPixmap] = OrderedDict()
+        self._thumb_scaled_pixmap_cache: OrderedDict[tuple[str, int, int], QPixmap] = OrderedDict()
         self._auth_dialog: AuthDialog | None = None
         self._auth_flow_checked = False
         self._browser_tab_ids: tuple[str, ...] = ()

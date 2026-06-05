@@ -1,0 +1,186 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QFrame, QLabel, QListView, QVBoxLayout, QWidget
+
+from app.domain import Album, Artist
+from app.presentation.qt.library_controller import BrowserContent, BrowserItem
+from app.presentation.qt.main_window_browser import (
+    MainWindowBrowserMixin,
+    _CenteredGridListWidget,
+    _ElidedSingleLineLabel,
+    _ElidedWrapLabel,
+)
+
+
+class _BrowserHarness(MainWindowBrowserMixin, QWidget):
+    def __init__(self) -> None:
+        super().__init__()
+        self.thumb_requests: list[tuple[str, int, int | None]] = []
+        self._container = SimpleNamespace(
+            services=SimpleNamespace(
+                artwork_cache=SimpleNamespace(
+                    normalize_url=lambda artwork_ref: f"url:{artwork_ref}" if artwork_ref else None,
+                    cache_path_for_url=lambda artwork_url: None,
+                )
+            )
+        )
+        self._library_controller = SimpleNamespace(can_go_back=lambda: False)
+        self._browser_auto_open_enabled = False
+        self._current_browser_content = None
+        self._loading_more_content = False
+        self._updating_browser_tabs = False
+        self._browser_tab_ids = ()
+        self._pending_thumb_labels = {}
+        self._pending_thumb_callbacks = {}
+        self._queued_thumb_downloads = []
+        self._active_thumb_downloads = 0
+        self._max_active_thumb_downloads = 4
+        self._browser_panel = self._build_browser_panel()
+
+    def _panel_frame(self, title: str) -> QFrame:
+        del title
+        frame = QFrame(self)
+        frame.setLayout(QVBoxLayout())
+        return frame
+
+    def _panel_label(self, text: str, *, align_right: bool = False) -> QLabel:
+        del align_right
+        return QLabel(text, self)
+
+    def _show_browser_panel(self) -> None:
+        return
+
+    def _thumb_pixmap_for_url(
+        self,
+        artwork_url: str,
+        *,
+        size: int,
+        source_max_edge: int | None = None,
+    ):
+        self.thumb_requests.append((artwork_url, size, source_max_edge))
+        return None
+
+    def _queue_thumb_download(self, artwork_url, cache_path, label=None, *, on_ready=None) -> None:
+        del artwork_url, cache_path, label, on_ready
+        return
+
+    def _t(self, key: str, **params: object) -> str:
+        return key.format(**params) if params else key
+
+
+def test_render_content_uses_card_grid_for_album_lists(qtbot) -> None:
+    window = _BrowserHarness()
+    qtbot.addWidget(window)
+    content = BrowserContent(
+        title="Albums",
+        items=(
+            BrowserItem(
+                kind="album",
+                title="A",
+                subtitle="1999",
+                payload=Album(id="1", title="A", artwork_ref="art-a"),
+            ),
+            BrowserItem(
+                kind="album",
+                title="B",
+                subtitle="2000",
+                payload=Album(id="2", title="B", artwork_ref="art-b"),
+            ),
+        ),
+    )
+
+    window._render_content(content)
+
+    assert window._content_list.viewMode() == QListView.ViewMode.IconMode
+    assert window._content_list.flow() == QListView.Flow.LeftToRight
+    assert window._content_list.alternatingRowColors() is False
+    assert window._content_list.uniformItemSizes() is True
+    assert "padding: 0px" in window._content_list.styleSheet()
+    card = window._content_list.itemWidget(window._content_list.item(0))
+    assert card.objectName() == "browser-album-card"
+    assert card.size() == window._content_list.gridSize()
+    title = card.findChild(_ElidedWrapLabel, "browser-album-card-title")
+    assert title is not None
+    assert title.height() == 48
+    assert title.alignment() == Qt.AlignmentFlag.AlignCenter
+    subtitle = card.findChild(_ElidedSingleLineLabel, "browser-album-card-subtitle")
+    assert subtitle is not None
+    assert subtitle.alignment() == Qt.AlignmentFlag.AlignCenter
+    assert window.thumb_requests[0] == ("url:art-a", 176, 256)
+
+
+def test_render_content_keeps_list_mode_for_artist_lists(qtbot) -> None:
+    window = _BrowserHarness()
+    qtbot.addWidget(window)
+    content = BrowserContent(
+        title="Artists",
+        items=(
+            BrowserItem(
+                kind="artist",
+                title="Artist",
+                subtitle="library.artist",
+                payload=Artist(id="1", name="Artist"),
+            ),
+        ),
+    )
+
+    window._render_content(content)
+
+    assert window._content_list.viewMode() == QListView.ViewMode.ListMode
+    assert window._content_list.alternatingRowColors() is True
+    assert "padding: 5px" in window._content_list.styleSheet()
+
+
+def test_centered_grid_adds_balanced_side_insets(qtbot) -> None:
+    list_widget = _CenteredGridListWidget()
+    list_widget.resize(640, 400)
+    qtbot.addWidget(list_widget)
+    list_widget.set_centered_grid_metrics(enabled=True, cell_width=196, spacing=12)
+    list_widget.show()
+    qtbot.waitExposed(list_widget)
+
+    margins = list_widget.viewportMargins()
+    assert margins.left() >= 0
+    assert margins.right() >= 0
+    assert abs(margins.left() - margins.right()) <= 1
+
+
+def test_elided_wrap_label_truncates_long_word_horizontally(qtbot) -> None:
+    label = _ElidedWrapLabel(
+        "pesnitrushchebnadezhdrazbitykhserdets - chast 1. Dnevniki odinochki",
+        max_lines=2,
+    )
+    label.setFixedWidth(120)
+    qtbot.addWidget(label)
+    label.show()
+    qtbot.waitExposed(label)
+
+    assert "..." in label.text()
+    assert len(label.text().splitlines()) <= 2
+
+
+def test_elided_wrap_label_truncates_overflowing_multiline_text(qtbot) -> None:
+    label = _ElidedWrapLabel(
+        "Tribyut Egoru Letovu i ochen dlinnoe prodolzhenie nazvaniya alboma",
+        max_lines=2,
+    )
+    label.setFixedWidth(150)
+    qtbot.addWidget(label)
+    label.show()
+    qtbot.waitExposed(label)
+
+    assert "..." in label.text()
+    assert len(label.text().splitlines()) <= 2
+
+
+def test_elided_single_line_label_truncates_long_text(qtbot) -> None:
+    label = _ElidedSingleLineLabel("1999 | artist one, artist two, artist three | 42 tracks")
+    label.setFixedWidth(120)
+    qtbot.addWidget(label)
+    label.show()
+    qtbot.waitExposed(label)
+
+    assert "..." in label.text()

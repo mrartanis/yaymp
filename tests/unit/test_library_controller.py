@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.domain import Artist, CatalogSearchResults, Playlist, Track
+from app.domain import Album, Artist, CatalogSearchResults, Playlist, Track
 from app.presentation.qt.library_controller import LibraryController
 
 
@@ -180,3 +180,25 @@ def test_load_full_current_source_tracks_for_playlist_and_artist() -> None:
         "artist",
         "artist-id",
     )
+
+
+def test_album_subtitle_orders_year_before_artists_and_track_count() -> None:
+    controller = LibraryController(
+        search_service=StubSearchService(),
+        library_service=StubLibraryService(),
+        logger=StubLogger(),
+        translate=_translate,
+    )
+    album = Album(
+        id="album-id",
+        title="Album",
+        artists=("Artist One", "Artist Two"),
+        year=1999,
+        track_count=12,
+    )
+    try:
+        subtitle = controller._album_subtitle(album)
+    finally:
+        controller.shutdown()
+
+    assert subtitle == "1999 | Artist One, Artist Two | library.track_count"

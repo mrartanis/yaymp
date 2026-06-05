@@ -1007,9 +1007,13 @@ class LibraryController(QObject):
         return " | ".join(parts) or self._t("library.track")
 
     def _album_subtitle(self, album: Album) -> str | None:
-        parts = [", ".join(album.artists)]
         if album.year is not None:
-            parts.append(str(album.year))
+            parts = [str(album.year)]
+        else:
+            parts = []
+        artists = ", ".join(album.artists)
+        if artists:
+            parts.append(artists)
         if album.track_count is not None:
             parts.append(self._t("library.track_count", count=album.track_count))
         return " | ".join(part for part in parts if part) or None

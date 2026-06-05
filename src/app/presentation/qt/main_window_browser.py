@@ -3,8 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import shiboken6
-from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QPixmap
+from PySide6.QtCore import QSize, Qt, QUrl
+from PySide6.QtGui import QFontMetrics, QPixmap, QTextLayout, QTextOption
 from PySide6.QtNetwork import QNetworkRequest
 from PySide6.QtWidgets import (
     QDialog,
@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QListView,
     QProgressBar,
     QPushButton,
     QSizePolicy,
@@ -27,7 +28,162 @@ from app.presentation.qt.icon_utils import create_icon
 from app.presentation.qt.library_controller import BrowserContent, BrowserItem, BrowserTab
 
 
+class _CenteredGridListWidget(QListWidget):
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._centered_grid_enabled = False
+        self._centered_cell_width = 0
+        self._centered_spacing = 0
+
+    def set_centered_grid_metrics(
+        self,
+        *,
+        enabled: bool,
+        cell_width: int = 0,
+        spacing: int = 0,
+    ) -> None:
+        self._centered_grid_enabled = enabled
+        self._centered_cell_width = cell_width
+        self._centered_spacing = spacing
+        self._update_centered_grid_margins()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._update_centered_grid_margins()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._update_centered_grid_margins()
+
+    def _update_centered_grid_margins(self) -> None:
+        if not self._centered_grid_enabled or self._centered_cell_width <= 0:
+            self.setViewportMargins(0, 0, 0, 0)
+            return
+        margins = self.viewportMargins()
+        available_width = self.viewport().width() + margins.left() + margins.right()
+        if available_width <= 0:
+            return
+        stride = self._centered_cell_width + self._centered_spacing
+        columns = max(1, (available_width + self._centered_spacing) // stride)
+        used_width = (
+            columns * self._centered_cell_width
+            + max(0, columns - 1) * self._centered_spacing
+        )
+        side_space = max(0, available_width - used_width)
+        left = side_space // 2
+        right = side_space - left
+        self.setViewportMargins(left, 0, right, 0)
+
+
+class _ElidedWrapLabel(QLabel):
+    def __init__(self, text: str = "", *, max_lines: int = 1, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._max_lines = max_lines
+        self._full_text = ""
+        self.setText(text)
+
+    def setText(self, text: str) -> None:
+        self._full_text = text
+        self._update_elided_text()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._update_elided_text()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._update_elided_text()
+
+    def _update_elided_text(self) -> None:
+        width = self.contentsRect().width()
+        if width <= 0:
+            super().setText(self._full_text)
+            return
+        super().setText(self._elide_wrapped_text(self._full_text, width))
+
+    def _elide_wrapped_text(self, text: str, width: int) -> str:
+        if not text:
+            return ""
+        metrics = QFontMetrics(self.font())
+        layout = QTextLayout(text, self.font())
+        option = QTextOption()
+        option.setWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
+        layout.setTextOption(option)
+        layout.beginLayout()
+        lines: list[tuple[int, int]] = []
+        has_more = False
+        while len(lines) < self._max_lines:
+            line = layout.createLine()
+            if not line.isValid():
+                break
+            line.setLineWidth(width)
+            lines.append((line.textStart(), line.textLength()))
+        overflow_probe = layout.createLine()
+        if overflow_probe.isValid():
+            has_more = True
+        layout.endLayout()
+        if not lines:
+            return metrics.elidedText(text, Qt.TextElideMode.ElideRight, width)
+
+        rendered_lines: list[str] = []
+        for index, (start, length) in enumerate(lines):
+            chunk = text[start:start + length].strip()
+            if index == len(lines) - 1 and has_more:
+                rendered_lines.append(self._force_ellipsis(chunk, width, metrics))
+            else:
+                rendered_lines.append(chunk)
+        return "\n".join(rendered_lines)
+
+    def _force_ellipsis(self, text: str, width: int, metrics: QFontMetrics) -> str:
+        if not text:
+            return "..."
+        candidate = text.rstrip()
+        while candidate and metrics.horizontalAdvance(f"{candidate}...") > width:
+            candidate = candidate[:-1].rstrip()
+        return f"{candidate}..." if candidate else "..."
+
+
+class _ElidedSingleLineLabel(QLabel):
+    def __init__(self, text: str = "", parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._full_text = ""
+        self.setText(text)
+
+    def setText(self, text: str) -> None:
+        self._full_text = text
+        self._update_elided_text()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._update_elided_text()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._update_elided_text()
+
+    def _update_elided_text(self) -> None:
+        width = self.contentsRect().width()
+        if width <= 0:
+            super().setText(self._full_text)
+            return
+        metrics = QFontMetrics(self.font())
+        super().setText(self._elide_text(self._full_text, width, metrics))
+
+    def _elide_text(self, text: str, width: int, metrics: QFontMetrics) -> str:
+        if metrics.horizontalAdvance(text) <= width:
+            return text
+        candidate = text.rstrip()
+        while candidate and metrics.horizontalAdvance(f"{candidate}...") > width:
+            candidate = candidate[:-1].rstrip()
+        return f"{candidate}..." if candidate else "..."
+
+
 class MainWindowBrowserMixin:
+    _ALBUM_CARD_WIDTH = 196
+    _ALBUM_CARD_HEIGHT = 284
+    _ALBUM_CARD_ART_SIZE = 176
+    _ALBUM_CARD_SOURCE_MAX_EDGE = 256
+
     def _build_browser_panel(self) -> QFrame:
         frame = self._panel_frame("Search / Library")
         frame.setSizePolicy(
@@ -60,11 +216,15 @@ class MainWindowBrowserMixin:
         self._browser_close_button.setFixedSize(32, 30)
         self._browser_tabs = QTabWidget()
         self._browser_tabs.setVisible(False)
-        self._content_list = QListWidget()
+        self._content_list = _CenteredGridListWidget()
+        self._content_list.setObjectName("browser-content-list")
         self._content_list.setAlternatingRowColors(True)
         self._content_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._content_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._content_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._content_list.setMovement(QListView.Movement.Static)
+        self._content_list.setResizeMode(QListView.ResizeMode.Adjust)
+        self._apply_browser_content_layout(use_album_cards=False)
         self._play_all_button = QPushButton(self._t("action.play_all"))
         self._play_all_button.setIcon(create_icon("play.svg"))
         self._play_all_button.setFixedHeight(32)
@@ -186,6 +346,7 @@ class MainWindowBrowserMixin:
             self._show_browser_panel()
         self._current_browser_content = content
         self._loading_more_content = False
+        use_album_cards = self._content_uses_album_cards(content)
         self._browser_title_label.setText(content.title)
         self._browser_back_button.setEnabled(self._library_controller.can_go_back())
         self._render_browser_tabs(content.tabs, active_tab=content.active_tab)
@@ -193,6 +354,7 @@ class MainWindowBrowserMixin:
         self._search_button.setEnabled(not content.is_loading)
         if content.search_query is not None:
             self._search_input.setText(content.search_query)
+        self._apply_browser_content_layout(use_album_cards=use_album_cards)
 
         self._content_list.blockSignals(True)
         self._content_list.clear()
@@ -209,7 +371,11 @@ class MainWindowBrowserMixin:
             if browser_item.kind == "section":
                 widget_item.setFlags(widget_item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
             elif self._browser_item_uses_art(browser_item):
-                widget = self._browser_art_row_widget(browser_item)
+                widget = (
+                    self._browser_album_card_widget(browser_item)
+                    if use_album_cards and browser_item.kind == "album"
+                    else self._browser_art_row_widget(browser_item)
+                )
                 widget_item.setSizeHint(widget.sizeHint())
                 widget_item.setText("")
             self._content_list.addItem(widget_item)
@@ -232,6 +398,44 @@ class MainWindowBrowserMixin:
             "album",
             "artist",
         }
+
+    def _content_uses_album_cards(self, content: BrowserContent) -> bool:
+        items = tuple(item for item in content.items if item.kind != "section")
+        return bool(items) and all(item.kind == "album" for item in items)
+
+    def _apply_browser_content_layout(self, *, use_album_cards: bool) -> None:
+        if use_album_cards:
+            self._content_list.setAlternatingRowColors(False)
+            self._content_list.setViewMode(QListView.ViewMode.IconMode)
+            self._content_list.setFlow(QListView.Flow.LeftToRight)
+            self._content_list.setWrapping(True)
+            self._content_list.setSpacing(12)
+            self._content_list.setGridSize(
+                QSize(self._ALBUM_CARD_WIDTH, self._ALBUM_CARD_HEIGHT)
+            )
+            self._content_list.setWordWrap(True)
+            self._content_list.setUniformItemSizes(True)
+            self._content_list.setStyleSheet(
+                "QListWidget::item, QListView::item { padding: 0px; margin: 0px; }"
+            )
+            self._content_list.set_centered_grid_metrics(
+                enabled=True,
+                cell_width=self._ALBUM_CARD_WIDTH,
+                spacing=self._content_list.spacing(),
+            )
+            return
+        self._content_list.setAlternatingRowColors(True)
+        self._content_list.setViewMode(QListView.ViewMode.ListMode)
+        self._content_list.setFlow(QListView.Flow.TopToBottom)
+        self._content_list.setWrapping(False)
+        self._content_list.setSpacing(0)
+        self._content_list.setGridSize(QSize())
+        self._content_list.setWordWrap(False)
+        self._content_list.setUniformItemSizes(False)
+        self._content_list.setStyleSheet(
+            "QListWidget::item, QListView::item { padding: 5px; margin: 0px; }"
+        )
+        self._content_list.set_centered_grid_metrics(enabled=False)
 
     def _browser_art_row_widget(self, item: BrowserItem) -> QWidget:
         row = QWidget()
@@ -262,6 +466,56 @@ class MainWindowBrowserMixin:
         text_layout.addWidget(subtitle)
         layout.addWidget(text_container, 1)
         return row
+
+    def _browser_album_card_widget(self, item: BrowserItem) -> QWidget:
+        card = QWidget()
+        card.setObjectName("browser-album-card")
+        card.setFixedSize(self._ALBUM_CARD_WIDTH, self._ALBUM_CARD_HEIGHT)
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(0, 8, 0, 14)
+        layout.setSpacing(8)
+        artwork_ref = getattr(item.payload, "artwork_ref", None)
+        art = self._album_card_art_label(artwork_ref, size=self._ALBUM_CARD_ART_SIZE)
+        art.setObjectName("browser-album-card-art")
+        title = _ElidedWrapLabel(item.title, max_lines=2)
+        title.setObjectName("browser-album-card-title")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setFixedHeight(48)
+        subtitle = _ElidedSingleLineLabel(item.subtitle or "")
+        subtitle.setObjectName("browser-album-card-subtitle")
+        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        subtitle.setWordWrap(False)
+        subtitle.setFixedHeight(16)
+        layout.addWidget(art, 0, Qt.AlignmentFlag.AlignHCenter)
+        layout.addWidget(title)
+        layout.addWidget(subtitle)
+        return card
+
+    def _album_card_art_label(self, artwork_ref: str | None, *, size: int) -> QLabel:
+        label = QLabel()
+        label.setObjectName("browser-album-card-art")
+        label.setFixedSize(size, size)
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        if not artwork_ref:
+            label.setText("♪")
+            return label
+        artwork_url = self._container.services.artwork_cache.normalize_url(artwork_ref)
+        if artwork_url is None:
+            label.setText("♪")
+            return label
+        pixmap = self._thumb_pixmap_for_url(
+            artwork_url,
+            size=size,
+            source_max_edge=self._ALBUM_CARD_SOURCE_MAX_EDGE,
+        )
+        if pixmap is None:
+            label.setText("♪")
+            cache_path = self._container.services.artwork_cache.cache_path_for_url(artwork_url)
+            self._queue_thumb_download(artwork_url, cache_path, label)
+            return label
+        label.setText("")
+        label.setPixmap(pixmap)
+        return label
 
     def _art_thumb_label(self, artwork_ref: str | None, *, size: int) -> QLabel:
         label = QLabel()

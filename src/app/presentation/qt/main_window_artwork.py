@@ -19,6 +19,7 @@ class MainWindowArtworkMixin:
     _THUMB_SOURCE_PIXMAP_CACHE_LIMIT = 576
     _THUMB_SCALED_PIXMAP_CACHE_LIMIT = 1152
     _THUMB_SOURCE_MAX_EDGE = 64
+    _BROWSER_CARD_SOURCE_MAX_EDGE = 256
 
     def _thumb_pixmap_for_artwork_ref(
         self,
@@ -52,13 +53,23 @@ class MainWindowArtworkMixin:
             on_ready=lambda: self._queue_delegate.update_row(row),
         )
 
-    def _thumb_pixmap_for_url(self, artwork_url: str, *, size: int) -> QPixmap | None:
-        cache_key = (artwork_url, size)
+    def _thumb_pixmap_for_url(
+        self,
+        artwork_url: str,
+        *,
+        size: int,
+        source_max_edge: int | None = None,
+    ) -> QPixmap | None:
+        normalized_max_edge = source_max_edge or self._THUMB_SOURCE_MAX_EDGE
+        cache_key = (artwork_url, size, normalized_max_edge)
         cached_scaled = self._thumb_scaled_pixmap_cache.get(cache_key)
         if cached_scaled is not None:
             self._thumb_scaled_pixmap_cache.move_to_end(cache_key)
             return cached_scaled
-        source_pixmap = self._thumb_source_pixmap(artwork_url)
+        source_pixmap = self._thumb_source_pixmap(
+            artwork_url,
+            max_edge=normalized_max_edge,
+        )
         if source_pixmap is None:
             return None
         scaled = source_pixmap.scaled(
@@ -75,10 +86,11 @@ class MainWindowArtworkMixin:
         )
         return scaled
 
-    def _thumb_source_pixmap(self, artwork_url: str) -> QPixmap | None:
-        cached_source = self._thumb_source_pixmap_cache.get(artwork_url)
+    def _thumb_source_pixmap(self, artwork_url: str, *, max_edge: int) -> QPixmap | None:
+        cache_key = (artwork_url, max_edge)
+        cached_source = self._thumb_source_pixmap_cache.get(cache_key)
         if cached_source is not None:
-            self._thumb_source_pixmap_cache.move_to_end(artwork_url)
+            self._thumb_source_pixmap_cache.move_to_end(cache_key)
             return cached_source
         cache_path = self._container.services.artwork_cache.cache_path_for_url(artwork_url)
         if not cache_path.exists():
@@ -86,20 +98,29 @@ class MainWindowArtworkMixin:
         pixmap = QPixmap(str(cache_path))
         if pixmap.isNull():
             return None
-        normalized = self._normalized_thumb_source_pixmap(pixmap)
+        normalized = self._normalized_thumb_source_pixmap(pixmap, max_edge=max_edge)
         self._lru_store_pixmap(
             self._thumb_source_pixmap_cache,
-            artwork_url,
+            cache_key,
             normalized,
             limit=self._THUMB_SOURCE_PIXMAP_CACHE_LIMIT,
         )
         return normalized
 
     def _store_thumb_source_pixmap(self, artwork_url: str, pixmap: QPixmap) -> None:
+        stale_source_keys = [
+            key for key in self._thumb_source_pixmap_cache
+            if key[0] == artwork_url
+        ]
+        for key in stale_source_keys:
+            del self._thumb_source_pixmap_cache[key]
         self._lru_store_pixmap(
             self._thumb_source_pixmap_cache,
-            artwork_url,
-            self._normalized_thumb_source_pixmap(pixmap),
+            (artwork_url, self._THUMB_SOURCE_MAX_EDGE),
+            self._normalized_thumb_source_pixmap(
+                pixmap,
+                max_edge=self._THUMB_SOURCE_MAX_EDGE,
+            ),
             limit=self._THUMB_SOURCE_PIXMAP_CACHE_LIMIT,
         )
         stale_keys = [
@@ -109,17 +130,17 @@ class MainWindowArtworkMixin:
         for key in stale_keys:
             del self._thumb_scaled_pixmap_cache[key]
 
-    def _normalized_thumb_source_pixmap(self, pixmap: QPixmap) -> QPixmap:
-        max_edge = max(pixmap.width(), pixmap.height())
-        if max_edge <= self._THUMB_SOURCE_MAX_EDGE:
+    def _normalized_thumb_source_pixmap(self, pixmap: QPixmap, *, max_edge: int) -> QPixmap:
+        pixmap_max_edge = max(pixmap.width(), pixmap.height())
+        if pixmap_max_edge <= max_edge:
             return pixmap
         if pixmap.width() >= pixmap.height():
             return pixmap.scaledToWidth(
-                self._THUMB_SOURCE_MAX_EDGE,
+                max_edge,
                 Qt.TransformationMode.SmoothTransformation,
             )
         return pixmap.scaledToHeight(
-            self._THUMB_SOURCE_MAX_EDGE,
+            max_edge,
             Qt.TransformationMode.SmoothTransformation,
         )
 

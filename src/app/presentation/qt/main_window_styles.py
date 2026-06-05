@@ -198,6 +198,24 @@ def build_main_window_stylesheet(
                 color: {palette.text_secondary};
                 font-size: 11px;
             }}
+            QWidget#browser-album-card {{
+                background: transparent;
+                border: 0;
+                border-radius: 0;
+            }}
+            QLabel#browser-album-card-art {{
+                background: transparent;
+            }}
+            QLabel#browser-album-card-title {{
+                color: {palette.text_title};
+                font-size: 13px;
+                font-weight: 700;
+                padding-top: 2px;
+            }}
+            QLabel#browser-album-card-subtitle {{
+                color: {palette.text_secondary};
+                font-size: 11px;
+            }}
             QLabel#queue-subtitle {{
                 qproperty-wordWrap: false;
             }}
