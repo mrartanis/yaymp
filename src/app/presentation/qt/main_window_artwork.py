@@ -61,7 +61,10 @@ class MainWindowArtworkMixin:
         source_max_edge: int | None = None,
     ) -> QPixmap | None:
         normalized_max_edge = source_max_edge or self._THUMB_SOURCE_MAX_EDGE
-        cache_key = (artwork_url, size, normalized_max_edge)
+        if normalized_max_edge == self._THUMB_SOURCE_MAX_EDGE:
+            cache_key: object = (artwork_url, size)
+        else:
+            cache_key = (artwork_url, size, normalized_max_edge)
         cached_scaled = self._thumb_scaled_pixmap_cache.get(cache_key)
         if cached_scaled is not None:
             self._thumb_scaled_pixmap_cache.move_to_end(cache_key)
@@ -86,8 +89,17 @@ class MainWindowArtworkMixin:
         )
         return scaled
 
-    def _thumb_source_pixmap(self, artwork_url: str, *, max_edge: int) -> QPixmap | None:
-        cache_key = (artwork_url, max_edge)
+    def _thumb_source_pixmap(
+        self,
+        artwork_url: str,
+        *,
+        max_edge: int | None = None,
+    ) -> QPixmap | None:
+        normalized_max_edge = max_edge or self._THUMB_SOURCE_MAX_EDGE
+        if normalized_max_edge == self._THUMB_SOURCE_MAX_EDGE:
+            cache_key: object = artwork_url
+        else:
+            cache_key = (artwork_url, normalized_max_edge)
         cached_source = self._thumb_source_pixmap_cache.get(cache_key)
         if cached_source is not None:
             self._thumb_source_pixmap_cache.move_to_end(cache_key)
@@ -98,7 +110,10 @@ class MainWindowArtworkMixin:
         pixmap = QPixmap(str(cache_path))
         if pixmap.isNull():
             return None
-        normalized = self._normalized_thumb_source_pixmap(pixmap, max_edge=max_edge)
+        normalized = self._normalized_thumb_source_pixmap(
+            pixmap,
+            max_edge=normalized_max_edge,
+        )
         self._lru_store_pixmap(
             self._thumb_source_pixmap_cache,
             cache_key,
@@ -116,7 +131,7 @@ class MainWindowArtworkMixin:
             del self._thumb_source_pixmap_cache[key]
         self._lru_store_pixmap(
             self._thumb_source_pixmap_cache,
-            (artwork_url, self._THUMB_SOURCE_MAX_EDGE),
+            artwork_url,
             self._normalized_thumb_source_pixmap(
                 pixmap,
                 max_edge=self._THUMB_SOURCE_MAX_EDGE,
