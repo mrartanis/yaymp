@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.bootstrap.container import AppContainer
-from app.domain import PlaybackStatus, Track
+from app.domain import Album, Artist, PlaybackStatus, Track
 from app.presentation.qt.auth_dialog import AuthDialog
 from app.presentation.qt.i18n import UiTextCatalog
 from app.presentation.qt.icon_utils import create_icon
@@ -584,6 +584,7 @@ class MainWindow(
                 album_text
             )
             self._track_album_label.setToolTip(album_text)
+            self._update_track_navigation_affordances(current_track)
             self._fit_track_text_labels()
             self._render_current_track_like_button(current_track.is_liked)
             self._defer_artwork_render(current_track)
@@ -594,6 +595,7 @@ class MainWindow(
             self._track_version_label.setVisible(False)
             self._track_meta_label.setText(self._t("track.choose_music"))
             self._track_album_label.setText("")
+            self._update_track_navigation_affordances(None)
             self._fit_track_text_labels()
             self._render_current_track_like_button(False)
             self._pending_artwork_track = None
@@ -666,6 +668,44 @@ class MainWindow(
         if liked is None or liked == track.is_liked:
             return track
         return replace(track, is_liked=liked)
+
+    def _update_track_navigation_affordances(self, track: Track | None) -> None:
+        can_open_artist = bool(track and track.artist_ids and track.artists)
+        can_open_album = bool(track and track.album_id)
+        self._track_meta_label.setCursor(
+            Qt.CursorShape.PointingHandCursor
+            if can_open_artist
+            else Qt.CursorShape.ArrowCursor
+        )
+        self._track_album_label.setCursor(
+            Qt.CursorShape.PointingHandCursor
+            if can_open_album
+            else Qt.CursorShape.ArrowCursor
+        )
+
+    def _open_current_track_primary_artist(self) -> bool:
+        track = self._current_track
+        if track is None:
+            return False
+        if not track.artist_ids or not track.artists:
+            return False
+        artist = Artist(id=track.artist_ids[0], name=track.artists[0])
+        self._library_controller.open_artist(artist)
+        return True
+
+    def _open_current_track_album(self) -> bool:
+        track = self._current_track
+        if track is None or not track.album_id:
+            return False
+        album = Album(
+            id=track.album_id,
+            title=track.album_title or self._t("label.album"),
+            artists=track.artists,
+            artist_ids=track.artist_ids,
+            year=track.album_year,
+        )
+        self._library_controller.open_album(album)
+        return True
 
     def _render_current_track_like_button(self, is_liked: bool) -> None:
         self._like_track_button.setIcon(

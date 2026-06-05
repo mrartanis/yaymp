@@ -89,8 +89,6 @@ class MainWindowWindowingMixin:
             track_metadata_zone,
             artwork_label,
             track_title_label,
-            track_meta_label,
-            track_album_label,
         }:
             if event.type() == QEvent.Type.MouseButtonPress:
                 mouse_event = self._as_mouse_event(event)
@@ -101,6 +99,24 @@ class MainWindowWindowingMixin:
                 ):
                     self._start_system_move()
                     return True
+            return False
+        if watched is track_meta_label:
+            if event.type() == QEvent.Type.MouseButtonRelease:
+                mouse_event = self._as_mouse_event(event)
+                if (
+                    mouse_event is not None
+                    and mouse_event.button() == Qt.MouseButton.LeftButton
+                ):
+                    return bool(self._open_current_track_primary_artist())
+            return False
+        if watched is track_album_label:
+            if event.type() == QEvent.Type.MouseButtonRelease:
+                mouse_event = self._as_mouse_event(event)
+                if (
+                    mouse_event is not None
+                    and mouse_event.button() == Qt.MouseButton.LeftButton
+                ):
+                    return bool(self._open_current_track_album())
             return False
         if watched is settings_popup:
             if event.type() == QEvent.Type.Leave and settings_popup is not None:
