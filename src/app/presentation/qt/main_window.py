@@ -849,6 +849,8 @@ class MainWindow(
         self._search_input.setPlaceholderText(self._t("browser.placeholder.search"))
         self._browser_back_button.setToolTip(self._t("action.back"))
         self._browser_close_button.setToolTip(self._t("action.close"))
+        self._browser_view_list_button.setText(self._t("browser.view.list"))
+        self._browser_view_cards_button.setText(self._t("browser.view.cards"))
         self._browser_dialog.setWindowTitle(self._t("window.search_library"))
         self._search_nav_button.setText(self._t("action.search"))
         self._liked_nav_button.setText(self._t("nav.my_tracks"))
