@@ -7,6 +7,7 @@ from PySide6.QtCore import QSize, Qt, QUrl
 from PySide6.QtGui import QFontMetrics, QPixmap, QTextLayout, QTextOption
 from PySide6.QtNetwork import QNetworkRequest
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QDialog,
     QFrame,
     QHBoxLayout,
@@ -166,6 +167,8 @@ class _ElidedSingleLineLabel(QLabel):
 
 
 class MainWindowBrowserMixin:
+    _BROWSER_VIEW_MODE_LIST = "list"
+    _BROWSER_VIEW_MODE_CARDS = "cards"
     _ALBUM_CARD_WIDTH = 196
     _ALBUM_CARD_HEIGHT = 284
     _ALBUM_CARD_ART_SIZE = 176
@@ -202,6 +205,23 @@ class MainWindowBrowserMixin:
         self._browser_close_button.setObjectName("panel-close-button")
         self._browser_close_button.setToolTip(self._t("action.close"))
         self._browser_close_button.setFixedSize(32, 30)
+        self._browser_view_mode_group = QButtonGroup(self)
+        self._browser_view_mode_group.setExclusive(True)
+        self._browser_view_mode_widget = QWidget()
+        browser_view_layout = QHBoxLayout(self._browser_view_mode_widget)
+        browser_view_layout.setContentsMargins(0, 0, 0, 0)
+        browser_view_layout.setSpacing(6)
+        self._browser_view_list_button = self._browser_view_button(
+            self._t("browser.view.list"),
+            mode=self._BROWSER_VIEW_MODE_LIST,
+        )
+        self._browser_view_cards_button = self._browser_view_button(
+            self._t("browser.view.cards"),
+            mode=self._BROWSER_VIEW_MODE_CARDS,
+        )
+        browser_view_layout.addWidget(self._browser_view_list_button)
+        browser_view_layout.addWidget(self._browser_view_cards_button)
+        self._browser_view_mode_widget.hide()
         self._browser_tabs = QTabWidget()
         self._browser_tabs.setVisible(False)
         self._content_list = _CenteredGridListWidget()
@@ -229,6 +249,7 @@ class MainWindowBrowserMixin:
         self._append_all_button.setFixedHeight(32)
         header_row.addWidget(self._browser_back_button)
         header_row.addWidget(self._browser_title_label, 1)
+        header_row.addWidget(self._browser_view_mode_widget, 0, Qt.AlignmentFlag.AlignVCenter)
         header_row.addWidget(self._browser_close_button)
         search_row = QHBoxLayout()
         search_row.setSpacing(8)
@@ -342,7 +363,7 @@ class MainWindowBrowserMixin:
             self._show_browser_panel()
         self._current_browser_content = content
         self._loading_more_content = False
-        use_art_cards = self._content_uses_art_cards(content)
+        use_art_cards = self._browser_view_uses_cards(content)
         self._browser_title_label.setText(content.title)
         self._browser_back_button.setEnabled(self._library_controller.can_go_back())
         self._render_browser_tabs(content.tabs, active_tab=content.active_tab)
@@ -350,6 +371,7 @@ class MainWindowBrowserMixin:
         self._search_button.setEnabled(not content.is_loading)
         if content.search_query is not None:
             self._search_input.setText(content.search_query)
+        self._sync_browser_view_mode_controls(content)
         self._apply_browser_content_layout(use_album_cards=use_art_cards)
 
         self._content_list.blockSignals(True)
@@ -403,6 +425,48 @@ class MainWindowBrowserMixin:
     def _content_uses_art_cards(self, content: BrowserContent) -> bool:
         items = tuple(item for item in content.items if item.kind != "section")
         return bool(items) and all(item.kind in {"album", "artist"} for item in items)
+
+    def _browser_view_button(self, text: str, *, mode: str) -> QPushButton:
+        button = QPushButton(text)
+        button.setObjectName("quality-option")
+        button.setCheckable(True)
+        button.setFixedHeight(26)
+        button.setProperty("browser_view_mode", mode)
+        self._browser_view_mode_group.addButton(button)
+        return button
+
+    def _browser_view_uses_cards(self, content: BrowserContent) -> bool:
+        supports_cards = self._content_uses_art_cards(content)
+        if not supports_cards:
+            return False
+        return self._browser_view_mode == self._BROWSER_VIEW_MODE_CARDS
+
+    def _sync_browser_view_mode_controls(self, content: BrowserContent | None = None) -> None:
+        if content is None:
+            content = self._current_browser_content
+        supports_cards = bool(content) and self._content_uses_art_cards(content)
+        self._browser_view_mode_widget.setVisible(supports_cards)
+        if supports_cards:
+            for button, mode in (
+                (self._browser_view_list_button, self._BROWSER_VIEW_MODE_LIST),
+                (self._browser_view_cards_button, self._BROWSER_VIEW_MODE_CARDS),
+            ):
+                button.blockSignals(True)
+                button.setChecked(self._browser_view_mode == mode)
+                button.blockSignals(False)
+
+    def _set_browser_view_mode(self, mode: str) -> None:
+        if mode not in {
+            self._BROWSER_VIEW_MODE_LIST,
+            self._BROWSER_VIEW_MODE_CARDS,
+        }:
+            mode = self._BROWSER_VIEW_MODE_CARDS
+        if self._browser_view_mode == mode:
+            return
+        self._browser_view_mode = mode
+        self._sync_browser_view_mode_controls()
+        if self._current_browser_content is not None:
+            self._render_content(self._current_browser_content)
 
     def _apply_browser_content_layout(self, *, use_album_cards: bool) -> None:
         if use_album_cards:

@@ -144,6 +144,7 @@ class MainWindow(
         self._queue_last_interaction_at = 0.0
         self._track_like_overrides: dict[str, bool] = {}
         self._track_label_base_sizes: dict[QLabel, int] = {}
+        self._browser_view_mode = self._BROWSER_VIEW_MODE_CARDS
         self._updating_resize_cursor = False
         self._pending_system_move = False
         self._pending_system_move_origin = QPointF()
@@ -433,6 +434,9 @@ class MainWindow(
         self._queue_shuffle_button.toggled.connect(self._controller.set_shuffle_enabled)
         self._browser_back_button.clicked.connect(self._library_controller.go_back)
         self._browser_close_button.clicked.connect(self._hide_browser_panel)
+        self._browser_view_mode_group.buttonClicked.connect(
+            self._on_browser_view_mode_button_clicked
+        )
         self._content_list.itemDoubleClicked.connect(self._open_content_item)
         self._content_list.customContextMenuRequested.connect(self._show_content_context_menu)
         self._content_list.verticalScrollBar().valueChanged.connect(self._maybe_load_more_content)
@@ -467,6 +471,11 @@ class MainWindow(
         self._window_close_button.clicked.connect(self.close)
         self._playback_poll_timer.timeout.connect(self._controller.refresh)
         self._artwork_manager.finished.connect(self._handle_artwork_downloaded)
+
+    def _on_browser_view_mode_button_clicked(self, button: QPushButton) -> None:
+        mode = button.property("browser_view_mode")
+        if isinstance(mode, str):
+            self._set_browser_view_mode(mode)
 
     def _apply_seek(self) -> None:
         self._controller.seek(self._seek_slider.value())

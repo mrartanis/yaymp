@@ -28,6 +28,7 @@ class _BrowserHarness(MainWindowBrowserMixin, QWidget):
         )
         self._library_controller = SimpleNamespace(can_go_back=lambda: False)
         self._browser_auto_open_enabled = False
+        self._browser_view_mode = self._BROWSER_VIEW_MODE_CARDS
         self._current_browser_content = None
         self._loading_more_content = False
         self._updating_browser_tabs = False
@@ -184,6 +185,39 @@ def test_non_card_content_uses_item_scroll_mode(qtbot) -> None:
     assert window._content_list.viewMode() == QListView.ViewMode.ListMode
     assert window._content_list.verticalScrollMode() == QListView.ScrollMode.ScrollPerItem
     assert window._content_list.width() == window._content_list_host.width()
+    assert window._browser_view_mode_widget.isHidden()
+
+
+def test_browser_view_mode_toggle_switches_supported_pages(qtbot) -> None:
+    window = _BrowserHarness()
+    qtbot.addWidget(window)
+    content = BrowserContent(
+        title="Albums",
+        items=(
+            BrowserItem(
+                kind="album",
+                title="A",
+                subtitle="1999",
+                payload=Album(id="1", title="A", artwork_ref="art-a"),
+            ),
+        ),
+    )
+
+    window._render_content(content)
+
+    assert not window._browser_view_mode_widget.isHidden()
+    assert window._browser_view_cards_button.isChecked()
+    assert window._content_list.viewMode() == QListView.ViewMode.IconMode
+
+    window._set_browser_view_mode(window._BROWSER_VIEW_MODE_LIST)
+
+    assert window._browser_view_list_button.isChecked()
+    assert window._content_list.viewMode() == QListView.ViewMode.ListMode
+
+    window._set_browser_view_mode(window._BROWSER_VIEW_MODE_CARDS)
+
+    assert window._browser_view_cards_button.isChecked()
+    assert window._content_list.viewMode() == QListView.ViewMode.IconMode
 
 
 def test_elided_wrap_label_truncates_long_word_horizontally(qtbot) -> None:
