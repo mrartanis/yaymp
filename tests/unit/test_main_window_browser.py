@@ -226,6 +226,59 @@ def test_browser_view_mode_toggle_switches_supported_pages(qtbot) -> None:
     assert window.saved_browser_view_modes == ["list", "cards"]
 
 
+def test_search_input_filters_current_list_content_locally(qtbot) -> None:
+    window = _BrowserHarness()
+    qtbot.addWidget(window)
+    content = BrowserContent(
+        title="Tracks",
+        items=(
+            BrowserItem(kind="track", title="Alpha", subtitle="One", payload=None),
+            BrowserItem(kind="track", title="Beta", subtitle="Two", payload=None),
+        ),
+    )
+
+    window._render_content(content)
+    window._search_input.setText("bet")
+    window._filter_browser_content_from_input()
+
+    assert window._content_list.viewMode() == QListView.ViewMode.ListMode
+    assert window._content_list.count() == 1
+    assert window._content_list.item(0).text() == "Beta\nTwo"
+
+
+def test_search_input_filters_current_card_content_locally(qtbot) -> None:
+    window = _BrowserHarness()
+    qtbot.addWidget(window)
+    content = BrowserContent(
+        title="Albums",
+        items=(
+            BrowserItem(
+                kind="album",
+                title="Alpha",
+                subtitle="1999",
+                payload=Album(id="1", title="Alpha", artwork_ref="art-a"),
+            ),
+            BrowserItem(
+                kind="album",
+                title="Beta",
+                subtitle="2000",
+                payload=Album(id="2", title="Beta", artwork_ref="art-b"),
+            ),
+        ),
+    )
+
+    window._render_content(content)
+    window._search_input.setText("bet")
+    window._filter_browser_content_from_input()
+
+    assert window._content_list.viewMode() == QListView.ViewMode.IconMode
+    assert window._content_list.count() == 1
+    card = window._content_list.itemWidget(window._content_list.item(0))
+    title = card.findChild(_ElidedWrapLabel, "browser-album-card-title")
+    assert title is not None
+    assert title.text() == "Beta"
+
+
 def test_elided_wrap_label_truncates_long_word_horizontally(qtbot) -> None:
     label = _ElidedWrapLabel(
         "pesnitrushchebnadezhdrazbitykhserdets - chast 1. Dnevniki odinochki",

@@ -346,6 +346,11 @@ class MainWindowBrowserMixin:
         self._show_browser_panel()
         self._library_controller.search_tracks(self._search_input.text())
 
+    def _filter_browser_content_from_input(self) -> None:
+        if self._current_browser_content is None:
+            return
+        self._apply_filtered_browser_content(self._current_browser_content)
+
     def _show_search(self) -> None:
         self._show_browser_panel()
         self._library_controller.show_search_page()
@@ -363,24 +368,28 @@ class MainWindowBrowserMixin:
             self._show_browser_panel()
         self._current_browser_content = content
         self._loading_more_content = False
+        if content.search_query is not None:
+            self._search_input.setText(content.search_query)
+        self._apply_filtered_browser_content(content)
+
+    def _apply_filtered_browser_content(self, content: BrowserContent) -> None:
+        filtered_content = self._filtered_browser_content(content, self._search_input.text())
         use_art_cards = self._browser_view_uses_cards(content)
         self._browser_title_label.setText(content.title)
         self._browser_back_button.setEnabled(self._library_controller.can_go_back())
         self._render_browser_tabs(content.tabs, active_tab=content.active_tab)
         self._search_loading.setVisible(content.is_loading)
         self._search_button.setEnabled(not content.is_loading)
-        if content.search_query is not None:
-            self._search_input.setText(content.search_query)
         self._sync_browser_view_mode_controls(content)
         self._apply_browser_content_layout(use_album_cards=use_art_cards)
 
         self._content_list.blockSignals(True)
         self._content_list.clear()
-        if not content.items:
+        if not filtered_content.items:
             empty_item = QListWidgetItem(self._t("browser.empty"))
             empty_item.setFlags(empty_item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
             self._content_list.addItem(empty_item)
-        for browser_item in content.items:
+        for browser_item in filtered_content.items:
             text = browser_item.title
             if browser_item.subtitle:
                 text = f"{browser_item.title}\n{browser_item.subtitle}"
@@ -415,6 +424,74 @@ class MainWindowBrowserMixin:
         )
         self._play_all_button.setEnabled(can_play_source)
         self._append_all_button.setEnabled(can_play_source)
+
+    def _filtered_browser_content(self, content: BrowserContent, query: str) -> BrowserContent:
+        normalized_query = query.strip().casefold()
+        if not normalized_query:
+            return content
+
+        filtered_items: list[BrowserItem] = []
+        pending_section: BrowserItem | None = None
+        section_matched = False
+        has_sections = False
+
+        for item in content.items:
+            if item.kind == "section":
+                has_sections = True
+                if pending_section is not None and section_matched:
+                    filtered_items.append(pending_section)
+                pending_section = item
+                section_matched = False
+                continue
+            if not self._browser_item_matches_query(item, normalized_query):
+                continue
+            if pending_section is not None and not section_matched:
+                filtered_items.append(pending_section)
+                section_matched = True
+            filtered_items.append(item)
+
+        if has_sections:
+            return BrowserContent(
+                title=content.title,
+                items=tuple(filtered_items),
+                recent_searches=content.recent_searches,
+                tabs=content.tabs,
+                active_tab=content.active_tab,
+                search_query=content.search_query,
+                source_type=content.source_type,
+                source_id=content.source_id,
+                source_tracks=content.source_tracks,
+                bulk_mode=content.bulk_mode,
+                list_key=content.list_key,
+                has_more=content.has_more,
+                is_loading=content.is_loading,
+            )
+
+        return BrowserContent(
+            title=content.title,
+            items=tuple(
+                item
+                for item in content.items
+                if self._browser_item_matches_query(item, normalized_query)
+            ),
+            recent_searches=content.recent_searches,
+            tabs=content.tabs,
+            active_tab=content.active_tab,
+            search_query=content.search_query,
+            source_type=content.source_type,
+            source_id=content.source_id,
+            source_tracks=content.source_tracks,
+            bulk_mode=content.bulk_mode,
+            list_key=content.list_key,
+            has_more=content.has_more,
+            is_loading=content.is_loading,
+        )
+
+    def _browser_item_matches_query(self, item: BrowserItem, normalized_query: str) -> bool:
+        haystacks = [item.title]
+        if item.subtitle:
+            haystacks.append(item.subtitle)
+        return any(normalized_query in value.casefold() for value in haystacks)
 
     def _browser_item_uses_art(self, item: BrowserItem) -> bool:
         return item.kind in {

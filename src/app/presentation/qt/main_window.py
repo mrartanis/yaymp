@@ -441,6 +441,7 @@ class MainWindow(
         self._content_list.customContextMenuRequested.connect(self._show_content_context_menu)
         self._content_list.verticalScrollBar().valueChanged.connect(self._maybe_load_more_content)
         self._queue_list.customContextMenuRequested.connect(self._show_queue_context_menu)
+        self._search_input.textChanged.connect(self._filter_browser_content_from_input)
         self._search_button.clicked.connect(self._run_search)
         self._search_input.returnPressed.connect(self._run_search)
         self._search_nav_button.clicked.connect(self._show_search)
