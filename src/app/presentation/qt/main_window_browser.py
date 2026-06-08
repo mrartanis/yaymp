@@ -455,7 +455,7 @@ class MainWindowBrowserMixin:
                 button.setChecked(self._browser_view_mode == mode)
                 button.blockSignals(False)
 
-    def _set_browser_view_mode(self, mode: str) -> None:
+    def _set_browser_view_mode(self, mode: str, *, persist: bool = True) -> None:
         if mode not in {
             self._BROWSER_VIEW_MODE_LIST,
             self._BROWSER_VIEW_MODE_CARDS,
@@ -464,6 +464,8 @@ class MainWindowBrowserMixin:
         if self._browser_view_mode == mode:
             return
         self._browser_view_mode = mode
+        if persist:
+            self._container.services.settings_service.save_browser_view_mode(mode)
         self._sync_browser_view_mode_controls()
         if self._current_browser_content is not None:
             self._render_content(self._current_browser_content)

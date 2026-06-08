@@ -52,6 +52,7 @@ def test_settings_service_round_trips_volume_and_audio_quality() -> None:
     service.save_language_preference("ru")
     service.save_my_wave_history(["#123456", "#abcdef"])
     service.save_waveform_progress_enabled(True)
+    service.save_browser_view_mode("list")
 
     assert service.load_volume() == 42
     assert service.load_audio_quality() is AudioQuality.SD
@@ -60,6 +61,7 @@ def test_settings_service_round_trips_volume_and_audio_quality() -> None:
     assert service.load_language_preference() == "ru"
     assert service.load_my_wave_history() == ["#123456", "#abcdef"]
     assert service.load_waveform_progress_enabled() is True
+    assert service.load_browser_view_mode() == "list"
 
 
 def test_settings_service_clamps_volume_and_defaults_invalid_quality() -> None:
@@ -72,6 +74,7 @@ def test_settings_service_clamps_volume_and_defaults_invalid_quality() -> None:
                 "corner_style": "curvy",
                 "language": "de",
                 "my_wave_history": ["#123456", "bad", 7, "#ABCDEF"],
+                "browser_view_mode": "grid",
             }
         ),
         logger=RecordingLogger(),
@@ -84,6 +87,7 @@ def test_settings_service_clamps_volume_and_defaults_invalid_quality() -> None:
     assert service.load_language_preference() == "system"
     assert service.load_my_wave_history() == ["#123456", "#abcdef"]
     assert service.load_waveform_progress_enabled() is False
+    assert service.load_browser_view_mode() == "cards"
 
 
 def test_settings_service_logs_storage_failures_and_uses_defaults() -> None:

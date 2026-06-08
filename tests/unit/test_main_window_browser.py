@@ -18,12 +18,16 @@ class _BrowserHarness(MainWindowBrowserMixin, QWidget):
     def __init__(self) -> None:
         super().__init__()
         self.thumb_requests: list[tuple[str, int, int | None]] = []
+        self.saved_browser_view_modes: list[str] = []
         self._container = SimpleNamespace(
             services=SimpleNamespace(
                 artwork_cache=SimpleNamespace(
                     normalize_url=lambda artwork_ref: f"url:{artwork_ref}" if artwork_ref else None,
                     cache_path_for_url=lambda artwork_url: None,
-                )
+                ),
+                settings_service=SimpleNamespace(
+                    save_browser_view_mode=self.saved_browser_view_modes.append
+                ),
             )
         )
         self._library_controller = SimpleNamespace(can_go_back=lambda: False)
@@ -213,11 +217,13 @@ def test_browser_view_mode_toggle_switches_supported_pages(qtbot) -> None:
 
     assert window._browser_view_list_button.isChecked()
     assert window._content_list.viewMode() == QListView.ViewMode.ListMode
+    assert window.saved_browser_view_modes == ["list"]
 
     window._set_browser_view_mode(window._BROWSER_VIEW_MODE_CARDS)
 
     assert window._browser_view_cards_button.isChecked()
     assert window._content_list.viewMode() == QListView.ViewMode.IconMode
+    assert window.saved_browser_view_modes == ["list", "cards"]
 
 
 def test_elided_wrap_label_truncates_long_word_horizontally(qtbot) -> None:

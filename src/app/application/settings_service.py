@@ -12,6 +12,7 @@ class SettingsService:
     _LANGUAGE_KEY = "language"
     _MY_WAVE_HISTORY_KEY = "my_wave_history"
     _WAVEFORM_PROGRESS_KEY = "waveform_progress"
+    _BROWSER_VIEW_MODE_KEY = "browser_view_mode"
 
     def __init__(self, *, settings_repo: SettingsRepo, logger: Logger) -> None:
         self._settings_repo = settings_repo
@@ -120,6 +121,19 @@ class SettingsService:
 
     def save_waveform_progress_enabled(self, enabled: bool) -> None:
         self._save_value(self._WAVEFORM_PROGRESS_KEY, bool(enabled))
+
+    def load_browser_view_mode(self, *, default: str = "cards") -> str:
+        value = self._load_value(self._BROWSER_VIEW_MODE_KEY)
+        if not isinstance(value, str):
+            return default
+        if value not in {"list", "cards"}:
+            return default
+        return value
+
+    def save_browser_view_mode(self, mode: str) -> None:
+        if mode not in {"list", "cards"}:
+            mode = "cards"
+        self._save_value(self._BROWSER_VIEW_MODE_KEY, mode)
 
     def _load_value(self, key: str) -> object | None:
         try:

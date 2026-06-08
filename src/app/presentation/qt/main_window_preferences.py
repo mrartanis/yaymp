@@ -324,6 +324,10 @@ class MainWindowPreferencesMixin:
         self._render_waveform_progress_enabled(
             self._container.services.settings_service.load_waveform_progress_enabled()
         )
+        self._set_browser_view_mode(
+            self._container.services.settings_service.load_browser_view_mode(),
+            persist=False,
+        )
         if hasattr(self, "_seek_slider"):
             self._seek_slider.set_waveform_enabled(
                 self._container.services.settings_service.load_waveform_progress_enabled()
