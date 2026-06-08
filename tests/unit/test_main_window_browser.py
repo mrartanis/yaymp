@@ -9,7 +9,6 @@ from app.domain import Album, Artist
 from app.presentation.qt.library_controller import BrowserContent, BrowserItem
 from app.presentation.qt.main_window_browser import (
     MainWindowBrowserMixin,
-    _CenteredGridListWidget,
     _ElidedSingleLineLabel,
     _ElidedWrapLabel,
 )
@@ -129,23 +128,40 @@ def test_render_content_keeps_list_mode_for_artist_lists(qtbot) -> None:
 
     window._render_content(content)
 
-    assert window._content_list.viewMode() == QListView.ViewMode.ListMode
-    assert window._content_list.alternatingRowColors() is True
-    assert "padding: 5px" in window._content_list.styleSheet()
+    assert window._content_list.viewMode() == QListView.ViewMode.IconMode
+    assert window._content_list.alternatingRowColors() is False
+    assert "padding: 0px" in window._content_list.styleSheet()
+    card = window._content_list.itemWidget(window._content_list.item(0))
+    assert card.objectName() == "browser-album-card"
+    assert window._content_list.item(0).sizeHint() == window._content_list.gridSize()
+    subtitle = card.findChild(_ElidedSingleLineLabel, "browser-album-card-subtitle")
+    assert subtitle is not None
+    assert subtitle.text() == ""
 
 
 def test_centered_grid_adds_balanced_side_insets(qtbot) -> None:
-    list_widget = _CenteredGridListWidget()
-    list_widget.resize(640, 400)
-    qtbot.addWidget(list_widget)
-    list_widget.set_centered_grid_metrics(enabled=True, cell_width=196, spacing=12)
-    list_widget.show()
-    qtbot.waitExposed(list_widget)
+    window = _BrowserHarness()
+    window.resize(900, 600)
+    qtbot.addWidget(window)
+    window.show()
+    qtbot.waitExposed(window)
+    content = BrowserContent(
+        title="Albums",
+        items=tuple(
+            BrowserItem(
+                kind="album",
+                title=f"A{index}",
+                subtitle="1999",
+                payload=Album(id=str(index), title=f"A{index}", artwork_ref=f"art-{index}"),
+            )
+            for index in range(4)
+        ),
+    )
 
-    margins = list_widget.viewportMargins()
-    assert margins.left() >= 0
-    assert margins.right() >= 0
-    assert abs(margins.left() - margins.right()) <= 1
+    window._render_content(content)
+
+    assert window._content_list.width() < window._content_list_host.width()
+    assert window._content_list.width() >= window._content_list.gridSize().width()
 
 
 def test_elided_wrap_label_truncates_long_word_horizontally(qtbot) -> None:

@@ -29,12 +29,6 @@ from app.presentation.qt.library_controller import BrowserContent, BrowserItem, 
 
 
 class _CenteredGridListWidget(QListWidget):
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self._centered_grid_enabled = False
-        self._centered_cell_width = 0
-        self._centered_spacing = 0
-
     def set_centered_grid_metrics(
         self,
         *,
@@ -42,37 +36,24 @@ class _CenteredGridListWidget(QListWidget):
         cell_width: int = 0,
         spacing: int = 0,
     ) -> None:
-        self._centered_grid_enabled = enabled
-        self._centered_cell_width = cell_width
-        self._centered_spacing = spacing
-        self._update_centered_grid_margins()
+        del enabled, cell_width, spacing
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        self._update_centered_grid_margins()
 
-    def showEvent(self, event) -> None:
-        super().showEvent(event)
-        self._update_centered_grid_margins()
 
-    def _update_centered_grid_margins(self) -> None:
-        if not self._centered_grid_enabled or self._centered_cell_width <= 0:
-            self.setViewportMargins(0, 0, 0, 0)
-            return
-        margins = self.viewportMargins()
-        available_width = self.viewport().width() + margins.left() + margins.right()
-        if available_width <= 0:
-            return
-        stride = self._centered_cell_width + self._centered_spacing
-        columns = max(1, (available_width + self._centered_spacing) // stride)
-        used_width = (
-            columns * self._centered_cell_width
-            + max(0, columns - 1) * self._centered_spacing
-        )
-        side_space = max(0, available_width - used_width)
-        left = side_space // 2
-        right = side_space - left
-        self.setViewportMargins(left, 0, right, 0)
+class _BrowserContentHost(QWidget):
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._resize_callback = None
+
+    def set_resize_callback(self, callback) -> None:
+        self._resize_callback = callback
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if self._resize_callback is not None:
+            self._resize_callback()
 
 
 class _ElidedWrapLabel(QLabel):
@@ -231,6 +212,14 @@ class MainWindowBrowserMixin:
         self._content_list.setMovement(QListView.Movement.Static)
         self._content_list.setResizeMode(QListView.ResizeMode.Adjust)
         self._apply_browser_content_layout(use_album_cards=False)
+        self._content_list_host = _BrowserContentHost()
+        self._content_list_host.set_resize_callback(self._update_art_card_content_width)
+        content_host_layout = QHBoxLayout(self._content_list_host)
+        content_host_layout.setContentsMargins(0, 0, 0, 0)
+        content_host_layout.setSpacing(0)
+        content_host_layout.addStretch(1)
+        content_host_layout.addWidget(self._content_list, 0)
+        content_host_layout.addStretch(1)
         self._play_all_button = QPushButton(self._t("action.play_all"))
         self._play_all_button.setIcon(create_icon("play.svg"))
         self._play_all_button.setFixedHeight(32)
@@ -256,7 +245,7 @@ class MainWindowBrowserMixin:
         base_layout.addLayout(header_row)
         base_layout.addLayout(search_row)
         base_layout.addWidget(self._browser_tabs)
-        base_layout.addWidget(self._content_list, 1)
+        base_layout.addWidget(self._content_list_host, 1)
         base_layout.addWidget(browser_footer, 0, Qt.AlignmentFlag.AlignBottom)
         return frame
 
@@ -352,7 +341,7 @@ class MainWindowBrowserMixin:
             self._show_browser_panel()
         self._current_browser_content = content
         self._loading_more_content = False
-        use_album_cards = self._content_uses_album_cards(content)
+        use_art_cards = self._content_uses_art_cards(content)
         self._browser_title_label.setText(content.title)
         self._browser_back_button.setEnabled(self._library_controller.can_go_back())
         self._render_browser_tabs(content.tabs, active_tab=content.active_tab)
@@ -360,7 +349,7 @@ class MainWindowBrowserMixin:
         self._search_button.setEnabled(not content.is_loading)
         if content.search_query is not None:
             self._search_input.setText(content.search_query)
-        self._apply_browser_content_layout(use_album_cards=use_album_cards)
+        self._apply_browser_content_layout(use_album_cards=use_art_cards)
 
         self._content_list.blockSignals(True)
         self._content_list.clear()
@@ -379,10 +368,15 @@ class MainWindowBrowserMixin:
             elif self._browser_item_uses_art(browser_item):
                 widget = (
                     self._browser_album_card_widget(browser_item)
-                    if use_album_cards and browser_item.kind == "album"
+                    if use_art_cards and browser_item.kind in {"album", "artist"}
                     else self._browser_art_row_widget(browser_item)
                 )
-                widget_item.setSizeHint(widget.sizeHint())
+                if use_art_cards and browser_item.kind in {"album", "artist"}:
+                    widget_item.setSizeHint(
+                        QSize(self._ALBUM_CARD_WIDTH, self._ALBUM_CARD_HEIGHT)
+                    )
+                else:
+                    widget_item.setSizeHint(widget.sizeHint())
                 widget_item.setText("")
             self._content_list.addItem(widget_item)
             if browser_item.kind != "section" and self._browser_item_uses_art(browser_item):
@@ -405,9 +399,9 @@ class MainWindowBrowserMixin:
             "artist",
         }
 
-    def _content_uses_album_cards(self, content: BrowserContent) -> bool:
+    def _content_uses_art_cards(self, content: BrowserContent) -> bool:
         items = tuple(item for item in content.items if item.kind != "section")
-        return bool(items) and all(item.kind == "album" for item in items)
+        return bool(items) and all(item.kind in {"album", "artist"} for item in items)
 
     def _apply_browser_content_layout(self, *, use_album_cards: bool) -> None:
         if use_album_cards:
@@ -421,14 +415,14 @@ class MainWindowBrowserMixin:
             )
             self._content_list.setWordWrap(True)
             self._content_list.setUniformItemSizes(True)
+            self._content_list.setSizePolicy(
+                QSizePolicy.Policy.Fixed,
+                QSizePolicy.Policy.Expanding,
+            )
             self._content_list.setStyleSheet(
                 "QListWidget::item, QListView::item { padding: 0px; margin: 0px; }"
             )
-            self._content_list.set_centered_grid_metrics(
-                enabled=True,
-                cell_width=self._ALBUM_CARD_WIDTH,
-                spacing=self._content_list.spacing(),
-            )
+            self._update_art_card_content_width()
             return
         self._content_list.setAlternatingRowColors(True)
         self._content_list.setViewMode(QListView.ViewMode.ListMode)
@@ -438,10 +432,31 @@ class MainWindowBrowserMixin:
         self._content_list.setGridSize(QSize())
         self._content_list.setWordWrap(False)
         self._content_list.setUniformItemSizes(False)
+        self._content_list.setMinimumWidth(0)
+        self._content_list.setMaximumWidth(16_777_215)
+        self._content_list.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
         self._content_list.setStyleSheet(
             "QListWidget::item, QListView::item { padding: 5px; margin: 0px; }"
         )
         self._content_list.set_centered_grid_metrics(enabled=False)
+
+    def _update_art_card_content_width(self) -> None:
+        if self._content_list.viewMode() != QListView.ViewMode.IconMode:
+            return
+        available_width = self._content_list_host.contentsRect().width()
+        if available_width <= 0:
+            return
+        spacing = self._content_list.spacing()
+        stride = self._ALBUM_CARD_WIDTH + spacing
+        columns = max(1, (available_width + spacing) // stride)
+        used_width = (
+            columns * self._ALBUM_CARD_WIDTH
+            + max(0, columns - 1) * spacing
+        )
+        self._content_list.setFixedWidth(min(used_width, available_width))
 
     def _browser_art_row_widget(self, item: BrowserItem) -> QWidget:
         row = QWidget()
@@ -487,7 +502,8 @@ class MainWindowBrowserMixin:
         title.setObjectName("browser-album-card-title")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setFixedHeight(48)
-        subtitle = _ElidedSingleLineLabel(item.subtitle or "")
+        subtitle_text = "" if item.kind == "artist" else (item.subtitle or "")
+        subtitle = _ElidedSingleLineLabel(subtitle_text)
         subtitle.setObjectName("browser-album-card-subtitle")
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
         subtitle.setWordWrap(False)
