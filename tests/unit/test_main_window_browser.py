@@ -95,6 +95,7 @@ def test_render_content_uses_card_grid_for_album_lists(qtbot) -> None:
 
     assert window._content_list.viewMode() == QListView.ViewMode.IconMode
     assert window._content_list.flow() == QListView.Flow.LeftToRight
+    assert window._content_list.verticalScrollMode() == QListView.ScrollMode.ScrollPerPixel
     assert window._content_list.alternatingRowColors() is False
     assert window._content_list.uniformItemSizes() is True
     assert "padding: 0px" in window._content_list.styleSheet()
@@ -129,6 +130,7 @@ def test_render_content_keeps_list_mode_for_artist_lists(qtbot) -> None:
     window._render_content(content)
 
     assert window._content_list.viewMode() == QListView.ViewMode.IconMode
+    assert window._content_list.verticalScrollMode() == QListView.ScrollMode.ScrollPerPixel
     assert window._content_list.alternatingRowColors() is False
     assert "padding: 0px" in window._content_list.styleSheet()
     card = window._content_list.itemWidget(window._content_list.item(0))
@@ -162,6 +164,26 @@ def test_centered_grid_adds_balanced_side_insets(qtbot) -> None:
 
     assert window._content_list.width() < window._content_list_host.width()
     assert window._content_list.width() >= window._content_list.gridSize().width()
+
+
+def test_non_card_content_uses_item_scroll_mode(qtbot) -> None:
+    window = _BrowserHarness()
+    window.resize(900, 600)
+    qtbot.addWidget(window)
+    window.show()
+    qtbot.waitExposed(window)
+    content = BrowserContent(
+        title="Tracks",
+        items=(
+            BrowserItem(kind="track", title="Track 1", subtitle="Artist", payload=None),
+        ),
+    )
+
+    window._render_content(content)
+
+    assert window._content_list.viewMode() == QListView.ViewMode.ListMode
+    assert window._content_list.verticalScrollMode() == QListView.ScrollMode.ScrollPerItem
+    assert window._content_list.width() == window._content_list_host.width()
 
 
 def test_elided_wrap_label_truncates_long_word_horizontally(qtbot) -> None:

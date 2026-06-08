@@ -170,6 +170,7 @@ class MainWindowBrowserMixin:
     _ALBUM_CARD_HEIGHT = 284
     _ALBUM_CARD_ART_SIZE = 176
     _ALBUM_CARD_SOURCE_MAX_EDGE = 256
+    _ART_CARD_SCROLL_STEP = 28
 
     def _build_browser_panel(self) -> QFrame:
         frame = self._panel_frame("Search / Library")
@@ -211,15 +212,15 @@ class MainWindowBrowserMixin:
         self._content_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._content_list.setMovement(QListView.Movement.Static)
         self._content_list.setResizeMode(QListView.ResizeMode.Adjust)
-        self._apply_browser_content_layout(use_album_cards=False)
         self._content_list_host = _BrowserContentHost()
         self._content_list_host.set_resize_callback(self._update_art_card_content_width)
-        content_host_layout = QHBoxLayout(self._content_list_host)
-        content_host_layout.setContentsMargins(0, 0, 0, 0)
-        content_host_layout.setSpacing(0)
-        content_host_layout.addStretch(1)
-        content_host_layout.addWidget(self._content_list, 0)
-        content_host_layout.addStretch(1)
+        self._content_list_host_layout = QHBoxLayout(self._content_list_host)
+        self._content_list_host_layout.setContentsMargins(0, 0, 0, 0)
+        self._content_list_host_layout.setSpacing(0)
+        self._content_list_host_layout.addStretch(1)
+        self._content_list_host_layout.addWidget(self._content_list, 0)
+        self._content_list_host_layout.addStretch(1)
+        self._apply_browser_content_layout(use_album_cards=False)
         self._play_all_button = QPushButton(self._t("action.play_all"))
         self._play_all_button.setIcon(create_icon("play.svg"))
         self._play_all_button.setFixedHeight(32)
@@ -409,6 +410,8 @@ class MainWindowBrowserMixin:
             self._content_list.setViewMode(QListView.ViewMode.IconMode)
             self._content_list.setFlow(QListView.Flow.LeftToRight)
             self._content_list.setWrapping(True)
+            self._content_list.setVerticalScrollMode(QListView.ScrollMode.ScrollPerPixel)
+            self._content_list.verticalScrollBar().setSingleStep(self._ART_CARD_SCROLL_STEP)
             self._content_list.setSpacing(12)
             self._content_list.setGridSize(
                 QSize(self._ALBUM_CARD_WIDTH, self._ALBUM_CARD_HEIGHT)
@@ -422,12 +425,16 @@ class MainWindowBrowserMixin:
             self._content_list.setStyleSheet(
                 "QListWidget::item, QListView::item { padding: 0px; margin: 0px; }"
             )
+            self._content_list_host_layout.setStretch(0, 1)
+            self._content_list_host_layout.setStretch(1, 0)
+            self._content_list_host_layout.setStretch(2, 1)
             self._update_art_card_content_width()
             return
         self._content_list.setAlternatingRowColors(True)
         self._content_list.setViewMode(QListView.ViewMode.ListMode)
         self._content_list.setFlow(QListView.Flow.TopToBottom)
         self._content_list.setWrapping(False)
+        self._content_list.setVerticalScrollMode(QListView.ScrollMode.ScrollPerItem)
         self._content_list.setSpacing(0)
         self._content_list.setGridSize(QSize())
         self._content_list.setWordWrap(False)
@@ -441,6 +448,9 @@ class MainWindowBrowserMixin:
         self._content_list.setStyleSheet(
             "QListWidget::item, QListView::item { padding: 5px; margin: 0px; }"
         )
+        self._content_list_host_layout.setStretch(0, 0)
+        self._content_list_host_layout.setStretch(1, 1)
+        self._content_list_host_layout.setStretch(2, 0)
         self._content_list.set_centered_grid_metrics(enabled=False)
 
     def _update_art_card_content_width(self) -> None:
