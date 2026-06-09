@@ -10,7 +10,7 @@
 - Официальный клиент доступен здесь: <https://music.yandex.ru/download/>
 - Приложение **не позволяет скачивать музыку** и не ставит перед собой такой цели.
 - Приложение для работы требует подписку яндекс плюс, **не позволяет слушать музыку без подписки** и не ставит перед собой такой цели.
-- Сборки под Windows нет, поскольку под windows есть нативный клиент яндекс музыки.
+- Windows-поддержка сейчас ориентирована на Windows 11 x64 и portable zip сборку.
 
 ## Зачем это сделано
 
@@ -35,7 +35,11 @@
   - выключен по умолчанию;
   - при включении показывает waveform + buffered/download progress прямо в seek bar;
 - переключение темной/светлой темы, языка интерфейса и стиля оформления;
-- сборки для macOS и Linux через Nuitka.
+- системная интеграция:
+  - macOS Now Playing / media keys;
+  - Linux MPRIS;
+  - Windows SMTC/media keys + track change toasts;
+- сборки для macOS, Linux и Windows через Nuitka.
 
 ## Скриншоты
 
@@ -107,11 +111,17 @@ python -m pip install -e '.[dev]'
 ./scripts/build_nuitka_linux.sh
 ```
 
+```powershell
+.\scripts\build_nuitka_windows.ps1
+Compress-Archive -Path "build\nuitka\YaYmp.dist\*" -DestinationPath "build\nuitka\YAYMP-windows-x86_64.zip" -Force
+```
+
 ### Важное про packaged build
 
 - waveform/proxy path использует `miniaudio`;
 - self-contained сборки дополнительно включают `cffi`, `_cffi_backend` и `certifi`;
 - packaged stream proxy HTTPS опирается на bundled CA bundle, а не на внешний системный OpenSSL path.
+- Windows packaging ожидает `mpv-2.dll`; при нестандартном пути задай `YAYMP_MPV_LIBRARY`.
 
 ## Как устроен проект
 

@@ -65,3 +65,22 @@ def test_linux_loader_checks_usr_lib_next_to_appimage_binary(
     monkeypatch.setattr(mpv_loader.sys, "executable", str(executable))
 
     assert mpv_loader.resolve_mpv_library_path() == str(bundled_library)
+
+
+def test_windows_loader_checks_lib_directory_next_to_binary(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    executable_dir = tmp_path / "dist"
+    executable_dir.mkdir(parents=True)
+    executable = executable_dir / "YaYmp.exe"
+    executable.touch()
+
+    bundled_library = executable_dir / "lib" / "mpv-2.dll"
+    bundled_library.parent.mkdir(parents=True)
+    bundled_library.touch()
+
+    monkeypatch.setattr(mpv_loader.sys, "platform", "win32")
+    monkeypatch.setattr(mpv_loader.sys, "executable", str(executable))
+
+    assert mpv_loader.resolve_mpv_library_path() == str(bundled_library)
