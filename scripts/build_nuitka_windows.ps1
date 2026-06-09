@@ -59,6 +59,13 @@ if ($versionParts.Count -eq 3) {
 $mpvLibrary = $env:YAYMP_MPV_LIBRARY
 if ([string]::IsNullOrWhiteSpace($mpvLibrary)) {
     $searchRoots = @(
+        "C:\ProgramData\chocolatey\lib\mpv.install\tools\mpv",
+        "C:\ProgramData\chocolatey\lib\mpvio.install\tools\mpv",
+        "C:\ProgramData\chocolatey\lib\mpv.install\tools",
+        "C:\ProgramData\chocolatey\lib\mpvio.install\tools",
+        "C:\ProgramData\chocolatey\lib\mpv\tools",
+        "C:\Program Files\mpv",
+        "C:\Program Files (x86)\mpv",
         "C:\ProgramData\chocolatey\lib",
         "C:\Program Files",
         "C:\Program Files (x86)"
@@ -69,7 +76,7 @@ if ([string]::IsNullOrWhiteSpace($mpvLibrary)) {
             continue
         }
         foreach ($dllName in $bundledDllNames) {
-            $candidate = Get-ChildItem -Path $root -Filter $dllName -File -Recurse -ErrorAction SilentlyContinue |
+            $candidate = Get-ChildItem -LiteralPath $root -Filter $dllName -File -Recurse -ErrorAction SilentlyContinue |
                 Select-Object -First 1 -ExpandProperty FullName
             if ($candidate) {
                 break

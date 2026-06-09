@@ -185,11 +185,23 @@ jobs:
         run: |
           choco install mpv -y --no-progress
           $dllNames = @("mpv-2.dll", "libmpv-2.dll", "libmpv.dll", "mpv.dll")
+          $searchRoots = @(
+            "C:\ProgramData\chocolatey\lib\mpv.install\tools\mpv",
+            "C:\ProgramData\chocolatey\lib\mpvio.install\tools\mpv",
+            "C:\ProgramData\chocolatey\lib\mpv.install\tools",
+            "C:\ProgramData\chocolatey\lib\mpvio.install\tools",
+            "C:\ProgramData\chocolatey\lib\mpv\tools",
+            "C:\Program Files\mpv",
+            "C:\Program Files (x86)\mpv",
+            "C:\ProgramData\chocolatey\lib",
+            "C:\Program Files",
+            "C:\Program Files (x86)"
+          )
           $mpvDll = $null
-          foreach ($root in @("C:\ProgramData\chocolatey\lib", "C:\Program Files", "C:\Program Files (x86)")) {
+          foreach ($root in $searchRoots) {
             if (-not $mpvDll -and (Test-Path $root)) {
               foreach ($dllName in $dllNames) {
-                $mpvDll = Get-ChildItem -Path $root -Filter $dllName -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+                $mpvDll = Get-ChildItem -LiteralPath $root -Filter $dllName -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
                 if ($mpvDll) {
                   break
                 }
