@@ -183,33 +183,22 @@ jobs:
       - name: Install system dependencies
         shell: pwsh
         run: |
-          choco install mpv -y --no-progress
-          $dllNames = @("mpv-2.dll", "libmpv-2.dll", "libmpv.dll", "mpv.dll")
-          $searchRoots = @(
-            "C:\ProgramData\chocolatey\lib\mpv.install\tools\mpv",
-            "C:\ProgramData\chocolatey\lib\mpvio.install\tools\mpv",
-            "C:\ProgramData\chocolatey\lib\mpv.install\tools",
-            "C:\ProgramData\chocolatey\lib\mpvio.install\tools",
-            "C:\ProgramData\chocolatey\lib\mpv\tools",
-            "C:\Program Files\mpv",
-            "C:\Program Files (x86)\mpv",
-            "C:\ProgramData\chocolatey\lib",
-            "C:\Program Files",
-            "C:\Program Files (x86)"
-          )
-          $mpvDll = $null
-          foreach ($root in $searchRoots) {
-            if (-not $mpvDll -and (Test-Path $root)) {
-              foreach ($dllName in $dllNames) {
-                $mpvDll = Get-ChildItem -LiteralPath $root -Filter $dllName -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
-                if ($mpvDll) {
-                  break
-                }
-              }
-            }
+          $release = Invoke-RestMethod -Uri "https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest"
+          $asset = $release.assets | Where-Object { $_.name -match '^mpv-dev-x86_64-[^.]+.*\.7z$' } | Select-Object -First 1
+          if (-not $asset) {
+            throw "Unable to locate mpv dev asset in latest shinchiro release"
           }
+          $archivePath = Join-Path $env:RUNNER_TEMP $asset.name
+          $extractDir = Join-Path $env:RUNNER_TEMP "mpv-dev"
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $archivePath
+          if (Test-Path $extractDir) {
+            Remove-Item -LiteralPath $extractDir -Recurse -Force
+          }
+          7z x $archivePath "-o$extractDir" | Out-Null
+          $mpvDll = Get-ChildItem -LiteralPath $extractDir -Filter "libmpv-2.dll" -File -Recurse -ErrorAction Stop |
+            Select-Object -First 1 -ExpandProperty FullName
           if (-not $mpvDll) {
-            throw "Unable to locate libmpv DLL after installing mpv"
+            throw "Unable to locate libmpv-2.dll after extracting mpv dev archive"
           }
           "YAYMP_MPV_LIBRARY=$mpvDll" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
