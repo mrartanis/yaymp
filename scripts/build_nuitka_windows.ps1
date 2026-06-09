@@ -12,7 +12,12 @@ $builtDistDir = Join-Path $outputDir "$nuitkaStem.dist"
 $distDir = Join-Path $outputDir "$appName.dist"
 $iconSourcePath = Join-Path $projectRoot "icon.png"
 $iconPath = Join-Path $outputDir "yaymp.ico"
-$bundledDllName = "mpv-2.dll"
+$bundledDllNames = @(
+    "mpv-2.dll",
+    "libmpv-2.dll",
+    "libmpv.dll",
+    "mpv.dll"
+)
 $bundledPrimaryDllName = ""
 $appVersion = ""
 $windowsVersion = ""
@@ -63,8 +68,13 @@ if ([string]::IsNullOrWhiteSpace($mpvLibrary)) {
         if (-not (Test-Path $root)) {
             continue
         }
-        $candidate = Get-ChildItem -Path $root -Filter $bundledDllName -File -Recurse -ErrorAction SilentlyContinue |
-            Select-Object -First 1 -ExpandProperty FullName
+        foreach ($dllName in $bundledDllNames) {
+            $candidate = Get-ChildItem -Path $root -Filter $dllName -File -Recurse -ErrorAction SilentlyContinue |
+                Select-Object -First 1 -ExpandProperty FullName
+            if ($candidate) {
+                break
+            }
+        }
         if ($candidate) {
             break
         }

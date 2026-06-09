@@ -184,9 +184,20 @@ jobs:
         shell: pwsh
         run: |
           choco install mpv -y --no-progress
-          $mpvDll = Get-ChildItem -Path "C:\ProgramData\chocolatey\lib", "C:\Program Files", "C:\Program Files (x86)" -Filter "mpv-2.dll" -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+          $dllNames = @("mpv-2.dll", "libmpv-2.dll", "libmpv.dll", "mpv.dll")
+          $mpvDll = $null
+          foreach ($root in @("C:\ProgramData\chocolatey\lib", "C:\Program Files", "C:\Program Files (x86)")) {
+            if (-not $mpvDll -and (Test-Path $root)) {
+              foreach ($dllName in $dllNames) {
+                $mpvDll = Get-ChildItem -Path $root -Filter $dllName -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+                if ($mpvDll) {
+                  break
+                }
+              }
+            }
+          }
           if (-not $mpvDll) {
-            throw "Unable to locate mpv-2.dll after installing mpv"
+            throw "Unable to locate libmpv DLL after installing mpv"
           }
           "YAYMP_MPV_LIBRARY=$mpvDll" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
@@ -236,7 +247,7 @@ jobs:
             throw "Missing packaged app log at $logPath"
           }
 
-          Select-String -Path $logPath -Pattern "Using MPV playback backend: .*build\\\\nuitka\\\\YaYmp\.dist\\\\lib\\\\mpv-2\.dll"
+          Select-String -Path $logPath -Pattern "Using MPV playback backend: .*build\\\\nuitka\\\\YaYmp\.dist\\\\lib\\\\(?:lib)?mpv-2\.dll"
           if (Select-String -Path $logPath -Pattern "Falling back to fake playback backend" -Quiet) {
             throw "Packaged app fell back to fake backend"
           }
