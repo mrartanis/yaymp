@@ -35,3 +35,37 @@ jobs:
           QT_QPA_PLATFORM: offscreen
           YAYMP_ENABLE_MPV_TESTS: "1"
         run: ./scripts/run_tests.sh
+
+  windows-contract-and-unit:
+    runs-on: windows-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+      YAYMP_PLAYBACK_BACKEND: fake
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Create virtualenv
+        shell: pwsh
+        run: python -m venv .venv
+
+      - name: Install Python dependencies
+        shell: pwsh
+        run: .venv\Scripts\python -m pip install -e ".[dev]"
+
+      - name: Lint
+        shell: pwsh
+        run: .venv\Scripts\python -m ruff check src tests
+
+      - name: Run targeted Windows tests
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "$pwd\src"
+          .venv\Scripts\python -m pytest `
+            tests/contract/test_mpv_loader.py `
+            tests/unit/test_system_media.py

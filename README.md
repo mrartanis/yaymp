@@ -10,7 +10,8 @@
 - Официальный клиент доступен здесь: <https://music.yandex.ru/download/>
 - Приложение **не позволяет скачивать музыку** и не ставит перед собой такой цели.
 - Приложение для работы требует подписку яндекс плюс, **не позволяет слушать музыку без подписки** и не ставит перед собой такой цели.
-- Сборки под Windows нет, поскольку под windows есть нативный клиент яндекс музыки.
+- Windows-поддержка сейчас ориентирована на Windows 11 x64.
+- Для Windows публикуются два артефакта: `portable zip` и installer.
 
 ## Зачем это сделано
 
@@ -34,8 +35,13 @@
 - опциональный `Waveformed Progress`:
   - выключен по умолчанию;
   - при включении показывает waveform + buffered/download progress прямо в seek bar;
+  - на Windows отсутствует и возвращать его пока не планируется;
 - переключение темной/светлой темы, языка интерфейса и стиля оформления;
-- сборки для macOS и Linux через Nuitka.
+- системная интеграция:
+  - macOS Now Playing / media keys;
+  - Linux MPRIS;
+  - Windows SMTC/media keys + track change toasts;
+- сборки для macOS, Linux и Windows через Nuitka.
 
 ## Скриншоты
 
@@ -107,11 +113,20 @@ python -m pip install -e '.[dev]'
 ./scripts/build_nuitka_linux.sh
 ```
 
+```powershell
+.\scripts\build_nuitka_windows.ps1
+Compress-Archive -Path "build\nuitka\YaYmp.dist\*" -DestinationPath "dist\YAYMP-windows-x86_64.zip" -Force
+.\scripts\build_windows_installer.ps1
+```
+
 ### Важное про packaged build
 
 - waveform/proxy path использует `miniaudio`;
 - self-contained сборки дополнительно включают `cffi`, `_cffi_backend` и `certifi`;
 - packaged stream proxy HTTPS опирается на bundled CA bundle, а не на внешний системный OpenSSL path.
+- Windows packaging ожидает `mpv-2.dll` или `libmpv-2.dll`; при нестандартном пути задай `YAYMP_MPV_LIBRARY`.
+- Windows installer собирается через Inno Setup 6.
+- uninstall из Windows installer удаляет приложение и каталог `%LOCALAPPDATA%\yaymp\YAYMP` целиком, включая config, data, cache и logs.
 
 ## Как устроен проект
 
@@ -120,7 +135,7 @@ python -m pip install -e '.[dev]'
 - `domain` — контракты и сущности;
 - `application` — orchestration и use-case логика;
 - `infrastructure` — доступ к Яндекс Музыке, кешам, persistence и playback backend;
-- `infrastructure.playback.stream_proxy_service` — локальный proxy/waveform path для опционального waveform-progress режима;
+- `infrastructure.playback.stream_proxy_service` — локальный proxy/waveform path для опционального waveform-progress режима; на Windows этот путь принудительно отключен;
 - `presentation` — Qt UI.
 
 Важная практическая деталь: бизнес-логика сознательно выносится из самих Qt-виджетов.
