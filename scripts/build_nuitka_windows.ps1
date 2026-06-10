@@ -22,6 +22,7 @@ $bundledPrimaryDllName = ""
 $appVersion = ""
 $windowsVersion = ""
 $nuitkaArgs = @()
+$nuitkaVerbose = $env:YAYMP_NUITKA_VERBOSE -eq "1"
 
 Set-Location $projectRoot
 
@@ -108,9 +109,6 @@ Remove-Item -Recurse -Force -ErrorAction SilentlyContinue `
 $nuitkaArgs = @(
     "--standalone",
     "--assume-yes-for-downloads",
-    "--show-progress",
-    "--show-scons",
-    "--verbose",
     "--windows-console-mode=disable",
     "--plugin-enable=pyside6",
     "--include-module=_cffi_backend",
@@ -132,6 +130,10 @@ $nuitkaArgs = @(
     "--output-filename=$appName",
     "tools/nuitka_entry.py"
 )
+
+if ($nuitkaVerbose) {
+    $nuitkaArgs = @("--show-progress", "--show-scons", "--verbose") + $nuitkaArgs
+}
 
 if (Get-Command "cl.exe" -ErrorAction SilentlyContinue) {
     # Prefer MSVC whenever the compiler is already available in the current

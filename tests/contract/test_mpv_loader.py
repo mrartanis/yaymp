@@ -25,10 +25,12 @@ def test_mpv_loader_resolves_python_binding_and_system_library() -> None:
 
 def test_mpv_loader_patches_find_library_for_explicit_path(monkeypatch: pytest.MonkeyPatch) -> None:
     bundled_path = "/tmp/bundled/libmpv.so.1"
+    expected_names = {"mpv", *mpv_loader._candidate_library_names()}
 
     def fake_import_module(name: str):
         assert name == "mpv"
-        assert ctypes.util.find_library("mpv") == bundled_path
+        for library_name in expected_names:
+            assert ctypes.util.find_library(library_name) == bundled_path
         return object()
 
     def fake_find_library(name: str) -> str | None:
@@ -111,10 +113,12 @@ def test_windows_loader_adds_library_directory_for_dependent_dlls(
     def fake_import_module(name: str):
         assert name == "mpv"
         assert ctypes.util.find_library("mpv") == str(bundled_library)
+        assert ctypes.util.find_library("mpv-2.dll") == str(bundled_library)
+        assert ctypes.util.find_library("libmpv-2.dll") == str(bundled_library)
         return object()
 
     monkeypatch.setattr(mpv_loader.sys, "platform", "win32")
-    monkeypatch.setattr(mpv_loader.os, "add_dll_directory", fake_add_dll_directory)
+    monkeypatch.setattr(mpv_loader.os, "add_dll_directory", fake_add_dll_directory, raising=False)
     monkeypatch.setattr("app.infrastructure.playback.mpv_loader.import_module", fake_import_module)
     monkeypatch.setattr("app.infrastructure.playback.mpv_loader.invalidate_caches", lambda: None)
     monkeypatch.delitem(sys.modules, "mpv", raising=False)
