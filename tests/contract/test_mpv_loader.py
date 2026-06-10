@@ -23,8 +23,14 @@ def test_mpv_loader_resolves_python_binding_and_system_library() -> None:
     assert library_path
 
 
-def test_mpv_loader_patches_find_library_for_explicit_path(monkeypatch: pytest.MonkeyPatch) -> None:
-    bundled_path = "/tmp/bundled/libmpv.so.1"
+def test_mpv_loader_patches_find_library_for_explicit_path(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    bundled_library = tmp_path / "bundled" / mpv_loader._candidate_library_names()[0]
+    bundled_library.parent.mkdir(parents=True)
+    bundled_library.touch()
+    bundled_path = str(bundled_library)
     expected_names = {"mpv", *mpv_loader._candidate_library_names()}
 
     def fake_import_module(name: str):
