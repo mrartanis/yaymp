@@ -21,6 +21,7 @@ $bundledDllNames = @(
 $bundledPrimaryDllName = ""
 $appVersion = ""
 $windowsVersion = ""
+$nuitkaArgs = @()
 
 Set-Location $projectRoot
 
@@ -104,29 +105,45 @@ Remove-Item -Recurse -Force -ErrorAction SilentlyContinue `
     $distDir, `
     (Join-Path $outputDir "$nuitkaStem.onefile-build")
 
-& $venvPython -m nuitka `
-    --standalone `
-    --assume-yes-for-downloads `
-    --windows-console-mode=disable `
-    --plugin-enable=pyside6 `
-    --include-module=_cffi_backend `
-    --include-package=certifi `
-    --include-package-data=certifi `
-    --include-package=cffi `
-    --include-package=miniaudio `
-    --include-package=app `
-    --include-package-data=app.presentation.qt `
-    --include-data-files="$mpvLibrary=lib/$bundledPrimaryDllName" `
-    --include-data-files="$mpvLibraryDir\*.dll=lib/" `
-    --windows-icon-from-ico="$iconPath" `
-    --windows-company-name="yaymp" `
-    --windows-product-name="$displayName" `
-    --windows-file-description="$displayName" `
-    --windows-file-version="$windowsVersion" `
-    --windows-product-version="$windowsVersion" `
-    --output-dir="$outputDir" `
-    --output-filename="$appName" `
-    tools/nuitka_entry.py
+$nuitkaArgs = @(
+    "--standalone",
+    "--assume-yes-for-downloads",
+    "--show-progress",
+    "--show-scons",
+    "--verbose",
+    "--windows-console-mode=disable",
+    "--plugin-enable=pyside6",
+    "--include-module=_cffi_backend",
+    "--include-package=certifi",
+    "--include-package-data=certifi",
+    "--include-package=cffi",
+    "--include-package=miniaudio",
+    "--include-package=app",
+    "--include-package-data=app.presentation.qt",
+    "--include-data-files=$mpvLibrary=lib/$bundledPrimaryDllName",
+    "--include-data-files=$mpvLibraryDir\*.dll=lib/",
+    "--windows-icon-from-ico=$iconPath",
+    "--windows-company-name=yaymp",
+    "--windows-product-name=$displayName",
+    "--windows-file-description=$displayName",
+    "--windows-file-version=$windowsVersion",
+    "--windows-product-version=$windowsVersion",
+    "--output-dir=$outputDir",
+    "--output-filename=$appName",
+    "tools/nuitka_entry.py"
+)
+
+if ($env:GITHUB_ACTIONS -eq "true") {
+    # GitHub runners have Visual Studio toolchains preinstalled; prefer MSVC to
+    # avoid slow/opaque MinGW bootstrapping on Windows packaging jobs.
+    $nuitkaArgs = @("--msvc=latest") + $nuitkaArgs
+}
+
+Write-Host "Building Windows bundle with Nuitka"
+Write-Host "Using MPV library: $mpvLibrary"
+Write-Host "Output directory: $distDir"
+
+& $venvPython -u -m nuitka @nuitkaArgs
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
