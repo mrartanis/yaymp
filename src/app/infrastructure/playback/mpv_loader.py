@@ -70,6 +70,11 @@ def resolve_mpv_library_path() -> str | None:
 
 def _import_mpv_with_explicit_library(library_path: str):
     original_find_library = ctypes.util.find_library
+    dll_directory = None
+    dll_directory_handle = None
+
+    if sys.platform == "win32":
+        dll_directory = str(Path(library_path).resolve().parent)
 
     def patched_find_library(name: str) -> str | None:
         if name == "mpv":
@@ -78,11 +83,15 @@ def _import_mpv_with_explicit_library(library_path: str):
 
     ctypes.util.find_library = patched_find_library
     try:
+        if dll_directory and hasattr(os, "add_dll_directory"):
+            dll_directory_handle = os.add_dll_directory(dll_directory)
         if "mpv" in sys.modules:
             del sys.modules["mpv"]
         invalidate_caches()
         return import_module("mpv")
     finally:
+        if dll_directory_handle is not None:
+            dll_directory_handle.close()
         ctypes.util.find_library = original_find_library
 
 
