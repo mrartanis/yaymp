@@ -133,9 +133,9 @@ $nuitkaArgs = @(
     "tools/nuitka_entry.py"
 )
 
-if ($env:GITHUB_ACTIONS -eq "true") {
-    # GitHub runners have Visual Studio toolchains preinstalled; prefer MSVC to
-    # avoid slow/opaque MinGW bootstrapping on Windows packaging jobs.
+if (Get-Command "cl.exe" -ErrorAction SilentlyContinue) {
+    # Prefer MSVC whenever the compiler is already available in the current
+    # shell, including GitHub runners and local developer command prompts.
     $nuitkaArgs = @("--msvc=latest") + $nuitkaArgs
 }
 
