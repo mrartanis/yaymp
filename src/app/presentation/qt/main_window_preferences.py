@@ -465,6 +465,9 @@ class MainWindowPreferencesMixin:
     def _theme_icon_color(self) -> str:
         return "#1f2736" if self._resolved_theme_mode() == "light" else "#ffffff"
 
+    def _theme_muted_icon_color(self) -> str:
+        return "#7b87a0" if self._resolved_theme_mode() == "light" else "#8f98b5"
+
     def _refresh_theme_icons(self) -> None:
         icon_color = self._theme_icon_color()
         if hasattr(self, "_window_minimize_button"):

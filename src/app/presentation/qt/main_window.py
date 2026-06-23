@@ -755,7 +755,7 @@ class MainWindow(
 
     def _render_current_track_dislike_button(self, is_disliked: bool) -> None:
         self._dislike_track_button.setIcon(
-            create_icon("heart_slash.svg", color=self._accent_color)
+            create_icon("heart_slash.svg", color=self._theme_muted_icon_color())
             if is_disliked
             else create_icon("heart_slash_outline.svg", color=self._theme_icon_color())
         )
