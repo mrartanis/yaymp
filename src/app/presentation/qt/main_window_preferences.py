@@ -497,9 +497,7 @@ class MainWindowPreferencesMixin:
             status_value = self._play_pause_button.property("playback_status") or "stopped"
             self._render_play_pause_button(PlaybackStatus(status_value))
         if hasattr(self, "_like_track_button"):
-            self._render_current_track_like_button(
-                self._current_track.is_liked if self._current_track else False
-            )
+            self._render_current_track_preference_buttons(self._current_track)
 
     def _refresh_localized_texts(self) -> None:
         self.setWindowTitle(self._t("app.title"))

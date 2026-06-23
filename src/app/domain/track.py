@@ -22,10 +22,18 @@ class Track:
     waveform_bins: tuple[float, ...] = ()
     available: bool = True
     is_liked: bool = False
+    is_disliked: bool = False
 
 
 @dataclass(frozen=True, slots=True)
 class LikedTrackIds:
+    user_id: str
+    revision: int
+    track_ids: frozenset[str]
+
+
+@dataclass(frozen=True, slots=True)
+class DislikedTrackIds:
     user_id: str
     revision: int
     track_ids: frozenset[str]

@@ -7,6 +7,7 @@ from app.domain import (
     Artist,
     AudioQuality,
     CatalogSearchResults,
+    DislikedTrackIds,
     LikedTrackIds,
     LikedTrackSnapshot,
     PlayEventReport,
@@ -43,9 +44,11 @@ class InMemoryLibraryCacheRepo:
         self.tracks: dict[str, Track] = {}
         self.artwork: dict[str, str] = {}
         self.liked_tracks: dict[str, LikedTrackIds] = {}
+        self.disliked_tracks: dict[str, DislikedTrackIds] = {}
         self.liked_track_snapshots: dict[str, LikedTrackSnapshot] = {}
         self.liked_album_snapshots: dict[str, tuple[Album, ...]] = {}
         self.liked_artist_snapshots: dict[str, tuple[Artist, ...]] = {}
+        self.disliked_artist_snapshots: dict[str, tuple[Artist, ...]] = {}
         self.liked_playlist_snapshots: dict[str, tuple[Playlist, ...]] = {}
         self.user_playlist_snapshots: dict[str, tuple[Playlist, ...]] = {}
         self.generated_playlist_snapshots: dict[str, tuple[Playlist, ...]] = {}
@@ -74,6 +77,12 @@ class InMemoryLibraryCacheRepo:
     def save_liked_track_ids(self, liked_tracks: LikedTrackIds):
         self.liked_tracks[liked_tracks.user_id] = liked_tracks
 
+    def load_disliked_track_ids(self, user_id: str):
+        return self.disliked_tracks.get(user_id)
+
+    def save_disliked_track_ids(self, disliked_tracks: DislikedTrackIds):
+        self.disliked_tracks[disliked_tracks.user_id] = disliked_tracks
+
     def load_liked_track_snapshot(self, user_id: str):
         return self.liked_track_snapshots.get(user_id)
 
@@ -91,6 +100,12 @@ class InMemoryLibraryCacheRepo:
 
     def save_liked_artist_snapshot(self, user_id: str, artists):
         self.liked_artist_snapshots[user_id] = tuple(artists)
+
+    def load_disliked_artist_snapshot(self, user_id: str):
+        return self.disliked_artist_snapshots.get(user_id)
+
+    def save_disliked_artist_snapshot(self, user_id: str, artists):
+        self.disliked_artist_snapshots[user_id] = tuple(artists)
 
     def load_liked_playlist_snapshot(self, user_id: str):
         return self.liked_playlist_snapshots.get(user_id)
@@ -126,6 +141,27 @@ class InMemoryLibraryCacheRepo:
         if current is None:
             return
         self.liked_tracks[user_id] = LikedTrackIds(
+            user_id=user_id,
+            revision=current.revision,
+            track_ids=current.track_ids - {track_id},
+        )
+
+    def mark_track_disliked(self, user_id: str, track_id: str):
+        current = self.disliked_tracks.get(
+            user_id,
+            DislikedTrackIds(user_id=user_id, revision=0, track_ids=frozenset()),
+        )
+        self.disliked_tracks[user_id] = DislikedTrackIds(
+            user_id=user_id,
+            revision=current.revision,
+            track_ids=current.track_ids | {track_id},
+        )
+
+    def mark_track_undisliked(self, user_id: str, track_id: str):
+        current = self.disliked_tracks.get(user_id)
+        if current is None:
+            return
+        self.disliked_tracks[user_id] = DislikedTrackIds(
             user_id=user_id,
             revision=current.revision,
             track_ids=current.track_ids - {track_id},
@@ -218,6 +254,19 @@ class FakeMusicService:
         self.liked_artists_calls = getattr(self, "liked_artists_calls", 0) + 1
         return (Artist(id=f"liked-artist-{limit}", name="Liked Artist"),)
 
+    def get_disliked_track_ids(self, *, if_modified_since_revision: int = 0):
+        if if_modified_since_revision == 11:
+            return None
+        return DislikedTrackIds(
+            user_id="user-1",
+            revision=11,
+            track_ids=frozenset({"disliked-100"}),
+        )
+
+    def get_disliked_artists(self, *, limit: int = 100):
+        self.disliked_artists_calls = getattr(self, "disliked_artists_calls", 0) + 1
+        return (Artist(id=f"disliked-artist-{limit}", name="Disliked Artist", is_disliked=True),)
+
     def get_liked_playlists(self, *, limit: int = 100):
         self.liked_playlists_calls = getattr(self, "liked_playlists_calls", 0) + 1
         return (Playlist(id=f"liked-playlist-{limit}", title="Liked Playlist", is_liked=True),)
@@ -227,6 +276,12 @@ class FakeMusicService:
 
     def unlike_track(self, track_id: str):
         self.unliked_track_id = track_id
+
+    def dislike_track(self, track_id: str):
+        self.disliked_track_id = track_id
+
+    def undislike_track(self, track_id: str):
+        self.undisliked_track_id = track_id
 
     def like_album(self, album_id: str):
         self.liked_album_id = album_id
@@ -239,6 +294,12 @@ class FakeMusicService:
 
     def unlike_artist(self, artist_id: str):
         self.unliked_artist_id = artist_id
+
+    def dislike_artist(self, artist_id: str):
+        self.disliked_artist_id = artist_id
+
+    def undislike_artist(self, artist_id: str):
+        self.undisliked_artist_id = artist_id
 
     def like_playlist(self, playlist_id: str, *, owner_id: str | None = None):
         self.liked_playlist = (playlist_id, owner_id)

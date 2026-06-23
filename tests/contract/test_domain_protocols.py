@@ -13,6 +13,7 @@ from app.domain import (
     AuthSession,
     CatalogSearchResults,
     Clock,
+    DislikedTrackIds,
     LibraryCacheRepo,
     LikedTrackIds,
     LikedTrackSnapshot,
@@ -88,6 +89,21 @@ class FakeMusicService:
     def get_liked_artists(self, *, limit: int = 100) -> Sequence[Artist]:
         return [Artist(id=f"liked-artist-{limit}", name="Liked Artist")]
 
+    def get_disliked_track_ids(
+        self,
+        *,
+        if_modified_since_revision: int = 0,
+    ) -> DislikedTrackIds | None:
+        del if_modified_since_revision
+        return DislikedTrackIds(
+            user_id="user-1",
+            revision=2,
+            track_ids=frozenset({"disliked-100"}),
+        )
+
+    def get_disliked_artists(self, *, limit: int = 100) -> Sequence[Artist]:
+        return [Artist(id=f"disliked-artist-{limit}", name="Disliked Artist", is_disliked=True)]
+
     def get_liked_playlists(self, *, limit: int = 100) -> Sequence[Playlist]:
         return [Playlist(id=f"liked-playlist-{limit}", title="Liked Playlist", is_liked=True)]
 
@@ -96,6 +112,12 @@ class FakeMusicService:
 
     def unlike_track(self, track_id: str) -> None:
         self.unliked_track_id = track_id
+
+    def dislike_track(self, track_id: str) -> None:
+        self.disliked_track_id = track_id
+
+    def undislike_track(self, track_id: str) -> None:
+        self.undisliked_track_id = track_id
 
     def like_album(self, album_id: str) -> None:
         self.liked_album_id = album_id
@@ -108,6 +130,12 @@ class FakeMusicService:
 
     def unlike_artist(self, artist_id: str) -> None:
         self.unliked_artist_id = artist_id
+
+    def dislike_artist(self, artist_id: str) -> None:
+        self.disliked_artist_id = artist_id
+
+    def undislike_artist(self, artist_id: str) -> None:
+        self.undisliked_artist_id = artist_id
 
     def like_playlist(self, playlist_id: str, *, owner_id: str | None = None) -> None:
         self.liked_playlist = (playlist_id, owner_id)
@@ -361,6 +389,11 @@ class FakeLibraryCacheRepo:
             revision=1,
             track_ids=frozenset({"track-1"}),
         )
+        self.disliked_tracks = DislikedTrackIds(
+            user_id="user-1",
+            revision=2,
+            track_ids=frozenset({"track-2"}),
+        )
         self.liked_track_snapshot = LikedTrackSnapshot(
             user_id="user-1",
             revision=1,
@@ -368,6 +401,9 @@ class FakeLibraryCacheRepo:
         )
         self.liked_album_snapshot = (Album(id="album-1", title="Album"),)
         self.liked_artist_snapshot = (Artist(id="artist-1", name="Artist"),)
+        self.disliked_artist_snapshot = (
+            Artist(id="artist-2", name="Artist 2", is_disliked=True),
+        )
         self.liked_playlist_snapshot = (Playlist(id="playlist-1", title="Playlist"),)
         self.user_playlist_snapshot = (Playlist(id="playlist-1", title="Playlist"),)
         self.generated_playlist_snapshot = (Playlist(id="generated-1", title="Generated"),)
@@ -400,6 +436,14 @@ class FakeLibraryCacheRepo:
     def save_liked_track_ids(self, liked_tracks: LikedTrackIds) -> None:
         self.liked_tracks = liked_tracks
 
+    def load_disliked_track_ids(self, user_id: str) -> DislikedTrackIds | None:
+        if user_id != self.disliked_tracks.user_id:
+            return None
+        return self.disliked_tracks
+
+    def save_disliked_track_ids(self, disliked_tracks: DislikedTrackIds) -> None:
+        self.disliked_tracks = disliked_tracks
+
     def load_liked_track_snapshot(self, user_id: str) -> LikedTrackSnapshot | None:
         if user_id != self.liked_track_snapshot.user_id:
             return None
@@ -423,6 +467,14 @@ class FakeLibraryCacheRepo:
     def save_liked_artist_snapshot(self, user_id: str, artists: Sequence[Artist]) -> None:
         del user_id
         self.liked_artist_snapshot = tuple(artists)
+
+    def load_disliked_artist_snapshot(self, user_id: str) -> Sequence[Artist] | None:
+        del user_id
+        return self.disliked_artist_snapshot
+
+    def save_disliked_artist_snapshot(self, user_id: str, artists: Sequence[Artist]) -> None:
+        del user_id
+        self.disliked_artist_snapshot = tuple(artists)
 
     def load_liked_playlist_snapshot(self, user_id: str) -> Sequence[Playlist] | None:
         del user_id
@@ -464,6 +516,20 @@ class FakeLibraryCacheRepo:
             user_id=user_id,
             revision=self.liked_tracks.revision,
             track_ids=self.liked_tracks.track_ids - {track_id},
+        )
+
+    def mark_track_disliked(self, user_id: str, track_id: str) -> None:
+        self.disliked_tracks = DislikedTrackIds(
+            user_id=user_id,
+            revision=self.disliked_tracks.revision,
+            track_ids=self.disliked_tracks.track_ids | {track_id},
+        )
+
+    def mark_track_undisliked(self, user_id: str, track_id: str) -> None:
+        self.disliked_tracks = DislikedTrackIds(
+            user_id=user_id,
+            revision=self.disliked_tracks.revision,
+            track_ids=self.disliked_tracks.track_ids - {track_id},
         )
 
     def load_artwork_ref(self, item_id: str) -> str | None:

@@ -223,6 +223,7 @@ class MainWindowLayoutMixin:
         progress_row.addWidget(self._seek_label)
         progress_row.addWidget(self._volume_button)
         progress_row.addWidget(self._like_track_button)
+        progress_row.addWidget(self._dislike_track_button)
 
         self._player_right_widget = QWidget()
         self._player_right_widget.setMinimumWidth(self._PLAYER_MIN_WIDTH)

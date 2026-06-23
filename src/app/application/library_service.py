@@ -1,9 +1,15 @@
 from __future__ import annotations
 
-from app.application.track_metadata import merge_cached_liked_states
+from dataclasses import replace
+
+from app.application.track_metadata import (
+    merge_cached_artist_preference_states,
+    merge_cached_track_preference_states,
+)
 from app.domain import (
     Album,
     Artist,
+    DislikedTrackIds,
     LibraryCacheRepo,
     LikedTrackSnapshot,
     Logger,
@@ -145,6 +151,25 @@ class LibraryService:
             liked_tracks.revision,
         )
 
+    def refresh_disliked_track_index(self, *, force: bool = False) -> None:
+        user_id = self._current_user_id()
+        if user_id is None:
+            return
+        cached_dislikes = self._safe_load_disliked_track_ids(user_id)
+        revision = 0 if force or cached_dislikes is None else cached_dislikes.revision
+        disliked_tracks = self._music_service.get_disliked_track_ids(
+            if_modified_since_revision=revision
+        )
+        if disliked_tracks is None:
+            self._logger.info("Disliked track index is up to date at revision %s", revision)
+            return
+        self._safe_save_disliked_track_ids(disliked_tracks)
+        self._logger.info(
+            "Refreshed disliked track index: %s ids at revision %s",
+            len(disliked_tracks.track_ids),
+            disliked_tracks.revision,
+        )
+
     def load_liked_albums(self, *, limit: int = 100) -> tuple[Album, ...]:
         user_id = self._current_user_id()
         cached = (
@@ -163,17 +188,64 @@ class LibraryService:
     def load_liked_artists(self, *, limit: int = 100) -> tuple[Artist, ...]:
         user_id = self._current_user_id()
         cached = (
-            tuple(self._library_cache_repo.load_liked_artist_snapshot(user_id) or ())
+            tuple(
+                merge_cached_artist_preference_states(
+                    tuple(self._library_cache_repo.load_liked_artist_snapshot(user_id) or ()),
+                    self._library_cache_repo,
+                    user_id=user_id,
+                )
+            )
             if user_id is not None
             else ()
         )
         if cached:
             return cached[:limit]
-        artists = tuple(self._music_service.get_liked_artists(limit=limit))
+        artists = merge_cached_artist_preference_states(
+            tuple(self._music_service.get_liked_artists(limit=limit)),
+            self._library_cache_repo,
+            user_id=user_id,
+        )
         if user_id is not None:
             self._library_cache_repo.save_liked_artist_snapshot(user_id, artists)
         self._logger.info("Loaded %s liked artists", len(artists))
         return artists
+
+    def load_disliked_artists(self, *, limit: int = 100) -> tuple[Artist, ...]:
+        user_id = self._current_user_id()
+        cached = (
+            tuple(self._library_cache_repo.load_disliked_artist_snapshot(user_id) or ())
+            if user_id is not None
+            else ()
+        )
+        if cached:
+            return cached[:limit]
+        artists = tuple(
+            replace(artist, is_liked=False, is_disliked=True)
+            for artist in self._music_service.get_disliked_artists(limit=limit)
+        )
+        if user_id is not None:
+            self._library_cache_repo.save_disliked_artist_snapshot(user_id, artists)
+        self._logger.info("Loaded %s disliked artists", len(artists))
+        return artists
+
+    def refresh_disliked_artist_snapshot(self) -> None:
+        user_id = self._current_user_id()
+        if user_id is None:
+            return
+        artists = tuple(
+            replace(artist, is_liked=False, is_disliked=True)
+            for artist in self._music_service.get_disliked_artists(limit=10_000)
+        )
+        try:
+            self._library_cache_repo.save_disliked_artist_snapshot(user_id, artists)
+        except StorageError as exc:
+            self._logger.warning(
+                "Disliked artist snapshot cache save failed for %s: %s",
+                user_id,
+                exc,
+            )
+            return
+        self._logger.info("Refreshed disliked artist snapshot: %s artists", len(artists))
 
     def load_liked_playlists(self, *, limit: int = 100) -> tuple[Playlist, ...]:
         user_id = self._current_user_id()
@@ -229,7 +301,7 @@ class LibraryService:
         *,
         owner_id: str | None = None,
     ) -> tuple[Track, ...]:
-        tracks = merge_cached_liked_states(
+        tracks = merge_cached_track_preference_states(
             tuple(self._music_service.get_playlist_tracks(playlist_id, owner_id=owner_id)),
             self._library_cache_repo,
             user_id=self._current_user_id(),
@@ -252,7 +324,7 @@ class LibraryService:
         return album
 
     def load_album_tracks(self, album_id: str) -> tuple[Track, ...]:
-        tracks = merge_cached_liked_states(
+        tracks = merge_cached_track_preference_states(
             tuple(self._music_service.get_album_tracks(album_id)),
             self._library_cache_repo,
             user_id=self._current_user_id(),
@@ -265,7 +337,7 @@ class LibraryService:
         return self.load_album_tracks(album_id)
 
     def load_station_tracks(self, station_id: str, *, limit: int = 25) -> tuple[Track, ...]:
-        tracks = merge_cached_liked_states(
+        tracks = merge_cached_track_preference_states(
             tuple(self._music_service.get_station_tracks(station_id, limit=limit)),
             self._library_cache_repo,
             user_id=self._current_user_id(),
@@ -275,7 +347,7 @@ class LibraryService:
         return tracks
 
     def load_artist_tracks(self, artist_id: str, *, limit: int = 50) -> tuple[Track, ...]:
-        tracks = merge_cached_liked_states(
+        tracks = merge_cached_track_preference_states(
             tuple(self._music_service.get_artist_tracks(artist_id, limit=limit)),
             self._library_cache_repo,
             user_id=self._current_user_id(),
@@ -319,55 +391,45 @@ class LibraryService:
 
     def like_track(self, track: Track) -> Track:
         self._music_service.like_track(track.id)
-        liked_track = Track(
-            id=track.id,
-            title=track.title,
-            artists=track.artists,
-            version=track.version,
-            artist_ids=track.artist_ids,
-            album_id=track.album_id,
-            album_title=track.album_title,
-            album_year=track.album_year,
-            duration_ms=track.duration_ms,
-            stream_ref=track.stream_ref,
-            stream_ref_cached_at=track.stream_ref_cached_at,
-            artwork_ref=track.artwork_ref,
-            accent_color=track.accent_color,
-            available=track.available,
-            is_liked=True,
-        )
+        liked_track = replace(track, is_liked=True, is_disliked=False)
         self._cache_tracks((liked_track,))
         user_id = self._current_user_id()
         if user_id is not None:
             self._library_cache_repo.mark_track_liked(user_id, track.id)
+            self._library_cache_repo.mark_track_undisliked(user_id, track.id)
         self._logger.info("Liked track %s", track.id)
         return liked_track
 
     def unlike_track(self, track: Track) -> Track:
         self._music_service.unlike_track(track.id)
-        unliked_track = Track(
-            id=track.id,
-            title=track.title,
-            artists=track.artists,
-            version=track.version,
-            artist_ids=track.artist_ids,
-            album_id=track.album_id,
-            album_title=track.album_title,
-            album_year=track.album_year,
-            duration_ms=track.duration_ms,
-            stream_ref=track.stream_ref,
-            stream_ref_cached_at=track.stream_ref_cached_at,
-            artwork_ref=track.artwork_ref,
-            accent_color=track.accent_color,
-            available=track.available,
-            is_liked=False,
-        )
+        unliked_track = replace(track, is_liked=False)
         self._cache_tracks((unliked_track,))
         user_id = self._current_user_id()
         if user_id is not None:
             self._library_cache_repo.mark_track_unliked(user_id, track.id)
         self._logger.info("Unliked track %s", track.id)
         return unliked_track
+
+    def dislike_track(self, track: Track) -> Track:
+        self._music_service.dislike_track(track.id)
+        disliked_track = replace(track, is_liked=False, is_disliked=True)
+        self._cache_tracks((disliked_track,))
+        user_id = self._current_user_id()
+        if user_id is not None:
+            self._library_cache_repo.mark_track_unliked(user_id, track.id)
+            self._library_cache_repo.mark_track_disliked(user_id, track.id)
+        self._logger.info("Disliked track %s", track.id)
+        return disliked_track
+
+    def undislike_track(self, track: Track) -> Track:
+        self._music_service.undislike_track(track.id)
+        neutral_track = replace(track, is_disliked=False)
+        self._cache_tracks((neutral_track,))
+        user_id = self._current_user_id()
+        if user_id is not None:
+            self._library_cache_repo.mark_track_undisliked(user_id, track.id)
+        self._logger.info("Undisliked track %s", track.id)
+        return neutral_track
 
     def like_album(self, album: Album) -> Album:
         self._music_service.like_album(album.id)
@@ -403,25 +465,33 @@ class LibraryService:
 
     def like_artist(self, artist: Artist) -> Artist:
         self._music_service.like_artist(artist.id)
-        liked_artist = Artist(
-            id=artist.id,
-            name=artist.name,
-            artwork_ref=artist.artwork_ref,
-            is_liked=True,
-        )
+        liked_artist = replace(artist, is_liked=True, is_disliked=False)
+        self._cache_artist_preference(liked_artist, snapshot_key="liked")
+        self._cache_artist_preference(replace(liked_artist, is_liked=False), snapshot_key="undisliked")
         self._logger.info("Liked artist %s", artist.id)
         return liked_artist
 
     def unlike_artist(self, artist: Artist) -> Artist:
         self._music_service.unlike_artist(artist.id)
-        unliked_artist = Artist(
-            id=artist.id,
-            name=artist.name,
-            artwork_ref=artist.artwork_ref,
-            is_liked=False,
-        )
+        unliked_artist = replace(artist, is_liked=False)
+        self._cache_artist_preference(unliked_artist, snapshot_key="unliked")
         self._logger.info("Unliked artist %s", artist.id)
         return unliked_artist
+
+    def dislike_artist(self, artist: Artist) -> Artist:
+        self._music_service.dislike_artist(artist.id)
+        disliked_artist = replace(artist, is_liked=False, is_disliked=True)
+        self._cache_artist_preference(disliked_artist, snapshot_key="disliked")
+        self._cache_artist_preference(replace(disliked_artist, is_disliked=False), snapshot_key="unliked")
+        self._logger.info("Disliked artist %s", artist.id)
+        return disliked_artist
+
+    def undislike_artist(self, artist: Artist) -> Artist:
+        self._music_service.undislike_artist(artist.id)
+        neutral_artist = replace(artist, is_disliked=False)
+        self._cache_artist_preference(neutral_artist, snapshot_key="undisliked")
+        self._logger.info("Undisliked artist %s", artist.id)
+        return neutral_artist
 
     def like_playlist(self, playlist: Playlist) -> Playlist:
         self._music_service.like_playlist(playlist.id, owner_id=playlist.owner_id)
@@ -509,6 +579,55 @@ class LibraryService:
                 liked_tracks.user_id,
                 exc,
             )
+
+    def _safe_load_disliked_track_ids(
+        self,
+        user_id: str | None,
+    ) -> DislikedTrackIds | None:
+        if user_id is None:
+            return None
+        try:
+            return self._library_cache_repo.load_disliked_track_ids(user_id)
+        except StorageError as exc:
+            self._logger.warning("Disliked track id cache load failed for %s: %s", user_id, exc)
+            return None
+
+    def _safe_save_disliked_track_ids(self, disliked_tracks: DislikedTrackIds) -> None:
+        try:
+            self._library_cache_repo.save_disliked_track_ids(disliked_tracks)
+        except StorageError as exc:
+            self._logger.warning(
+                "Disliked track id cache save failed for %s: %s",
+                disliked_tracks.user_id,
+                exc,
+            )
+
+    def _cache_artist_preference(self, artist: Artist, *, snapshot_key: str) -> None:
+        user_id = self._current_user_id()
+        if user_id is None:
+            return
+        try:
+            if snapshot_key in {"liked", "unliked"}:
+                current_liked = list(
+                    self._library_cache_repo.load_liked_artist_snapshot(user_id) or ()
+                )
+                current_liked = [item for item in current_liked if item.id != artist.id]
+                if snapshot_key == "liked":
+                    current_liked.append(artist)
+                self._library_cache_repo.save_liked_artist_snapshot(user_id, tuple(current_liked))
+                return
+            current_disliked = list(
+                self._library_cache_repo.load_disliked_artist_snapshot(user_id) or ()
+            )
+            current_disliked = [item for item in current_disliked if item.id != artist.id]
+            if snapshot_key == "disliked":
+                current_disliked.append(artist)
+            self._library_cache_repo.save_disliked_artist_snapshot(
+                user_id,
+                tuple(current_disliked),
+            )
+        except StorageError as exc:
+            self._logger.warning("Artist preference cache save failed for %s: %s", artist.id, exc)
 
     def _current_user_id(self) -> str | None:
         session = self._music_service.get_auth_session()

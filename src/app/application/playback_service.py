@@ -11,7 +11,7 @@ from threading import Lock
 from time import monotonic
 from uuid import uuid4
 
-from app.application.track_metadata import merge_cached_liked_state, merge_cached_liked_states
+from app.application.track_metadata import merge_cached_track_preferences, merge_cached_track_preference_states
 from app.domain import (
     LibraryCacheRepo,
     Logger,
@@ -163,7 +163,7 @@ class PlaybackService:
         source_type: str | None = None,
         source_id: str | None = None,
     ) -> PlaybackSnapshot:
-        tracks = merge_cached_liked_states(
+        tracks = merge_cached_track_preference_states(
             tuple(tracks),
             self._library_cache_repo,
             user_id=self._current_user_id(),
@@ -193,7 +193,7 @@ class PlaybackService:
             for item in self._queue
             if item.source_type == source_type and item.source_id == source_id
         )
-        tracks = merge_cached_liked_states(
+        tracks = merge_cached_track_preference_states(
             tuple(tracks),
             self._library_cache_repo,
             user_id=self._current_user_id(),
@@ -233,7 +233,7 @@ class PlaybackService:
             for item in self._queue
             if item.source_type == source_type and item.source_id == source_id
         )
-        normalized_tracks = merge_cached_liked_states(
+        normalized_tracks = merge_cached_track_preference_states(
             tuple(tracks),
             self._library_cache_repo,
             user_id=self._current_user_id(),
@@ -269,7 +269,7 @@ class PlaybackService:
 
         self._queue = [
             self._build_queue_item(
-                merge_cached_liked_state(
+                merge_cached_track_preferences(
                     item.track,
                     self._library_cache_repo,
                     user_id=self._current_user_id(),
@@ -381,7 +381,7 @@ class PlaybackService:
     def play_track_by_id(self, track_id: str) -> PlaybackSnapshot:
         if self._music_service is None:
             raise PlaybackBackendError("Music service is not configured")
-        track = merge_cached_liked_state(
+        track = merge_cached_track_preferences(
             self._music_service.get_track(track_id),
             self._library_cache_repo,
             user_id=self._current_user_id(),
@@ -401,7 +401,7 @@ class PlaybackService:
             monotonic() - started_at,
             station_id,
         )
-        tracks = merge_cached_liked_states(
+        tracks = merge_cached_track_preference_states(
             radio_session.tracks,
             self._library_cache_repo,
             user_id=self._current_user_id(),
@@ -718,6 +718,7 @@ class PlaybackService:
                 waveform_bins=item.track.waveform_bins,
                 available=item.track.available,
                 is_liked=item.track.is_liked,
+                is_disliked=item.track.is_disliked,
             ),
             source_type=item.source_type,
             source_id=item.source_id,
@@ -911,7 +912,7 @@ class PlaybackService:
                 radio_session,
                 limit=self._STATION_QUEUE_BATCH_SIZE,
             )
-            fetched_tracks = merge_cached_liked_states(
+            fetched_tracks = merge_cached_track_preference_states(
                 radio_session.tracks,
                 self._library_cache_repo,
                 user_id=self._current_user_id(),
@@ -1221,6 +1222,7 @@ class PlaybackService:
             waveform_bins=cached_track.waveform_bins,
             available=track.available,
             is_liked=track.is_liked,
+            is_disliked=track.is_disliked,
         )
 
     def _advance_to_next_track(

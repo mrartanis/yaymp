@@ -9,6 +9,7 @@ from app.domain import (
     Album,
     Artist,
     CatalogSearchResults,
+    DislikedTrackIds,
     LibraryCacheRepo,
     LikedTrackIds,
     LikedTrackSnapshot,
@@ -102,6 +103,7 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
                 ),
                 available=bool(raw_track.get("available", True)),
                 is_liked=bool(raw_track.get("is_liked", False)),
+                is_disliked=bool(raw_track.get("is_disliked", False)),
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise StorageError("Library cache track entry is invalid") from exc
@@ -132,6 +134,7 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
             "waveform_bins": [float(value) for value in track.waveform_bins],
             "available": track.available,
             "is_liked": track.is_liked,
+            "is_disliked": track.is_disliked,
             "cached_at": self._now_iso(),
         }
         self._save_payload(payload)
@@ -163,6 +166,37 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
         raw_liked_tracks[liked_tracks.user_id] = {
             "revision": liked_tracks.revision,
             "track_ids": sorted(liked_tracks.track_ids),
+            "synced_at": self._now_iso(),
+        }
+        self._save_payload(payload)
+
+    def load_disliked_track_ids(self, user_id: str) -> DislikedTrackIds | None:
+        payload = self._load_payload()
+        disliked_tracks = payload.get("disliked_tracks", {})
+        if not isinstance(disliked_tracks, dict):
+            raise StorageError("Library cache disliked tracks are invalid")
+        raw_state = disliked_tracks.get(user_id)
+        if raw_state is None:
+            return None
+        if not isinstance(raw_state, dict):
+            raise StorageError("Library cache disliked track entry is invalid")
+        raw_ids = raw_state.get("track_ids", ())
+        if not isinstance(raw_ids, list):
+            raise StorageError("Library cache disliked track ids are invalid")
+        return DislikedTrackIds(
+            user_id=user_id,
+            revision=int(raw_state.get("revision", 0) or 0),
+            track_ids=frozenset(self._normalize_track_id(str(track_id)) for track_id in raw_ids),
+        )
+
+    def save_disliked_track_ids(self, disliked_tracks: DislikedTrackIds) -> None:
+        payload = self._load_payload()
+        raw_disliked_tracks = payload.setdefault("disliked_tracks", {})
+        if not isinstance(raw_disliked_tracks, dict):
+            raise StorageError("Library cache disliked tracks are invalid")
+        raw_disliked_tracks[disliked_tracks.user_id] = {
+            "revision": disliked_tracks.revision,
+            "track_ids": sorted(disliked_tracks.track_ids),
             "synced_at": self._now_iso(),
         }
         self._save_payload(payload)
@@ -233,6 +267,25 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
         self._save_entity_snapshot(
             user_id,
             snapshot_key="liked_artist_snapshots",
+            items=artists,
+            serializer=self._serialize_artist,
+        )
+
+    def load_disliked_artist_snapshot(self, user_id: str) -> tuple[Artist, ...] | None:
+        return self._load_entity_snapshot(
+            user_id,
+            snapshot_key="disliked_artist_snapshots",
+            mapper=self._deserialize_artist,
+        )
+
+    def save_disliked_artist_snapshot(
+        self,
+        user_id: str,
+        artists: tuple[Artist, ...] | list[Artist],
+    ) -> None:
+        self._save_entity_snapshot(
+            user_id,
+            snapshot_key="disliked_artist_snapshots",
             items=artists,
             serializer=self._serialize_artist,
         )
@@ -320,6 +373,32 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
             )
         )
 
+    def mark_track_disliked(self, user_id: str, track_id: str) -> None:
+        state = self.load_disliked_track_ids(user_id)
+        track_ids = set(state.track_ids if state is not None else ())
+        track_ids.add(self._normalize_track_id(track_id))
+        self.save_disliked_track_ids(
+            DislikedTrackIds(
+                user_id=user_id,
+                revision=state.revision if state is not None else 0,
+                track_ids=frozenset(track_ids),
+            )
+        )
+
+    def mark_track_undisliked(self, user_id: str, track_id: str) -> None:
+        state = self.load_disliked_track_ids(user_id)
+        if state is None:
+            return
+        track_ids = set(state.track_ids)
+        track_ids.discard(self._normalize_track_id(track_id))
+        self.save_disliked_track_ids(
+            DislikedTrackIds(
+                user_id=user_id,
+                revision=state.revision,
+                track_ids=frozenset(track_ids),
+            )
+        )
+
     def load_artwork_ref(self, item_id: str) -> str | None:
         payload = self._load_payload()
         artwork = payload.get("artwork", {})
@@ -350,9 +429,11 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
                 "tracks": {},
                 "artwork": {},
                 "liked_tracks": {},
+                "disliked_tracks": {},
                 "liked_track_snapshots": {},
                 "liked_album_snapshots": {},
                 "liked_artist_snapshots": {},
+                "disliked_artist_snapshots": {},
                 "liked_playlist_snapshots": {},
                 "user_playlist_snapshots": {},
                 "generated_playlist_snapshots": {},
@@ -368,6 +449,7 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
                 "recent_searches": payload,
                 "tracks": {},
                 "artwork": {},
+                "disliked_tracks": {},
                 "catalog_search": {},
             }
         if not isinstance(payload, dict):
@@ -377,9 +459,11 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
             "tracks",
             "artwork",
             "liked_tracks",
+            "disliked_tracks",
             "liked_track_snapshots",
             "liked_album_snapshots",
             "liked_artist_snapshots",
+            "disliked_artist_snapshots",
             "liked_playlist_snapshots",
             "user_playlist_snapshots",
             "generated_playlist_snapshots",
@@ -391,9 +475,11 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
         payload.setdefault("tracks", {})
         payload.setdefault("artwork", {})
         payload.setdefault("liked_tracks", {})
+        payload.setdefault("disliked_tracks", {})
         payload.setdefault("liked_track_snapshots", {})
         payload.setdefault("liked_album_snapshots", {})
         payload.setdefault("liked_artist_snapshots", {})
+        payload.setdefault("disliked_artist_snapshots", {})
         payload.setdefault("liked_playlist_snapshots", {})
         payload.setdefault("user_playlist_snapshots", {})
         payload.setdefault("generated_playlist_snapshots", {})
@@ -452,6 +538,7 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
             "waveform_bins": [float(value) for value in track.waveform_bins],
             "available": track.available,
             "is_liked": track.is_liked,
+            "is_disliked": track.is_disliked,
         }
 
     def _deserialize_track(self, raw_track: object) -> Track:
@@ -483,6 +570,7 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
                 ),
                 available=bool(raw_track.get("available", True)),
                 is_liked=bool(raw_track.get("is_liked", False)),
+                is_disliked=bool(raw_track.get("is_disliked", False)),
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise StorageError("Library cache track entry is invalid") from exc
@@ -521,6 +609,7 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
             "name": artist.name,
             "artwork_ref": artist.artwork_ref,
             "is_liked": artist.is_liked,
+            "is_disliked": artist.is_disliked,
         }
 
     def _deserialize_artist(self, raw_artist: object) -> Artist:
@@ -531,6 +620,7 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
             name=str(raw_artist["name"]),
             artwork_ref=self._optional_str(raw_artist.get("artwork_ref")),
             is_liked=bool(raw_artist.get("is_liked", False)),
+            is_disliked=bool(raw_artist.get("is_disliked", False)),
         )
 
     def _serialize_playlist(self, playlist: Playlist) -> dict[str, object]:

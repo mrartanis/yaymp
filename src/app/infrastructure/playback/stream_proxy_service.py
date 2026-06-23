@@ -363,6 +363,7 @@ class StreamProxyService:
                                 waveform_bins=tuple(bins),
                                 available=session.track.available,
                                 is_liked=session.track.is_liked,
+                                is_disliked=session.track.is_disliked,
                             )
                         )
                     self._logger.debug(

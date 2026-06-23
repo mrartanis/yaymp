@@ -83,10 +83,14 @@ class LibraryController(QObject):
     content_failed = Signal(str)
     track_liked = Signal(object)
     track_unliked = Signal(object)
+    track_disliked = Signal(object)
+    track_undisliked = Signal(object)
     album_liked = Signal(object)
     album_unliked = Signal(object)
     artist_liked = Signal(object)
     artist_unliked = Signal(object)
+    artist_disliked = Signal(object)
+    artist_undisliked = Signal(object)
     playlist_liked = Signal(object)
     playlist_unliked = Signal(object)
     _search_requested = Signal(int, str)
@@ -455,6 +459,16 @@ class LibraryController(QObject):
             lambda: self.track_unliked.emit(self._library_service.unlike_track(track))
         )
 
+    def dislike_track(self, track: Track) -> None:
+        self._execute_mutation(
+            lambda: self.track_disliked.emit(self._library_service.dislike_track(track))
+        )
+
+    def undislike_track(self, track: Track) -> None:
+        self._execute_mutation(
+            lambda: self.track_undisliked.emit(self._library_service.undislike_track(track))
+        )
+
     def like_album(self, album: Album) -> None:
         self._execute_mutation(
             lambda: self.album_liked.emit(self._library_service.like_album(album))
@@ -473,6 +487,16 @@ class LibraryController(QObject):
     def unlike_artist(self, artist: Artist) -> None:
         self._execute_mutation(
             lambda: self.artist_unliked.emit(self._library_service.unlike_artist(artist))
+        )
+
+    def dislike_artist(self, artist: Artist) -> None:
+        self._execute_mutation(
+            lambda: self.artist_disliked.emit(self._library_service.dislike_artist(artist))
+        )
+
+    def undislike_artist(self, artist: Artist) -> None:
+        self._execute_mutation(
+            lambda: self.artist_undisliked.emit(self._library_service.undislike_artist(artist))
         )
 
     def like_playlist(self, playlist: Playlist) -> None:

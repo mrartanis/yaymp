@@ -10,6 +10,7 @@ from app.domain import (
     AudioQuality,
     AuthSession,
     CatalogSearchResults,
+    DislikedTrackIds,
     LikedTrackIds,
     MusicService,
     PlayEventReport,
@@ -184,6 +185,37 @@ class YandexMusicService(MusicService):
             track_ids=track_ids,
         )
 
+    def get_disliked_track_ids(
+        self,
+        *,
+        if_modified_since_revision: int = 0,
+    ) -> DislikedTrackIds | None:
+        client = self._require_client()
+        session = self.get_auth_session()
+        user_id = (
+            session.user_id
+            if session is not None
+            else str(getattr(client, "account_uid", ""))
+        )
+        try:
+            dislikes = client.users_dislikes_tracks(
+                if_modified_since_revision=if_modified_since_revision
+            )
+        except Exception as exc:
+            raise self._map_client_error(exc, "Failed to load disliked track ids") from exc
+        if dislikes is None:
+            return None
+        track_ids = frozenset(
+            self._normalize_track_id(getattr(track, "id", getattr(track, "track_id", track)))
+            for track in getattr(dislikes, "tracks", ())
+        )
+        revision = int(getattr(dislikes, "revision", 0) or 0)
+        return DislikedTrackIds(
+            user_id=user_id,
+            revision=revision,
+            track_ids=track_ids,
+        )
+
     def get_liked_albums(self, *, limit: int = 100) -> Sequence[Album]:
         client = self._require_client()
         try:
@@ -209,6 +241,17 @@ class YandexMusicService(MusicService):
         except Exception as exc:
             raise self._map_client_error(exc, "Failed to load liked artists") from exc
         return tuple(self._map_artist(artist, is_liked=True) for artist in raw_artists[:limit])
+
+    def get_disliked_artists(self, *, limit: int = 100) -> Sequence[Artist]:
+        client = self._require_client()
+        try:
+            raw_artists = client.users_dislikes_artists()
+        except Exception as exc:
+            raise self._map_client_error(exc, "Failed to load disliked artists") from exc
+        return tuple(
+            self._map_artist(artist, is_liked=False, is_disliked=True)
+            for artist in (raw_artists or ())[:limit]
+        )
 
     def get_liked_playlists(self, *, limit: int = 100) -> Sequence[Playlist]:
         client = self._require_client()
@@ -242,6 +285,20 @@ class YandexMusicService(MusicService):
         except Exception as exc:
             raise self._map_client_error(exc, f"Failed to unlike track {track_id}") from exc
 
+    def dislike_track(self, track_id: str) -> None:
+        client = self._require_client()
+        try:
+            self._call_track_mutation(client.users_dislikes_tracks_add, track_id)
+        except Exception as exc:
+            raise self._map_client_error(exc, f"Failed to dislike track {track_id}") from exc
+
+    def undislike_track(self, track_id: str) -> None:
+        client = self._require_client()
+        try:
+            self._call_track_mutation(client.users_dislikes_tracks_remove, track_id)
+        except Exception as exc:
+            raise self._map_client_error(exc, f"Failed to undislike track {track_id}") from exc
+
     def like_album(self, album_id: str) -> None:
         client = self._require_client()
         try:
@@ -269,6 +326,20 @@ class YandexMusicService(MusicService):
             self._call_entity_mutation(client.users_likes_artists_remove, artist_id)
         except Exception as exc:
             raise self._map_client_error(exc, f"Failed to unlike artist {artist_id}") from exc
+
+    def dislike_artist(self, artist_id: str) -> None:
+        client = self._require_client()
+        try:
+            self._call_entity_mutation(client.users_dislikes_artists_add, artist_id)
+        except Exception as exc:
+            raise self._map_client_error(exc, f"Failed to dislike artist {artist_id}") from exc
+
+    def undislike_artist(self, artist_id: str) -> None:
+        client = self._require_client()
+        try:
+            self._call_entity_mutation(client.users_dislikes_artists_remove, artist_id)
+        except Exception as exc:
+            raise self._map_client_error(exc, f"Failed to undislike artist {artist_id}") from exc
 
     def like_playlist(self, playlist_id: str, *, owner_id: str | None = None) -> None:
         client = self._require_client()
@@ -806,7 +877,13 @@ class YandexMusicService(MusicService):
             raise AuthError("Failed to initialize Yandex Music client") from exc
         return self._client
 
-    def _map_track(self, raw_track: Any, *, is_liked: bool = False) -> Track:
+    def _map_track(
+        self,
+        raw_track: Any,
+        *,
+        is_liked: bool = False,
+        is_disliked: bool = False,
+    ) -> Track:
         raw_artists = getattr(raw_track, "artists", None) or ()
         artists = tuple(getattr(artist, "name", str(artist)) for artist in raw_artists)
         artist_ids = tuple(
@@ -835,6 +912,7 @@ class YandexMusicService(MusicService):
             accent_color=self._extract_track_accent_color(raw_track),
             available=available,
             is_liked=is_liked,
+            is_disliked=is_disliked,
         )
 
     def _normalize_track_id(self, track_id: Any) -> str:
@@ -911,16 +989,42 @@ class YandexMusicService(MusicService):
                 regular.append(album)
         return tuple(regular), tuple(singles), tuple(compilations)
 
-    def _map_artist(self, raw_artist: Any, *, is_liked: bool = False) -> Artist:
-        artist_id = str(getattr(raw_artist, "id", "unknown"))
+    def _map_artist(
+        self,
+        raw_artist: Any,
+        *,
+        is_liked: bool = False,
+        is_disliked: bool = False,
+    ) -> Artist:
+        if isinstance(raw_artist, dict):
+            artist_id = str(raw_artist.get("id", "unknown"))
+            artist_name = str(raw_artist.get("name", artist_id))
+        else:
+            artist_id = str(getattr(raw_artist, "id", "unknown"))
+            artist_name = getattr(raw_artist, "name", artist_id)
         return Artist(
             id=artist_id,
-            name=getattr(raw_artist, "name", artist_id),
+            name=artist_name,
             artwork_ref=self._extract_artwork_ref(raw_artist),
             is_liked=is_liked,
+            is_disliked=is_disliked,
         )
 
     def _extract_artwork_ref(self, item: Any) -> str | None:
+        if isinstance(item, dict):
+            artwork_ref = item.get("cover_uri")
+            if isinstance(artwork_ref, str) and artwork_ref:
+                return artwork_ref
+            cover = item.get("cover")
+            if isinstance(cover, dict):
+                cover_uri = cover.get("uri")
+                if isinstance(cover_uri, str) and cover_uri:
+                    return cover_uri
+            og_image = item.get("ogImage")
+            if isinstance(og_image, str) and og_image:
+                return og_image
+            return None
+
         artwork_ref = getattr(item, "cover_uri", None)
         if isinstance(artwork_ref, str) and artwork_ref:
             return artwork_ref

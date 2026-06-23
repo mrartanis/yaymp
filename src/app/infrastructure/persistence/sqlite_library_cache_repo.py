@@ -12,6 +12,7 @@ from app.domain import (
     Album,
     Artist,
     CatalogSearchResults,
+    DislikedTrackIds,
     LibraryCacheRepo,
     LikedTrackIds,
     LikedTrackSnapshot,
@@ -144,6 +145,7 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                 ),
                 available=bool(row["available"]),
                 is_liked=bool(row["is_liked"]),
+                is_disliked=bool(row["is_disliked"]),
             )
         except (TypeError, ValueError, json.JSONDecodeError) as exc:
             raise StorageError("Cached track metadata is invalid") from exc
@@ -207,6 +209,59 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                 )
         except sqlite3.Error as exc:
             raise StorageError("Failed to save liked track ids") from exc
+
+    def load_disliked_track_ids(self, user_id: str) -> DislikedTrackIds | None:
+        try:
+            with self._connect() as connection:
+                row = connection.execute(
+                    "select revision from disliked_track_sync where user_id = ?",
+                    (user_id,),
+                ).fetchone()
+                if row is None:
+                    return None
+                rows = connection.execute(
+                    "select track_id from disliked_tracks where user_id = ?",
+                    (user_id,),
+                ).fetchall()
+        except sqlite3.Error as exc:
+            raise StorageError("Failed to load disliked track ids") from exc
+        return DislikedTrackIds(
+            user_id=user_id,
+            revision=int(row["revision"]),
+            track_ids=frozenset(str(item["track_id"]) for item in rows),
+        )
+
+    def save_disliked_track_ids(self, disliked_tracks: DislikedTrackIds) -> None:
+        try:
+            with self._connect() as connection:
+                now = self._now_iso()
+                connection.execute("begin")
+                connection.execute(
+                    "delete from disliked_tracks where user_id = ?",
+                    (disliked_tracks.user_id,),
+                )
+                connection.executemany(
+                    (
+                        "insert into disliked_tracks(user_id, track_id, updated_at) "
+                        "values (?, ?, ?)"
+                    ),
+                    [
+                        (disliked_tracks.user_id, track_id, now)
+                        for track_id in sorted(disliked_tracks.track_ids)
+                    ],
+                )
+                connection.execute(
+                    (
+                        "insert into disliked_track_sync(user_id, revision, synced_at) "
+                        "values (?, ?, ?) "
+                        "on conflict(user_id) do update set "
+                        "revision = excluded.revision, "
+                        "synced_at = excluded.synced_at"
+                    ),
+                    (disliked_tracks.user_id, disliked_tracks.revision, now),
+                )
+        except sqlite3.Error as exc:
+            raise StorageError("Failed to save disliked track ids") from exc
 
     def load_liked_track_snapshot(self, user_id: str) -> LikedTrackSnapshot | None:
         try:
@@ -306,6 +361,21 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
             encoder=self._encode_artist,
         )
 
+    def load_disliked_artist_snapshot(self, user_id: str) -> tuple[Artist, ...] | None:
+        return self._load_entity_snapshot(
+            cache_key="disliked_artists",
+            user_id=user_id,
+            mapper=self._decode_artist,
+        )
+
+    def save_disliked_artist_snapshot(self, user_id: str, artists: Sequence[Artist]) -> None:
+        self._save_entity_snapshot(
+            cache_key="disliked_artists",
+            user_id=user_id,
+            items=artists,
+            encoder=self._encode_artist,
+        )
+
     def load_liked_playlist_snapshot(self, user_id: str) -> tuple[Playlist, ...] | None:
         return self._load_entity_snapshot(
             cache_key="liked_playlists",
@@ -380,6 +450,31 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
         except sqlite3.Error as exc:
             raise StorageError("Failed to mark track unliked") from exc
 
+    def mark_track_disliked(self, user_id: str, track_id: str) -> None:
+        try:
+            with self._connect() as connection:
+                connection.execute(
+                    (
+                        "insert into disliked_tracks(user_id, track_id, updated_at) "
+                        "values (?, ?, ?) "
+                        "on conflict(user_id, track_id) do update set "
+                        "updated_at = excluded.updated_at"
+                    ),
+                    (user_id, self._normalize_track_id(track_id), self._now_iso()),
+                )
+        except sqlite3.Error as exc:
+            raise StorageError("Failed to mark track disliked") from exc
+
+    def mark_track_undisliked(self, user_id: str, track_id: str) -> None:
+        try:
+            with self._connect() as connection:
+                connection.execute(
+                    "delete from disliked_tracks where user_id = ? and track_id = ?",
+                    (user_id, self._normalize_track_id(track_id)),
+                )
+        except sqlite3.Error as exc:
+            raise StorageError("Failed to mark track undisliked") from exc
+
     def load_artwork_ref(self, item_id: str) -> str | None:
         try:
             with self._connect() as connection:
@@ -439,6 +534,7 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                         waveform_bins_json text not null default '[]',
                         available integer not null,
                         is_liked integer not null,
+                        is_disliked integer not null default 0,
                         cached_at text not null
                     );
 
@@ -461,6 +557,19 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                     );
 
                     create table if not exists liked_tracks (
+                        user_id text not null,
+                        track_id text not null,
+                        updated_at text not null,
+                        primary key (user_id, track_id)
+                    );
+
+                    create table if not exists disliked_track_sync (
+                        user_id text primary key,
+                        revision integer not null,
+                        synced_at text not null
+                    );
+
+                    create table if not exists disliked_tracks (
                         user_id text not null,
                         track_id text not null,
                         updated_at text not null,
@@ -526,6 +635,12 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                     column="waveform_bins_json",
                     definition="text not null default '[]'",
                 )
+                self._ensure_column(
+                    connection,
+                    table="tracks",
+                    column="is_disliked",
+                    definition="integer not null default 0",
+                )
         except (OSError, sqlite3.Error) as exc:
             raise StorageError("Failed to initialize library cache database") from exc
 
@@ -590,8 +705,8 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                 "id, title, version, artists_json, artist_ids_json, album_id, album_title, "
                 "album_year, duration_ms, "
                 "stream_ref, stream_ref_cached_at, artwork_ref, accent_color, waveform_bins_json, "
-                "available, is_liked, cached_at"
-                ") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "available, is_liked, is_disliked, cached_at"
+                ") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 "on conflict(id) do update set "
                 "title = excluded.title, "
                 "version = excluded.version, "
@@ -608,6 +723,7 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                 "waveform_bins_json = excluded.waveform_bins_json, "
                 "available = excluded.available, "
                 "is_liked = excluded.is_liked, "
+                "is_disliked = excluded.is_disliked, "
                 "cached_at = excluded.cached_at"
             ),
             (
@@ -631,6 +747,7 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                 json.dumps([float(value) for value in track.waveform_bins], ensure_ascii=True),
                 int(track.available),
                 int(track.is_liked),
+                int(track.is_disliked),
                 self._now_iso(),
             ),
         )
@@ -722,6 +839,7 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
             "name": artist.name,
             "artwork_ref": artist.artwork_ref,
             "is_liked": artist.is_liked,
+            "is_disliked": artist.is_disliked,
         }
 
     def _decode_artist(self, raw_artist: object) -> Artist:
@@ -736,6 +854,7 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                 else None
             ),
             is_liked=bool(raw_artist.get("is_liked", False)),
+            is_disliked=bool(raw_artist.get("is_disliked", False)),
         )
 
     def _encode_playlist(self, playlist: Playlist) -> dict[str, object]:

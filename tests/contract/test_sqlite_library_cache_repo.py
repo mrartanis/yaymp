@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 from app.domain import Album, Artist, CatalogSearchResults
 from app.domain.playlist import Playlist
-from app.domain.track import LikedTrackIds, LikedTrackSnapshot, Track
+from app.domain.track import DislikedTrackIds, LikedTrackIds, LikedTrackSnapshot, Track
 from app.infrastructure.persistence.sqlite_library_cache_repo import SQLiteLibraryCacheRepo
 
 
@@ -90,6 +90,31 @@ def test_sqlite_library_cache_repo_round_trips_liked_track_snapshot(tmp_path) ->
     assert repo.load_liked_track_snapshot("user-1") == snapshot
 
 
+def test_sqlite_library_cache_repo_round_trips_disliked_track_ids_and_artist_snapshot(tmp_path) -> None:
+    repo = SQLiteLibraryCacheRepo(db_path=tmp_path / "library.sqlite3")
+    disliked_tracks = DislikedTrackIds(
+        user_id="user-1",
+        revision=12,
+        track_ids=frozenset({"track-1"}),
+    )
+
+    repo.save_disliked_track_ids(disliked_tracks)
+    repo.mark_track_disliked("user-1", "track-2:album-1")
+    repo.mark_track_undisliked("user-1", "track-1")
+    repo.save_disliked_artist_snapshot(
+        "user-1",
+        (Artist(id="artist-1", name="Artist", is_disliked=True),),
+    )
+
+    loaded_tracks = repo.load_disliked_track_ids("user-1")
+    loaded_artists = repo.load_disliked_artist_snapshot("user-1")
+
+    assert loaded_tracks is not None
+    assert loaded_tracks.revision == 12
+    assert loaded_tracks.track_ids == frozenset({"track-2:album-1"})
+    assert loaded_artists == (Artist(id="artist-1", name="Artist", is_disliked=True),)
+
+
 def test_sqlite_library_cache_repo_returns_empty_when_missing(tmp_path) -> None:
     repo = SQLiteLibraryCacheRepo(db_path=tmp_path / "library.sqlite3")
 
@@ -97,6 +122,7 @@ def test_sqlite_library_cache_repo_returns_empty_when_missing(tmp_path) -> None:
     assert repo.load_catalog_search("ambient") is None
     assert repo.load_track_metadata("missing") is None
     assert repo.load_liked_track_ids("user-1") is None
+    assert repo.load_disliked_track_ids("user-1") is None
     assert repo.load_liked_track_snapshot("user-1") is None
     assert repo.load_artwork_ref("missing") is None
 

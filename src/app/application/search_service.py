@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from app.application.track_metadata import merge_cached_liked_states
+from app.application.track_metadata import (
+    merge_cached_artist_preference_states,
+    merge_cached_track_preference_states,
+)
 from app.domain import CatalogSearchResults, LibraryCacheRepo, Logger, MusicService, Track
 from app.domain.errors import StorageError
 
@@ -22,7 +25,7 @@ class SearchService:
         if not normalized_query:
             return ()
 
-        tracks = merge_cached_liked_states(
+        tracks = merge_cached_track_preference_states(
             tuple(self._music_service.search_tracks(normalized_query, limit=limit)),
             self._library_cache_repo,
             user_id=self._current_user_id(),
@@ -60,7 +63,7 @@ class SearchService:
                     exc,
                 )
         results = CatalogSearchResults(
-            tracks=merge_cached_liked_states(
+            tracks=merge_cached_track_preference_states(
                 results.tracks,
                 self._library_cache_repo,
                 user_id=self._current_user_id(),
@@ -68,7 +71,11 @@ class SearchService:
             albums=results.albums,
             singles=results.singles,
             compilations=results.compilations,
-            artists=results.artists,
+            artists=merge_cached_artist_preference_states(
+                results.artists,
+                self._library_cache_repo,
+                user_id=self._current_user_id(),
+            ),
             playlists=results.playlists,
         )
         self._cache_tracks(results.tracks)

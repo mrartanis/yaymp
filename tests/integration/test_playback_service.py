@@ -9,6 +9,7 @@ from app.domain import (
     Album,
     AudioQuality,
     CatalogSearchResults,
+    DislikedTrackIds,
     LikedTrackIds,
     LikedTrackSnapshot,
     PlaybackBackendError,
@@ -116,6 +117,14 @@ class FakeMusicService:
         del limit
         return ()
 
+    def get_disliked_track_ids(self, *, if_modified_since_revision: int = 0):
+        del if_modified_since_revision
+        return DislikedTrackIds(user_id="user-1", revision=1, track_ids=frozenset())
+
+    def get_disliked_artists(self, *, limit: int = 100):
+        del limit
+        return ()
+
     def get_liked_playlists(self, *, limit: int = 100):
         del limit
         return ()
@@ -125,6 +134,12 @@ class FakeMusicService:
 
     def unlike_track(self, track_id: str) -> None:
         self.unliked_track_id = track_id
+
+    def dislike_track(self, track_id: str) -> None:
+        self.disliked_track_id = track_id
+
+    def undislike_track(self, track_id: str) -> None:
+        self.undisliked_track_id = track_id
 
     def like_album(self, album_id: str) -> None:
         self.liked_album_id = album_id
@@ -137,6 +152,12 @@ class FakeMusicService:
 
     def unlike_artist(self, artist_id: str) -> None:
         self.unliked_artist_id = artist_id
+
+    def dislike_artist(self, artist_id: str) -> None:
+        self.disliked_artist_id = artist_id
+
+    def undislike_artist(self, artist_id: str) -> None:
+        self.undisliked_artist_id = artist_id
 
     def like_playlist(self, playlist_id: str, *, owner_id: str | None = None) -> None:
         self.liked_playlist = (playlist_id, owner_id)
@@ -480,9 +501,11 @@ class InMemoryLibraryCacheRepo:
         self.catalog_search = {}
         self.tracks: dict[str, Track] = {}
         self.liked_tracks: dict[str, LikedTrackIds] = {}
+        self.disliked_tracks: dict[str, DislikedTrackIds] = {}
         self.liked_track_snapshots: dict[str, LikedTrackSnapshot] = {}
         self.liked_album_snapshots: dict[str, tuple[Album, ...]] = {}
         self.liked_artist_snapshots: dict[str, tuple] = {}
+        self.disliked_artist_snapshots: dict[str, tuple] = {}
         self.liked_playlist_snapshots: dict[str, tuple] = {}
         self.user_playlist_snapshots: dict[str, tuple] = {}
         self.generated_playlist_snapshots: dict[str, tuple] = {}
@@ -511,6 +534,12 @@ class InMemoryLibraryCacheRepo:
     def save_liked_track_ids(self, liked_tracks: LikedTrackIds):
         self.liked_tracks[liked_tracks.user_id] = liked_tracks
 
+    def load_disliked_track_ids(self, user_id: str):
+        return self.disliked_tracks.get(user_id)
+
+    def save_disliked_track_ids(self, disliked_tracks: DislikedTrackIds):
+        self.disliked_tracks[disliked_tracks.user_id] = disliked_tracks
+
     def load_liked_track_snapshot(self, user_id: str):
         return self.liked_track_snapshots.get(user_id)
 
@@ -528,6 +557,12 @@ class InMemoryLibraryCacheRepo:
 
     def save_liked_artist_snapshot(self, user_id: str, artists):
         self.liked_artist_snapshots[user_id] = tuple(artists)
+
+    def load_disliked_artist_snapshot(self, user_id: str):
+        return self.disliked_artist_snapshots.get(user_id)
+
+    def save_disliked_artist_snapshot(self, user_id: str, artists):
+        self.disliked_artist_snapshots[user_id] = tuple(artists)
 
     def load_liked_playlist_snapshot(self, user_id: str):
         return self.liked_playlist_snapshots.get(user_id)
@@ -563,6 +598,27 @@ class InMemoryLibraryCacheRepo:
         if current is None:
             return
         self.liked_tracks[user_id] = LikedTrackIds(
+            user_id=user_id,
+            revision=current.revision,
+            track_ids=current.track_ids - {track_id},
+        )
+
+    def mark_track_disliked(self, user_id: str, track_id: str):
+        current = self.disliked_tracks.get(
+            user_id,
+            DislikedTrackIds(user_id=user_id, revision=0, track_ids=frozenset()),
+        )
+        self.disliked_tracks[user_id] = DislikedTrackIds(
+            user_id=user_id,
+            revision=current.revision,
+            track_ids=current.track_ids | {track_id},
+        )
+
+    def mark_track_undisliked(self, user_id: str, track_id: str):
+        current = self.disliked_tracks.get(user_id)
+        if current is None:
+            return
+        self.disliked_tracks[user_id] = DislikedTrackIds(
             user_id=user_id,
             revision=current.revision,
             track_ids=current.track_ids - {track_id},
@@ -836,6 +892,71 @@ def test_playback_service_restores_saved_queue_without_autoplay() -> None:
     assert played.state.status is PlaybackStatus.PLAYING
     assert refreshed.state.status is PlaybackStatus.PLAYING
     assert refreshed.state.position_ms == 45_000
+
+
+def test_playback_service_restore_preserves_disliked_state_when_hydrating_waveform() -> None:
+    state_repo = InMemoryPlaybackStateRepo(
+        SavedPlaybackQueue(
+            queue=(
+                QueueItem(
+                    track=Track(
+                        id="151548059",
+                        title="Muted",
+                        artists=("Artist",),
+                        is_disliked=True,
+                    ),
+                ),
+            ),
+            active_index=0,
+        )
+    )
+    cache_repo = InMemoryLibraryCacheRepo()
+    cache_repo.save_track_metadata(
+        Track(
+            id="151548059",
+            title="Muted",
+            artists=("Artist",),
+            waveform_bins=(0.2, 0.6, 0.4),
+        )
+    )
+    service = PlaybackService(
+        playback_engine=FakePlaybackEngine(),
+        logger=TestLogger(),
+        music_service=FakeMusicService(stream_ref="resolved://one"),
+        library_cache_repo=cache_repo,
+        playback_state_repo=state_repo,
+    )
+
+    restored = service.restore_saved_queue()
+
+    assert restored.current_item is not None
+    assert restored.current_item.track.is_disliked is True
+    assert restored.current_item.track.waveform_bins == (0.2, 0.6, 0.4)
+
+
+def test_replace_queue_preserves_disliked_state_during_stream_prepare() -> None:
+    service = PlaybackService(
+        playback_engine=FakePlaybackEngine(),
+        logger=TestLogger(),
+        music_service=FakeMusicService(stream_ref="resolved://muted"),
+    )
+
+    snapshot = service.replace_queue(
+        (
+            Track(
+                id="151548059",
+                title="Muted",
+                artists=("Artist",),
+                is_disliked=True,
+            ),
+        ),
+        start_index=0,
+        source_type="track",
+        source_id="151548059",
+    )
+
+    assert snapshot.current_item is not None
+    assert snapshot.current_item.track.is_disliked is True
 
 
 def test_playback_service_applies_restore_seek_on_backend_ready_event() -> None:

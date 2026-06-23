@@ -2,44 +2,91 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from app.domain import LibraryCacheRepo, Track
+from app.domain import Artist, LibraryCacheRepo, Track
 from app.domain.errors import StorageError
 
 
-def merge_cached_liked_state(
+def merge_cached_track_preferences(
     track: Track,
     cache_repo: LibraryCacheRepo | None,
     *,
     user_id: str | None = None,
 ) -> Track:
-    if cache_repo is None or track.is_liked:
+    if cache_repo is None:
         return track
+
+    normalized_track_id = _normalize_track_id(track.id)
+    liked = track.is_liked
+    disliked = track.is_disliked
 
     try:
         if user_id is not None:
             liked_tracks = cache_repo.load_liked_track_ids(user_id)
             if liked_tracks is not None:
-                return replace(
-                    track,
-                    is_liked=_normalize_track_id(track.id) in liked_tracks.track_ids,
-                )
+                liked = normalized_track_id in liked_tracks.track_ids
+            disliked_tracks = cache_repo.load_disliked_track_ids(user_id)
+            if disliked_tracks is not None:
+                disliked = normalized_track_id in disliked_tracks.track_ids
 
         cached_track = cache_repo.load_track_metadata(track.id)
     except StorageError:
         return track
-    if cached_track is None or not cached_track.is_liked:
+
+    if cached_track is not None:
+        liked = liked or cached_track.is_liked
+        disliked = disliked or cached_track.is_disliked
+
+    if disliked:
+        liked = False
+    if liked == track.is_liked and disliked == track.is_disliked:
         return track
-    return replace(track, is_liked=True)
+    return replace(track, is_liked=liked, is_disliked=disliked)
 
 
-def merge_cached_liked_states(
+def merge_cached_track_preference_states(
     tracks: tuple[Track, ...],
     cache_repo: LibraryCacheRepo | None,
     *,
     user_id: str | None = None,
 ) -> tuple[Track, ...]:
     return tuple(
-        merge_cached_liked_state(track, cache_repo, user_id=user_id) for track in tracks
+        merge_cached_track_preferences(track, cache_repo, user_id=user_id) for track in tracks
+    )
+
+
+def merge_cached_artist_preferences(
+    artist: Artist,
+    cache_repo: LibraryCacheRepo | None,
+    *,
+    user_id: str | None = None,
+) -> Artist:
+    if cache_repo is None or user_id is None:
+        return artist
+
+    try:
+        liked_artists = cache_repo.load_liked_artist_snapshot(user_id) or ()
+        disliked_artists = cache_repo.load_disliked_artist_snapshot(user_id) or ()
+    except StorageError:
+        return artist
+
+    liked = artist.is_liked or any(item.id == artist.id for item in liked_artists)
+    disliked = artist.is_disliked or any(item.id == artist.id for item in disliked_artists)
+    if disliked:
+        liked = False
+    if liked == artist.is_liked and disliked == artist.is_disliked:
+        return artist
+    return replace(artist, is_liked=liked, is_disliked=disliked)
+
+
+def merge_cached_artist_preference_states(
+    artists: tuple[Artist, ...],
+    cache_repo: LibraryCacheRepo | None,
+    *,
+    user_id: str | None = None,
+) -> tuple[Artist, ...]:
+    return tuple(
+        merge_cached_artist_preferences(artist, cache_repo, user_id=user_id)
+        for artist in artists
     )
 
 

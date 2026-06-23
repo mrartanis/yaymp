@@ -100,6 +100,14 @@ def build_container(config: AppConfig, logger: logging.Logger) -> AppContainer:
         library_service.refresh_liked_track_index()
     except DomainError as exc:
         logger.warning("Failed to refresh liked track index: %s", exc)
+    try:
+        library_service.refresh_disliked_track_index()
+    except DomainError as exc:
+        logger.warning("Failed to refresh disliked track index: %s", exc)
+    try:
+        library_service.refresh_disliked_artist_snapshot()
+    except DomainError as exc:
+        logger.warning("Failed to refresh disliked artist snapshot: %s", exc)
 
     playback_engine = _build_playback_engine(logger)
     stream_proxy_service = StreamProxyService(

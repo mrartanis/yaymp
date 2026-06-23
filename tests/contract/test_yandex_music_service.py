@@ -214,18 +214,34 @@ class FakeYandexClient:
         )()
         self.artist_tracks = type("ArtistTracksStub", (), {"tracks": [self.track]})()
         self.likes = LikesStub([self.track])
+        self.dislikes = LikesStub([TrackStub(track_id="track-9", title="Muted Track")], revision=4)
         self.album_likes = [LikeStub(album=self.album)]
         self.artist_likes = [LikeStub(artist=ArtistResultStub())]
+        self.artist_dislikes = [
+            type(
+                "ArtistDislikeStub",
+                (),
+                {
+                    "id": "artist-9",
+                    "name": "Muted Artist",
+                    "cover_uri": "covers/disliked-artist.jpg",
+                },
+            )()
+        ]
         self.playlist_likes = [LikeStub(playlist=self.playlist)]
         self.download_infos = [DownloadInfoStub("https://stream.example/track-1")]
         self.account = type("Account", (), {"uid": 7, "login": "listener"})()
         self.me = type("Me", (), {"account": self.account})()
         self.liked_track_ids: list[str] = []
         self.unliked_track_ids: list[str] = []
+        self.disliked_track_ids: list[str] = []
+        self.undisliked_track_ids: list[str] = []
         self.liked_album_ids: list[str] = []
         self.unliked_album_ids: list[str] = []
         self.liked_artist_ids: list[str] = []
         self.unliked_artist_ids: list[str] = []
+        self.disliked_artist_ids: list[str] = []
+        self.undisliked_artist_ids: list[str] = []
         self.liked_playlist_ids: list[str] = []
         self.unliked_playlist_ids: list[str] = []
         self.playlist_requests: list[tuple[str, str | None]] = []
@@ -262,9 +278,9 @@ class FakeYandexClient:
             }
 
         def post(self, url: str, data=None, json=None, **kwargs):
-            del data, kwargs
+            del kwargs
             if url.endswith("/rotor/session/new"):
-                self._client.radio_session_new_calls.append(json or {})
+                self._client.radio_session_new_calls.append(json or data or {})
                 return {
                     "radioSessionId": "session-1",
                     "batchId": "batch-1",
@@ -274,8 +290,9 @@ class FakeYandexClient:
                     ],
                 }
             if url.endswith("/rotor/session/session-1/tracks"):
-                if isinstance(json, dict):
-                    queue = json.get("queue") or []
+                payload = json if isinstance(json, dict) else data
+                if isinstance(payload, dict):
+                    queue = payload.get("queue") or []
                     if queue:
                         self._client.radio_session_tracks_queue.append(str(queue[0]))
                 return {
@@ -285,12 +302,50 @@ class FakeYandexClient:
                     ],
                 }
             if url.endswith("/rotor/session/session-1/feedback"):
-                payload = {"type": "session-feedback", **(json or {})}
+                payload = {"type": "session-feedback", **((json or data) or {})}
                 self._client.station_feedback_calls.append(payload)
                 return {"status": "ok"}
-            if "/plays?client-now=" in url:
-                self._client.plays_calls.append({"url": url, "payload": json})
+            if "/dislikes/tracks/add-multiple" in url:
+                self._client.disliked_track_ids.append(str((data or {}).get("track-ids")))
+                return {"revision": 4}
+            if "/dislikes/tracks/remove" in url:
+                self._client.undisliked_track_ids.append(str((data or {}).get("track-ids")))
+                return {"revision": 5}
+            if "/dislikes/artists/add-multiple" in url:
+                self._client.disliked_artist_ids.append(str((data or {}).get("artist-ids")))
                 return "ok"
+            if "/dislikes/artists/remove" in url:
+                self._client.undisliked_artist_ids.append(str((data or {}).get("artist-ids")))
+                return "ok"
+            if "/plays?client-now=" in url:
+                self._client.plays_calls.append({"url": url, "payload": json if json is not None else data})
+                return "ok"
+            raise AssertionError(url)
+
+        def get(self, url: str, params=None, **kwargs):
+            del kwargs
+            if url.endswith("/dislikes/tracks"):
+                if (params or {}).get("if_modified_since_revision") == 4:
+                    return {"result": None}
+                return {
+                    "result": {
+                        "library": {
+                            "uid": 7,
+                            "revision": 4,
+                            "tracks": [{"id": "track-9", "albumId": "album-9"}],
+                        }
+                    }
+                }
+            if url.endswith("/dislikes/artists"):
+                return {
+                    "result": [
+                        {
+                            "id": "artist-9",
+                            "name": "Muted Artist",
+                            "cover": {"uri": "covers/disliked-artist.jpg"},
+                        }
+                    ]
+                }
             raise AssertionError(url)
 
     def tracks(self, track_ids):
@@ -319,11 +374,27 @@ class FakeYandexClient:
         del user_id
         return self.playlist_likes
 
+    def users_dislikes_tracks(self, user_id=None, if_modified_since_revision: int = 0):
+        del user_id
+        if if_modified_since_revision == self.dislikes.revision:
+            return None
+        return self.dislikes
+
+    def users_dislikes_artists(self, user_id=None):
+        del user_id
+        return self.artist_dislikes
+
     def users_likes_tracks_add(self, track_id: str):
         self.liked_track_ids.append(track_id)
 
     def users_likes_tracks_remove(self, track_id: str):
         self.unliked_track_ids.append(track_id)
+
+    def users_dislikes_tracks_add(self, track_id: str):
+        self.disliked_track_ids.append(track_id)
+
+    def users_dislikes_tracks_remove(self, track_id: str):
+        self.undisliked_track_ids.append(track_id)
 
     def users_likes_albums_add(self, album_id: str):
         self.liked_album_ids.append(album_id)
@@ -336,6 +407,12 @@ class FakeYandexClient:
 
     def users_likes_artists_remove(self, artist_id: str):
         self.unliked_artist_ids.append(artist_id)
+
+    def users_dislikes_artists_add(self, artist_id: str):
+        self.disliked_artist_ids.append(artist_id)
+
+    def users_dislikes_artists_remove(self, artist_id: str):
+        self.undisliked_artist_ids.append(artist_id)
 
     def users_likes_playlists_add(self, playlist_id: str):
         self.liked_playlist_ids.append(playlist_id)
@@ -481,8 +558,13 @@ def test_yandex_music_service_maps_track_and_playlist_data() -> None:
     unchanged_liked_track_ids = service.get_liked_track_ids(
         if_modified_since_revision=client.likes.revision
     )
+    disliked_track_ids = service.get_disliked_track_ids()
+    unchanged_disliked_track_ids = service.get_disliked_track_ids(
+        if_modified_since_revision=4
+    )
     liked_albums = service.get_liked_albums()
     liked_artists = service.get_liked_artists()
+    disliked_artists = service.get_disliked_artists()
     liked_playlists = service.get_liked_playlists()
     user_playlists = service.get_user_playlists()
     generated_playlists = service.get_generated_playlists()
@@ -533,8 +615,20 @@ def test_yandex_music_service_maps_track_and_playlist_data() -> None:
     assert liked_track_ids.revision == 3
     assert liked_track_ids.track_ids == frozenset({"track-1"})
     assert unchanged_liked_track_ids is None
+    assert disliked_track_ids is not None
+    assert disliked_track_ids.revision == 4
+    assert disliked_track_ids.track_ids == frozenset({"track-9"})
+    assert unchanged_disliked_track_ids is None
     assert [item.id for item in liked_albums] == ["album-1"]
     assert [item.id for item in liked_artists] == ["artist-1"]
+    assert disliked_artists == (
+        Artist(
+            id="artist-9",
+            name="Muted Artist",
+            artwork_ref="covers/disliked-artist.jpg",
+            is_disliked=True,
+        ),
+    )
     assert [item.id for item in liked_playlists] == ["playlist-1"]
     assert [item.id for item in user_playlists] == ["playlist-1"]
     assert [item.id for item in generated_playlists] == ["generated-1"]
@@ -853,6 +947,24 @@ def test_yandex_music_service_likes_and_unlikes_tracks() -> None:
 
     assert client.liked_track_ids == ["track-1"]
     assert client.unliked_track_ids == ["track-1"]
+
+
+def test_yandex_music_service_dislikes_and_undislikes_tracks_and_artists() -> None:
+    client = FakeYandexClient()
+    service = YandexMusicService(
+        session=AuthSession(user_id="user-1", token="token"),
+        client=client,
+    )
+
+    service.dislike_track("track-1")
+    service.undislike_track("track-1")
+    service.dislike_artist("artist-1")
+    service.undislike_artist("artist-1")
+
+    assert client.disliked_track_ids == ["track-1"]
+    assert client.undisliked_track_ids == ["track-1"]
+    assert client.disliked_artist_ids == ["artist-1"]
+    assert client.undisliked_artist_ids == ["artist-1"]
 
 
 def test_yandex_music_service_likes_and_unlikes_album_artist_and_playlist() -> None:

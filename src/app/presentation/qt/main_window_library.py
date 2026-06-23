@@ -23,9 +23,10 @@ class MainWindowLibraryMixin:
 
     def _render_track_liked(self, track: Track) -> None:
         self._track_like_overrides[track.id] = True
+        self._track_dislike_overrides[track.id] = False
         if self._current_track is not None and self._current_track.id == track.id:
             self._current_track = track
-            self._render_current_track_like_button(True)
+            self._render_current_track_preference_buttons(track)
         self._replace_content_track(track)
         self._update_queue_track_like(track)
         self._status_label.setText(
@@ -36,11 +37,34 @@ class MainWindowLibraryMixin:
         self._track_like_overrides[track.id] = False
         if self._current_track is not None and self._current_track.id == track.id:
             self._current_track = track
-            self._render_current_track_like_button(False)
+            self._render_current_track_preference_buttons(track)
         self._replace_content_track(track)
         self._update_queue_track_like(track)
         self._status_label.setText(
             self._t("status.track.unlike", title=display_track_title(track))
+        )
+
+    def _render_track_disliked(self, track: Track) -> None:
+        self._track_like_overrides[track.id] = False
+        self._track_dislike_overrides[track.id] = True
+        if self._current_track is not None and self._current_track.id == track.id:
+            self._current_track = track
+            self._render_current_track_preference_buttons(track)
+        self._replace_content_track(track)
+        self._update_queue_track_like(track)
+        self._status_label.setText(
+            self._t("status.track.dislike", title=display_track_title(track))
+        )
+
+    def _render_track_undisliked(self, track: Track) -> None:
+        self._track_dislike_overrides[track.id] = False
+        if self._current_track is not None and self._current_track.id == track.id:
+            self._current_track = track
+            self._render_current_track_preference_buttons(track)
+        self._replace_content_track(track)
+        self._update_queue_track_like(track)
+        self._status_label.setText(
+            self._t("status.track.undislike", title=display_track_title(track))
         )
 
     def _render_album_liked(self, album: Album) -> None:
@@ -58,6 +82,14 @@ class MainWindowLibraryMixin:
     def _render_artist_unliked(self, artist: Artist) -> None:
         self._replace_content_entity(artist)
         self._status_label.setText(self._t("status.artist.unlike", name=artist.name))
+
+    def _render_artist_disliked(self, artist: Artist) -> None:
+        self._replace_content_entity(artist)
+        self._status_label.setText(self._t("status.artist.dislike", name=artist.name))
+
+    def _render_artist_undisliked(self, artist: Artist) -> None:
+        self._replace_content_entity(artist)
+        self._status_label.setText(self._t("status.artist.undislike", name=artist.name))
 
     def _render_playlist_liked(self, playlist: Playlist) -> None:
         self._replace_content_entity(playlist)
@@ -243,6 +275,7 @@ class MainWindowLibraryMixin:
         if isinstance(payload, Artist):
             self._add_copy_share_link_action(menu, self._artist_share_link(payload))
             self._add_artist_like_action(menu, payload)
+            self._add_artist_dislike_action(menu, payload)
             self._add_artist_radio_action(menu, payload)
             return not menu.isEmpty()
         if isinstance(payload, Playlist):
@@ -268,6 +301,14 @@ class MainWindowLibraryMixin:
             lambda checked=False, selected_track=track: self._toggle_track_like(selected_track)
         )
         menu.addAction(toggle_like)
+        action_text = (
+            self._t("action.undislike") if track.is_disliked else self._t("action.dislike")
+        )
+        toggle_dislike = QAction(action_text, self)
+        toggle_dislike.triggered.connect(
+            lambda checked=False, selected_track=track: self._toggle_track_dislike(selected_track)
+        )
+        menu.addAction(toggle_dislike)
         if include_queue_actions:
             add_to_queue = QAction(self._t("action.add_to_queue"), self)
             add_to_queue.triggered.connect(
@@ -334,6 +375,12 @@ class MainWindowLibraryMixin:
             return
         self._library_controller.like_track(track)
 
+    def _toggle_track_dislike(self, track: Track) -> None:
+        if track.is_disliked:
+            self._library_controller.undislike_track(track)
+            return
+        self._library_controller.dislike_track(track)
+
     def _add_album_like_action(self, menu: QMenu, album: Album) -> None:
         action = QAction(
             self._t("action.unlike") if album.is_liked else self._t("action.like"),
@@ -351,6 +398,18 @@ class MainWindowLibraryMixin:
         )
         action.triggered.connect(
             lambda checked=False, selected_artist=artist: self._toggle_artist_like(selected_artist)
+        )
+        menu.addAction(action)
+
+    def _add_artist_dislike_action(self, menu: QMenu, artist: Artist) -> None:
+        action = QAction(
+            self._t("action.undislike") if artist.is_disliked else self._t("action.dislike"),
+            self,
+        )
+        action.triggered.connect(
+            lambda checked=False, selected_artist=artist: self._toggle_artist_dislike(
+                selected_artist
+            )
         )
         menu.addAction(action)
 
@@ -377,6 +436,12 @@ class MainWindowLibraryMixin:
             self._library_controller.unlike_artist(artist)
             return
         self._library_controller.like_artist(artist)
+
+    def _toggle_artist_dislike(self, artist: Artist) -> None:
+        if artist.is_disliked:
+            self._library_controller.undislike_artist(artist)
+            return
+        self._library_controller.dislike_artist(artist)
 
     def _toggle_playlist_like(self, playlist: Playlist) -> None:
         if playlist.is_liked:

@@ -143,6 +143,7 @@ class MainWindow(
         self._queue_selected_index: int | None = None
         self._queue_last_interaction_at = 0.0
         self._track_like_overrides: dict[str, bool] = {}
+        self._track_dislike_overrides: dict[str, bool] = {}
         self._track_label_base_sizes: dict[QLabel, int] = {}
         self._browser_view_mode = self._BROWSER_VIEW_MODE_CARDS
         self._updating_resize_cursor = False
@@ -259,13 +260,14 @@ class MainWindow(
         self._like_track_button.setIcon(create_icon("heart_outline.svg"))
         self._like_track_button.setToolTip(self._t("track.tooltip.like"))
         self._like_track_button.setFixedSize(34, 32)
-        for button in (
-            self._previous_button,
-            self._play_pause_button,
-            self._next_button,
-            self._like_track_button,
-        ):
-            layout.addWidget(button)
+        self._dislike_track_button = QPushButton()
+        self._dislike_track_button.setObjectName("like-current-button")
+        self._dislike_track_button.setIcon(create_icon("heart_slash_outline.svg"))
+        self._dislike_track_button.setToolTip(self._t("track.tooltip.dislike"))
+        self._dislike_track_button.setFixedSize(34, 32)
+        layout.addWidget(self._previous_button)
+        layout.addWidget(self._play_pause_button)
+        layout.addWidget(self._next_button)
         return layout
 
     def _build_body(self) -> QHBoxLayout:
@@ -408,10 +410,14 @@ class MainWindow(
         self._library_controller.content_failed.connect(self._render_library_error)
         self._library_controller.track_liked.connect(self._render_track_liked)
         self._library_controller.track_unliked.connect(self._render_track_unliked)
+        self._library_controller.track_disliked.connect(self._render_track_disliked)
+        self._library_controller.track_undisliked.connect(self._render_track_undisliked)
         self._library_controller.album_liked.connect(self._render_album_liked)
         self._library_controller.album_unliked.connect(self._render_album_unliked)
         self._library_controller.artist_liked.connect(self._render_artist_liked)
         self._library_controller.artist_unliked.connect(self._render_artist_unliked)
+        self._library_controller.artist_disliked.connect(self._render_artist_disliked)
+        self._library_controller.artist_undisliked.connect(self._render_artist_undisliked)
         self._library_controller.playlist_liked.connect(self._render_playlist_liked)
         self._library_controller.playlist_unliked.connect(self._render_playlist_unliked)
         self._sidebar_toggle_button.clicked.connect(self._toggle_sidebar)
@@ -463,6 +469,7 @@ class MainWindow(
         self._my_wave_top_button.clicked.connect(self._start_my_wave)
         self._settings_button.clicked.connect(self._show_settings_popup)
         self._like_track_button.clicked.connect(self._toggle_current_track_like)
+        self._dislike_track_button.clicked.connect(self._toggle_current_track_dislike)
         self._play_all_button.clicked.connect(self._play_current_source)
         self._append_all_button.clicked.connect(self._append_current_source)
         self._browser_tabs.currentChanged.connect(self._change_browser_tab)
@@ -512,6 +519,12 @@ class MainWindow(
             self._status_label.setText(self._t("status.prompt_select_track"))
             return
         self._toggle_track_like(self._current_track)
+
+    def _toggle_current_track_dislike(self) -> None:
+        if self._current_track is None:
+            self._status_label.setText(self._t("status.prompt_select_track"))
+            return
+        self._toggle_track_dislike(self._current_track)
 
     def _apply_volume(self, volume: int) -> None:
         self._controller.set_volume(volume)
@@ -579,7 +592,7 @@ class MainWindow(
         state = snapshot.state
 
         if current_item is not None:
-            current_track = self._track_with_like_override(current_item.track)
+            current_track = self._track_with_preference_override(current_item.track)
             self._current_track = current_track
             artists = ", ".join(current_track.artists)
             track_title = display_track_title(current_track)
@@ -600,7 +613,7 @@ class MainWindow(
             self._track_album_label.setToolTip(album_text)
             self._update_track_navigation_affordances(current_track)
             self._fit_track_text_labels()
-            self._render_current_track_like_button(current_track.is_liked)
+            self._render_current_track_preference_buttons(current_track)
             self._defer_artwork_render(current_track)
         else:
             self._current_track = None
@@ -611,7 +624,7 @@ class MainWindow(
             self._track_album_label.setText("")
             self._update_track_navigation_affordances(None)
             self._fit_track_text_labels()
-            self._render_current_track_like_button(False)
+            self._render_current_track_preference_buttons(None)
             self._pending_artwork_track = None
             self._artwork_render_timer.stop()
             self._clear_artwork()
@@ -677,11 +690,16 @@ class MainWindow(
         self._pending_system_media_snapshot = None
         self._system_media.update_snapshot(snapshot)
 
-    def _track_with_like_override(self, track: Track) -> Track:
+    def _track_with_preference_override(self, track: Track) -> Track:
         liked = self._track_like_overrides.get(track.id)
-        if liked is None or liked == track.is_liked:
+        disliked = self._track_dislike_overrides.get(track.id)
+        effective_liked = track.is_liked if liked is None else liked
+        effective_disliked = track.is_disliked if disliked is None else disliked
+        if effective_disliked:
+            effective_liked = False
+        if effective_liked == track.is_liked and effective_disliked == track.is_disliked:
             return track
-        return replace(track, is_liked=liked)
+        return replace(track, is_liked=effective_liked, is_disliked=effective_disliked)
 
     def _update_track_navigation_affordances(self, track: Track | None) -> None:
         can_open_artist = bool(track and track.artist_ids and track.artists)
@@ -721,6 +739,10 @@ class MainWindow(
         self._library_controller.open_album(album)
         return True
 
+    def _render_current_track_preference_buttons(self, track: Track | None) -> None:
+        self._render_current_track_like_button(bool(track and track.is_liked))
+        self._render_current_track_dislike_button(bool(track and track.is_disliked))
+
     def _render_current_track_like_button(self, is_liked: bool) -> None:
         self._like_track_button.setIcon(
             create_icon("heart.svg", color=self._accent_color)
@@ -730,6 +752,20 @@ class MainWindow(
         tooltip = self._t("track.tooltip.unlike") if is_liked else self._t("track.tooltip.like")
         self._like_track_button.setToolTip(tooltip)
         self._like_track_button.setAccessibleName(tooltip)
+
+    def _render_current_track_dislike_button(self, is_disliked: bool) -> None:
+        self._dislike_track_button.setIcon(
+            create_icon("heart_slash.svg", color=self._accent_color)
+            if is_disliked
+            else create_icon("heart_slash_outline.svg", color=self._theme_icon_color())
+        )
+        tooltip = (
+            self._t("track.tooltip.undislike")
+            if is_disliked
+            else self._t("track.tooltip.dislike")
+        )
+        self._dislike_track_button.setToolTip(tooltip)
+        self._dislike_track_button.setAccessibleName(tooltip)
 
     def _render_play_pause_button(self, status: PlaybackStatus) -> None:
         self._play_pause_button.setProperty("playback_status", status.value)
