@@ -228,6 +228,26 @@ class LibraryService:
         self._logger.info("Loaded %s disliked artists", len(artists))
         return artists
 
+    def refresh_liked_artist_snapshot(self) -> None:
+        user_id = self._current_user_id()
+        if user_id is None:
+            return
+        artists = merge_cached_artist_preference_states(
+            tuple(self._music_service.get_liked_artists(limit=10_000)),
+            self._library_cache_repo,
+            user_id=user_id,
+        )
+        try:
+            self._library_cache_repo.save_liked_artist_snapshot(user_id, artists)
+        except StorageError as exc:
+            self._logger.warning(
+                "Liked artist snapshot cache save failed for %s: %s",
+                user_id,
+                exc,
+            )
+            return
+        self._logger.info("Refreshed liked artist snapshot: %s artists", len(artists))
+
     def refresh_disliked_artist_snapshot(self) -> None:
         user_id = self._current_user_id()
         if user_id is None:

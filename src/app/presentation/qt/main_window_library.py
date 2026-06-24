@@ -9,7 +9,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QPoint, QStandardPaths, Qt
 from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QApplication, QFileDialog, QMenu
+from PySide6.QtWidgets import QApplication, QFileDialog, QListView, QMenu
 
 from app.domain import Album, Artist, Playlist, Station, Track
 from app.domain.playback import QueueItem
@@ -186,6 +186,9 @@ class MainWindowLibraryMixin:
                     source_index=browser_item.source_index,
                 ),
             )
+            updated_browser_item = item.data(Qt.ItemDataRole.UserRole)
+            if isinstance(updated_browser_item, BrowserItem):
+                self._refresh_content_item_widget(item, updated_browser_item)
             break
 
     def _update_queue_track_like(self, track: Track) -> None:
@@ -224,7 +227,29 @@ class MainWindowLibraryMixin:
                     source_index=browser_item.source_index,
                 ),
             )
+            updated_browser_item = item.data(Qt.ItemDataRole.UserRole)
+            if isinstance(updated_browser_item, BrowserItem):
+                self._refresh_content_item_widget(item, updated_browser_item)
             break
+
+    def _refresh_content_item_widget(self, item, browser_item: BrowserItem) -> None:
+        if not self._browser_item_uses_art(browser_item):
+            return
+        use_art_cards = (
+            self._content_list.viewMode() == QListView.ViewMode.IconMode
+            and browser_item.kind in {"album", "artist"}
+        )
+        widget = (
+            self._browser_album_card_widget(browser_item)
+            if use_art_cards
+            else self._browser_art_row_widget(browser_item)
+        )
+        if use_art_cards:
+            item.setSizeHint(self._content_list.gridSize())
+        else:
+            item.setSizeHint(widget.sizeHint())
+        self._content_list.removeItemWidget(item)
+        self._content_list.setItemWidget(item, widget)
 
     def _show_content_context_menu(self, position: QPoint) -> None:
         item = self._content_list.itemAt(position)

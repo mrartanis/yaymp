@@ -8,10 +8,10 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 
-_FILL_DOUBLE_QUOTED_RE = re.compile(r'fill="(?!none)([^"]*)"')
-_FILL_SINGLE_QUOTED_RE = re.compile(r"fill='(?!none)([^']*)'")
-_STROKE_DOUBLE_QUOTED_RE = re.compile(r'stroke="(?!none)([^"]*)"')
-_STROKE_SINGLE_QUOTED_RE = re.compile(r"stroke='(?!none)([^']*)'")
+_FILL_DOUBLE_QUOTED_RE = re.compile(r'(?<!data-fixed-)fill="(?!none)([^"]*)"')
+_FILL_SINGLE_QUOTED_RE = re.compile(r"(?<!data-fixed-)fill='(?!none)([^']*)'")
+_STROKE_DOUBLE_QUOTED_RE = re.compile(r'(?<!data-fixed-)stroke="(?!none)([^"]*)"')
+_STROKE_SINGLE_QUOTED_RE = re.compile(r"(?<!data-fixed-)stroke='(?!none)([^']*)'")
 _PATH_WITHOUT_FILL_RE = re.compile(r'(<path\b(?![^>]*\bfill=)[^>]*?)(\s*/?>)')
 _FIXED_FILL_DOUBLE_QUOTED_RE = re.compile(r'data-fixed-fill="([^"]*)"')
 _FIXED_FILL_SINGLE_QUOTED_RE = re.compile(r"data-fixed-fill='([^']*)'")

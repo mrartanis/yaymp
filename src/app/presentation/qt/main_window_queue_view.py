@@ -4,8 +4,14 @@ from PySide6.QtCore import QAbstractListModel, QModelIndex, QRect, QSize, Qt, QT
 from PySide6.QtGui import QColor, QDragEnterEvent, QDropEvent, QFont, QPainter, QPaintEvent
 from PySide6.QtWidgets import QListView, QStyledItemDelegate, QStyleOptionViewItem, QWidget
 
+from app.domain import Track
 from app.domain.playback import PlaybackStatus, QueueItem
+from app.presentation.qt.icon_utils import create_icon
 from app.presentation.qt.main_window_styles import _palette_for_theme
+from app.presentation.qt.preference_markers import (
+    preference_marker_icon_name,
+    preference_marker_kind,
+)
 
 
 class QueueListModel(QAbstractListModel):
@@ -294,6 +300,8 @@ class QueueRowDelegate(QStyledItemDelegate):
     _DURATION_WIDTH = 58
     _INDICATOR_WIDTH = 18
     _INDICATOR_GAP = 8
+    _PREFERENCE_ICON_SIZE = 16
+    _PREFERENCE_ICON_GAP = 8
 
     def __init__(
         self,
@@ -419,9 +427,13 @@ class QueueRowDelegate(QStyledItemDelegate):
             self._DURATION_WIDTH,
             content_rect.height(),
         )
+        marker_kind = preference_marker_kind(queue_item.track)
+        preference_width = (
+            self._PREFERENCE_ICON_SIZE + self._PREFERENCE_ICON_GAP if marker_kind else 0
+        )
         indicator_width = self._INDICATOR_WIDTH + self._INDICATOR_GAP if is_active else 0
         text_left = thumb_rect.right() + 1 + self._TEXT_GAP
-        text_right = duration_rect.left() - indicator_width - self._TEXT_GAP
+        text_right = duration_rect.left() - preference_width - indicator_width - self._TEXT_GAP
         text_rect = QRect(
             text_left,
             content_rect.top(),
@@ -509,6 +521,25 @@ class QueueRowDelegate(QStyledItemDelegate):
             self._format_ms(queue_item.track.duration_ms),
         )
 
+        preference_rect: QRect | None = None
+        if marker_kind is not None:
+            preference_left = duration_rect.left() - self._PREFERENCE_ICON_GAP - self._PREFERENCE_ICON_SIZE
+            if is_active:
+                preference_left -= indicator_width
+            preference_rect = QRect(
+                preference_left,
+                content_rect.center().y() - self._PREFERENCE_ICON_SIZE // 2,
+                self._PREFERENCE_ICON_SIZE,
+                self._PREFERENCE_ICON_SIZE,
+            )
+            self._paint_preference_marker(
+                painter,
+                preference_rect,
+                queue_item.track,
+                accent=accent,
+                muted=QColor(palette.text_muted),
+            )
+
         if is_active:
             indicator_rect = QRect(
                 duration_rect.left() - self._INDICATOR_GAP - self._INDICATOR_WIDTH,
@@ -540,6 +571,29 @@ class QueueRowDelegate(QStyledItemDelegate):
             y = baseline - height
             painter.drawRect(x, y, bar_width, height)
         painter.restore()
+
+    def _paint_preference_marker(
+        self,
+        painter: QPainter,
+        rect: QRect,
+        track: Track,
+        *,
+        accent: QColor,
+        muted: QColor,
+    ) -> None:
+        marker_kind = preference_marker_kind(track)
+        if marker_kind is None:
+            return
+        icon_name = preference_marker_icon_name(
+            marker_kind,
+            theme_mode=self._theme_provider(),
+        )
+        color = accent.name() if marker_kind == "liked" else muted.name()
+        pixmap = create_icon(icon_name, color=color, size=self._PREFERENCE_ICON_SIZE).pixmap(
+            self._PREFERENCE_ICON_SIZE,
+            self._PREFERENCE_ICON_SIZE,
+        )
+        painter.drawPixmap(rect, pixmap)
 
     def _normalize_playback_status(self, value: object) -> PlaybackStatus:
         if isinstance(value, PlaybackStatus):

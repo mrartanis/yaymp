@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 
 from app.application.auth_service import AuthService
@@ -96,18 +97,7 @@ def build_container(config: AppConfig, logger: logging.Logger) -> AppContainer:
         library_cache_repo=library_cache_repo,
         logger=logger,
     )
-    try:
-        library_service.refresh_liked_track_index()
-    except DomainError as exc:
-        logger.warning("Failed to refresh liked track index: %s", exc)
-    try:
-        library_service.refresh_disliked_track_index()
-    except DomainError as exc:
-        logger.warning("Failed to refresh disliked track index: %s", exc)
-    try:
-        library_service.refresh_disliked_artist_snapshot()
-    except DomainError as exc:
-        logger.warning("Failed to refresh disliked artist snapshot: %s", exc)
+    _refresh_library_cache_snapshots(library_service=library_service, logger=logger)
 
     playback_engine = _build_playback_engine(logger)
     stream_proxy_service = StreamProxyService(
@@ -143,6 +133,33 @@ def build_container(config: AppConfig, logger: logging.Logger) -> AppContainer:
             demo_tracks=demo_tracks,
         ),
     )
+
+
+def _refresh_library_cache_snapshots(
+    *,
+    library_service: LibraryService,
+    logger: logging.Logger,
+) -> None:
+    refresh_jobs = (
+        ("liked track index", library_service.refresh_liked_track_index),
+        ("disliked track index", library_service.refresh_disliked_track_index),
+        ("liked artist snapshot", library_service.refresh_liked_artist_snapshot),
+        ("disliked artist snapshot", library_service.refresh_disliked_artist_snapshot),
+    )
+    with ThreadPoolExecutor(
+        max_workers=len(refresh_jobs),
+        thread_name_prefix="yaymp-bootstrap",
+    ) as executor:
+        futures = {
+            executor.submit(operation): label
+            for label, operation in refresh_jobs
+        }
+        for future in as_completed(futures):
+            label = futures[future]
+            try:
+                future.result()
+            except DomainError as exc:
+                logger.warning("Failed to refresh %s: %s", label, exc)
 
 
 def _build_settings_repo(config: AppConfig, logger: logging.Logger) -> SettingsRepo:

@@ -27,6 +27,10 @@ from PySide6.QtWidgets import (
 from app.domain import Album, Artist, Playlist, Station, Track
 from app.presentation.qt.icon_utils import create_icon
 from app.presentation.qt.library_controller import BrowserContent, BrowserItem, BrowserTab
+from app.presentation.qt.preference_markers import (
+    preference_marker_icon_name,
+    preference_marker_kind,
+)
 
 
 class _CenteredGridListWidget(QListWidget):
@@ -412,7 +416,9 @@ class MainWindowBrowserMixin:
                 widget_item.setText("")
             self._content_list.addItem(widget_item)
             if browser_item.kind != "section" and self._browser_item_uses_art(browser_item):
-                self._content_list.setItemWidget(widget_item, widget)
+                added_item = self._content_list.item(self._content_list.count() - 1)
+                if added_item is not None:
+                    self._content_list.setItemWidget(added_item, widget)
         self._content_list.blockSignals(False)
         can_play_source = bool(
             content.source_type
@@ -495,6 +501,7 @@ class MainWindowBrowserMixin:
 
     def _browser_item_uses_art(self, item: BrowserItem) -> bool:
         return item.kind in {
+            "track",
             "album",
             "artist",
         }
@@ -639,6 +646,9 @@ class MainWindowBrowserMixin:
         text_layout.addWidget(title)
         text_layout.addWidget(subtitle)
         layout.addWidget(text_container, 1)
+        marker = self._preference_marker_label(item.payload, size=16, object_name="browser-preference-marker")
+        if marker is not None:
+            layout.addWidget(marker, 0, Qt.AlignmentFlag.AlignVCenter)
         return row
 
     def _browser_album_card_widget(self, item: BrowserItem) -> QWidget:
@@ -649,8 +659,7 @@ class MainWindowBrowserMixin:
         layout.setContentsMargins(0, 8, 0, 14)
         layout.setSpacing(8)
         artwork_ref = getattr(item.payload, "artwork_ref", None)
-        art = self._album_card_art_label(artwork_ref, size=self._ALBUM_CARD_ART_SIZE)
-        art.setObjectName("browser-album-card-art")
+        art = self._album_card_art_widget(item, artwork_ref, size=self._ALBUM_CARD_ART_SIZE)
         title = _ElidedWrapLabel(item.title, max_lines=2)
         title.setObjectName("browser-album-card-title")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -666,8 +675,37 @@ class MainWindowBrowserMixin:
         layout.addWidget(subtitle)
         return card
 
-    def _album_card_art_label(self, artwork_ref: str | None, *, size: int) -> QLabel:
-        label = QLabel()
+    def _album_card_art_widget(
+        self,
+        item: BrowserItem,
+        artwork_ref: str | None,
+        *,
+        size: int,
+    ) -> QWidget:
+        container = QWidget()
+        container.setFixedSize(size, size)
+        art = self._album_card_art_label(artwork_ref, size=size, parent=container)
+        art.setObjectName("browser-album-card-art")
+        art.move(0, 0)
+        marker = self._preference_marker_label(
+            item.payload,
+            size=18,
+            object_name="browser-preference-badge",
+            parent=container,
+        )
+        if marker is not None:
+            marker.move(size - marker.width() - 4, 4)
+            marker.raise_()
+        return container
+
+    def _album_card_art_label(
+        self,
+        artwork_ref: str | None,
+        *,
+        size: int,
+        parent: QWidget | None = None,
+    ) -> QLabel:
+        label = QLabel(parent)
         label.setObjectName("browser-album-card-art")
         label.setFixedSize(size, size)
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -690,6 +728,29 @@ class MainWindowBrowserMixin:
             return label
         label.setText("")
         label.setPixmap(pixmap)
+        return label
+
+    def _preference_marker_label(
+        self,
+        payload: object,
+        *,
+        size: int,
+        object_name: str,
+        parent: QWidget | None = None,
+    ) -> QLabel | None:
+        marker_kind = preference_marker_kind(payload)
+        if marker_kind is None:
+            return None
+        icon_name = preference_marker_icon_name(
+            marker_kind,
+            theme_mode=self._resolved_theme_mode(),
+        )
+        color = self._accent_color if marker_kind == "liked" else self._theme_muted_icon_color()
+        label = QLabel(parent)
+        label.setObjectName(object_name)
+        label.setFixedSize(size, size)
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label.setPixmap(create_icon(icon_name, color=color, size=size).pixmap(size, size))
         return label
 
     def _art_thumb_label(self, artwork_ref: str | None, *, size: int) -> QLabel:

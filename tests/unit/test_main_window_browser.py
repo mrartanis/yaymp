@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QLabel, QListView, QVBoxLayout, QWidget
 
-from app.domain import Album, Artist
+from app.domain import Album, Artist, Track
 from app.presentation.qt.library_controller import BrowserContent, BrowserItem
 from app.presentation.qt.main_window_browser import (
     MainWindowBrowserMixin,
@@ -34,6 +34,7 @@ class _BrowserHarness(MainWindowBrowserMixin, QWidget):
         self._browser_auto_open_enabled = False
         self._browser_view_mode = self._BROWSER_VIEW_MODE_CARDS
         self._current_browser_content = None
+        self._accent_color = "#526ee8"
         self._loading_more_content = False
         self._updating_browser_tabs = False
         self._browser_tab_ids = ()
@@ -73,6 +74,9 @@ class _BrowserHarness(MainWindowBrowserMixin, QWidget):
 
     def _t(self, key: str, **params: object) -> str:
         return key.format(**params) if params else key
+
+    def _theme_muted_icon_color(self) -> str:
+        return "#8f98b5"
 
 
 def test_render_content_uses_card_grid_for_album_lists(qtbot) -> None:
@@ -190,6 +194,55 @@ def test_non_card_content_uses_item_scroll_mode(qtbot) -> None:
     assert window._content_list.verticalScrollMode() == QListView.ScrollMode.ScrollPerItem
     assert window._content_list.width() == window._content_list_host.width()
     assert window._browser_view_mode_widget.isHidden()
+
+
+def test_track_rows_render_preference_marker_in_list_mode(qtbot) -> None:
+    window = _BrowserHarness()
+    window._browser_view_mode = window._BROWSER_VIEW_MODE_LIST
+    qtbot.addWidget(window)
+    content = BrowserContent(
+        title="Tracks",
+        items=(
+            BrowserItem(
+                kind="track",
+                title="Track 1",
+                subtitle="Artist",
+                payload=Track(id="1", title="Track 1", artists=("Artist",), is_disliked=True),
+            ),
+        ),
+    )
+
+    window._render_content(content)
+
+    row = window._content_list.itemWidget(window._content_list.item(0))
+    assert row is not None
+    marker = row.findChild(QLabel, "browser-preference-marker")
+    assert marker is not None
+    assert marker.pixmap() is not None
+
+
+def test_artist_cards_render_preference_badge(qtbot) -> None:
+    window = _BrowserHarness()
+    qtbot.addWidget(window)
+    content = BrowserContent(
+        title="Artists",
+        items=(
+            BrowserItem(
+                kind="artist",
+                title="Artist",
+                subtitle="library.artist",
+                payload=Artist(id="1", name="Artist", is_liked=True),
+            ),
+        ),
+    )
+
+    window._render_content(content)
+
+    card = window._content_list.itemWidget(window._content_list.item(0))
+    assert card is not None
+    badge = card.findChild(QLabel, "browser-preference-badge")
+    assert badge is not None
+    assert badge.pixmap() is not None
 
 
 def test_browser_view_mode_toggle_switches_supported_pages(qtbot) -> None:

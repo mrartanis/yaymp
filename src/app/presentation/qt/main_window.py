@@ -41,6 +41,7 @@ from app.presentation.qt.main_window_queue_view import (
     QueueListView,
     QueueRowDelegate,
 )
+from app.presentation.qt.preference_markers import preference_marker_icon_name
 from app.presentation.qt.main_window_windowing import MainWindowWindowingMixin
 from app.presentation.qt.playback_controller import PlaybackController
 from app.presentation.qt.system_media import build_system_media_integration
@@ -745,7 +746,10 @@ class MainWindow(
 
     def _render_current_track_like_button(self, is_liked: bool) -> None:
         self._like_track_button.setIcon(
-            create_icon("heart.svg", color=self._accent_color)
+            create_icon(
+                preference_marker_icon_name("liked", theme_mode=self._resolved_theme_mode()),
+                color=self._accent_color,
+            )
             if is_liked
             else create_icon("heart_outline.svg", color=self._theme_icon_color())
         )
