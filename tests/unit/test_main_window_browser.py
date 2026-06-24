@@ -78,6 +78,9 @@ class _BrowserHarness(MainWindowBrowserMixin, QWidget):
     def _theme_muted_icon_color(self) -> str:
         return "#8f98b5"
 
+    def _resolved_theme_mode(self) -> str:
+        return "dark"
+
 
 def test_render_content_uses_card_grid_for_album_lists(qtbot) -> None:
     window = _BrowserHarness()
@@ -296,7 +299,13 @@ def test_search_input_filters_current_list_content_locally(qtbot) -> None:
 
     assert window._content_list.viewMode() == QListView.ViewMode.ListMode
     assert window._content_list.count() == 1
-    assert window._content_list.item(0).text() == "Beta\nTwo"
+    row = window._content_list.itemWidget(window._content_list.item(0))
+    assert row is not None
+    labels = [
+        row.findChild(QLabel, "browser-art-title"),
+        row.findChild(QLabel, "browser-art-subtitle"),
+    ]
+    assert [label.text() for label in labels] == ["Beta", "Two"]
 
 
 def test_search_input_filters_current_card_content_locally(qtbot) -> None:

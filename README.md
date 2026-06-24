@@ -106,6 +106,14 @@ python -m pip install -e '.[dev]'
 ./scripts/run_tests.sh
 ```
 
+Локальный `pre-commit` hook для `ruff`:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+После этого перед каждым коммитом будет запускаться `./scripts/run_lint.sh`.
+
 Сборка:
 
 ```bash

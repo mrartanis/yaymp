@@ -1598,9 +1598,9 @@ def test_station_queue_persistence_is_bounded_around_active_item() -> None:
     )
 
     assert state_repo.saved_queue is not None
-    assert len(state_repo.saved_queue.queue) == 50
-    assert state_repo.saved_queue.active_index == 40
-    assert state_repo.saved_queue.queue[40].track.id == "w70"
+    assert len(state_repo.saved_queue.queue) == 80
+    assert state_repo.saved_queue.active_index == 70
+    assert state_repo.saved_queue.queue[70].track.id == "w70"
 
 
 def test_next_rolls_back_active_index_when_backend_load_fails() -> None:
