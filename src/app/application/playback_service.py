@@ -80,8 +80,7 @@ class PlaybackService:
     _STATION_QUEUE_REFILL_MAX_ATTEMPTS = 3
     _STREAM_PREFETCH_AHEAD = 2
     _STATION_QUEUE_RETAIN_BEFORE_ACTIVE = 10
-    _STATION_QUEUE_MAX_LENGTH = 1000
-    _STATION_QUEUE_PERSIST_LENGTH = 50
+    _STATION_QUEUE_WINDOW_LENGTH = 1000
     _POSITION_PERSIST_INTERVAL_SECONDS = 5.0
     _WAVEFORM_SUPPORTED = sys.platform != "win32"
 
@@ -1043,11 +1042,11 @@ class PlaybackService:
         current_item = self.current_item()
         if current_item is None or current_item.source_type != "station":
             return
-        if self._active_index is None or len(self._queue) <= self._STATION_QUEUE_MAX_LENGTH:
+        if self._active_index is None or len(self._queue) <= self._STATION_QUEUE_WINDOW_LENGTH:
             return
 
         drop_count = max(
-            len(self._queue) - self._STATION_QUEUE_MAX_LENGTH,
+            len(self._queue) - self._STATION_QUEUE_WINDOW_LENGTH,
             self._active_index - self._STATION_QUEUE_RETAIN_BEFORE_ACTIVE,
         )
         drop_count = max(0, min(drop_count, self._active_index))
@@ -1117,9 +1116,9 @@ class PlaybackService:
             return tuple(self._queue), self._active_index if self._queue else None
 
         start_index = max(0, self._active_index - self._STATION_QUEUE_RETAIN_BEFORE_ACTIVE)
-        end_index = min(len(self._queue), start_index + self._STATION_QUEUE_PERSIST_LENGTH)
-        if end_index - start_index < self._STATION_QUEUE_PERSIST_LENGTH:
-            start_index = max(0, end_index - self._STATION_QUEUE_PERSIST_LENGTH)
+        end_index = min(len(self._queue), start_index + self._STATION_QUEUE_WINDOW_LENGTH)
+        if end_index - start_index < self._STATION_QUEUE_WINDOW_LENGTH:
+            start_index = max(0, end_index - self._STATION_QUEUE_WINDOW_LENGTH)
         return tuple(self._queue[start_index:end_index]), self._active_index - start_index
 
     def _current_position_ms(self) -> int:
