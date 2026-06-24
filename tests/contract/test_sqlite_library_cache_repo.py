@@ -90,7 +90,9 @@ def test_sqlite_library_cache_repo_round_trips_liked_track_snapshot(tmp_path) ->
     assert repo.load_liked_track_snapshot("user-1") == snapshot
 
 
-def test_sqlite_library_cache_repo_round_trips_disliked_track_ids_and_artist_snapshot(tmp_path) -> None:
+def test_sqlite_library_cache_repo_round_trips_disliked_track_ids_and_artist_snapshot(
+    tmp_path,
+) -> None:
     repo = SQLiteLibraryCacheRepo(db_path=tmp_path / "library.sqlite3")
     disliked_tracks = DislikedTrackIds(
         user_id="user-1",

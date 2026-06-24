@@ -318,7 +318,9 @@ class FakeYandexClient:
                 self._client.undisliked_artist_ids.append(str((data or {}).get("artist-ids")))
                 return "ok"
             if "/plays?client-now=" in url:
-                self._client.plays_calls.append({"url": url, "payload": json if json is not None else data})
+                self._client.plays_calls.append(
+                    {"url": url, "payload": json if json is not None else data}
+                )
                 return "ok"
             raise AssertionError(url)
 

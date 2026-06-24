@@ -5,7 +5,10 @@ from app.presentation.qt.preference_markers import preference_marker_kind
 
 
 def test_preference_marker_kind_for_track() -> None:
-    assert preference_marker_kind(Track(id="1", title="T", artists=("A",), is_liked=True)) == "liked"
+    assert (
+        preference_marker_kind(Track(id="1", title="T", artists=("A",), is_liked=True))
+        == "liked"
+    )
     assert (
         preference_marker_kind(
             Track(id="1", title="T", artists=("A",), is_liked=True, is_disliked=True)

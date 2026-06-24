@@ -7,10 +7,20 @@ from typing import Any, Protocol, runtime_checkable
 from app.domain.audio_quality import AudioQuality
 from app.domain.auth import AuthSession
 from app.domain.catalog import Album, Artist, CatalogSearchResults
-from app.domain.playback import PlaybackState, PlayEventReport, QueueItem, SavedPlaybackQueue
+from app.domain.playback import (
+    PlaybackState,
+    PlayEventReport,
+    QueueItem,
+    SavedPlaybackQueue,
+)
 from app.domain.playlist import Playlist
-from app.domain.station import RadioFeedbackType, RadioSession, Station, StationTrackBatch
-from app.domain.track import DislikedTrackIds, LikedTrackSnapshot, LikedTrackIds, Track
+from app.domain.station import (
+    RadioFeedbackType,
+    RadioSession,
+    Station,
+    StationTrackBatch,
+)
+from app.domain.track import DislikedTrackIds, LikedTrackIds, LikedTrackSnapshot, Track
 
 
 @runtime_checkable

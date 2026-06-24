@@ -487,7 +487,10 @@ class LibraryService:
         self._music_service.like_artist(artist.id)
         liked_artist = replace(artist, is_liked=True, is_disliked=False)
         self._cache_artist_preference(liked_artist, snapshot_key="liked")
-        self._cache_artist_preference(replace(liked_artist, is_liked=False), snapshot_key="undisliked")
+        self._cache_artist_preference(
+            replace(liked_artist, is_liked=False),
+            snapshot_key="undisliked",
+        )
         self._logger.info("Liked artist %s", artist.id)
         return liked_artist
 
@@ -502,7 +505,10 @@ class LibraryService:
         self._music_service.dislike_artist(artist.id)
         disliked_artist = replace(artist, is_liked=False, is_disliked=True)
         self._cache_artist_preference(disliked_artist, snapshot_key="disliked")
-        self._cache_artist_preference(replace(disliked_artist, is_disliked=False), snapshot_key="unliked")
+        self._cache_artist_preference(
+            replace(disliked_artist, is_disliked=False),
+            snapshot_key="unliked",
+        )
         self._logger.info("Disliked artist %s", artist.id)
         return disliked_artist
 

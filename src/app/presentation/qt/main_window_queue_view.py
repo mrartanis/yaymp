@@ -523,7 +523,11 @@ class QueueRowDelegate(QStyledItemDelegate):
 
         preference_rect: QRect | None = None
         if marker_kind is not None:
-            preference_left = duration_rect.left() - self._PREFERENCE_ICON_GAP - self._PREFERENCE_ICON_SIZE
+            preference_left = (
+                duration_rect.left()
+                - self._PREFERENCE_ICON_GAP
+                - self._PREFERENCE_ICON_SIZE
+            )
             if is_active:
                 preference_left -= indicator_width
             preference_rect = QRect(

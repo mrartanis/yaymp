@@ -11,7 +11,10 @@ from threading import Lock
 from time import monotonic
 from uuid import uuid4
 
-from app.application.track_metadata import merge_cached_track_preferences, merge_cached_track_preference_states
+from app.application.track_metadata import (
+    merge_cached_track_preference_states,
+    merge_cached_track_preferences,
+)
 from app.domain import (
     LibraryCacheRepo,
     Logger,

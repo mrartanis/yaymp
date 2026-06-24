@@ -90,7 +90,9 @@ def test_file_library_cache_repo_round_trips_liked_track_snapshot(tmp_path) -> N
     assert repo.load_liked_track_snapshot("user-1") == snapshot
 
 
-def test_file_library_cache_repo_round_trips_disliked_track_ids_and_artist_snapshot(tmp_path) -> None:
+def test_file_library_cache_repo_round_trips_disliked_track_ids_and_artist_snapshot(
+    tmp_path,
+) -> None:
     repo = FileLibraryCacheRepo(file_path=tmp_path / "library.json")
     disliked_tracks = DislikedTrackIds(
         user_id="user-1",

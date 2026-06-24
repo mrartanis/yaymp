@@ -646,7 +646,11 @@ class MainWindowBrowserMixin:
         text_layout.addWidget(title)
         text_layout.addWidget(subtitle)
         layout.addWidget(text_container, 1)
-        marker = self._preference_marker_label(item.payload, size=16, object_name="browser-preference-marker")
+        marker = self._preference_marker_label(
+            item.payload,
+            size=16,
+            object_name="browser-preference-marker",
+        )
         if marker is not None:
             layout.addWidget(marker, 0, Qt.AlignmentFlag.AlignVCenter)
         return row

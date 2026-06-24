@@ -41,9 +41,9 @@ from app.presentation.qt.main_window_queue_view import (
     QueueListView,
     QueueRowDelegate,
 )
-from app.presentation.qt.preference_markers import preference_marker_icon_name
 from app.presentation.qt.main_window_windowing import MainWindowWindowingMixin
 from app.presentation.qt.playback_controller import PlaybackController
+from app.presentation.qt.preference_markers import preference_marker_icon_name
 from app.presentation.qt.system_media import build_system_media_integration
 from app.presentation.qt.track_display import display_track_title
 
