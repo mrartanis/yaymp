@@ -374,6 +374,10 @@ class MainWindowBrowserMixin:
         self._loading_more_content = False
         if content.search_query is not None:
             self._search_input.setText(content.search_query)
+        elif self._search_input.text():
+            self._search_input.blockSignals(True)
+            self._search_input.clear()
+            self._search_input.blockSignals(False)
         self._apply_filtered_browser_content(content)
 
     def _apply_filtered_browser_content(self, content: BrowserContent) -> None:

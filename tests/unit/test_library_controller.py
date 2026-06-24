@@ -35,6 +35,7 @@ class StubLibraryService:
             Track(id="liked-1", title="Liked 1", artists=()),
             Track(id="liked-2", title="Liked 2", artists=()),
         )
+        self.liked_artists = (Artist(id="artist-1", name="Artist 1"),)
         self.full_playlist_tracks = (Track(id="playlist-1", title="Playlist 1", artists=()),)
         self.full_album_tracks = (Track(id="album-1", title="Album 1", artists=()),)
         self.full_artist_tracks = (Track(id="artist-1", title="Artist 1", artists=()),)
@@ -44,6 +45,9 @@ class StubLibraryService:
 
     def load_all_liked_tracks(self) -> tuple[Track, ...]:
         return self.all_liked_tracks
+
+    def load_liked_artists(self) -> tuple[Artist, ...]:
+        return self.liked_artists
 
     def load_all_playlist_tracks(
         self,
@@ -202,3 +206,31 @@ def test_album_subtitle_orders_year_before_artists_and_track_count() -> None:
         controller.shutdown()
 
     assert subtitle == "1999 | Artist One, Artist Two | library.track_count"
+
+
+def test_refresh_active_list_reloads_liked_artists_without_history_push() -> None:
+    library_service = StubLibraryService()
+    controller = LibraryController(
+        search_service=StubSearchService(),
+        library_service=library_service,
+        logger=StubLogger(),
+        translate=_translate,
+    )
+    rendered: list[object] = []
+    controller.content_changed.connect(rendered.append)
+    controller._active_page = ("list", None)
+    controller._active_list_kind = "liked_artists"
+    library_service.liked_artists = (
+        Artist(id="artist-1", name="Artist 1"),
+        Artist(id="artist-2", name="Artist 2"),
+    )
+    try:
+        controller.refresh_active_list()
+    finally:
+        controller.shutdown()
+
+    assert len(controller._history) == 0
+    assert len(rendered) == 1
+    content = rendered[0]
+    assert content.title == "library.list.my_artists"
+    assert [item.payload.id for item in content.items] == ["artist-1", "artist-2"]

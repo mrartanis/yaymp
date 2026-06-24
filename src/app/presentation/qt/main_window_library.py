@@ -77,10 +77,14 @@ class MainWindowLibraryMixin:
 
     def _render_artist_liked(self, artist: Artist) -> None:
         self._replace_content_entity(artist)
+        if self._library_controller.active_list_kind() == "liked_artists":
+            self._library_controller.refresh_active_list()
         self._status_label.setText(self._t("status.artist.like", name=artist.name))
 
     def _render_artist_unliked(self, artist: Artist) -> None:
         self._replace_content_entity(artist)
+        if self._library_controller.active_list_kind() == "liked_artists":
+            self._library_controller.refresh_active_list()
         self._status_label.setText(self._t("status.artist.unlike", name=artist.name))
 
     def _render_artist_disliked(self, artist: Artist) -> None:

@@ -379,6 +379,58 @@ class LibraryController(QObject):
             )
         )
 
+    def active_list_kind(self) -> str | None:
+        page, _payload = self._active_page
+        if page != "list":
+            return None
+        return self._active_list_kind
+
+    def refresh_active_list(self) -> None:
+        page, _payload = self._active_page
+        if page != "list":
+            return
+        if self._active_list_kind == "liked_tracks":
+            self._execute(lambda: self._liked_tracks_content(limit=self._liked_tracks_limit))
+            return
+        if self._active_list_kind == "liked_albums":
+            self._execute(
+                lambda: BrowserContent(
+                    title=self._t("library.list.my_albums"),
+                    items=self._album_items(self._library_service.load_liked_albums()),
+                    recent_searches=self.recent_searches(),
+                )
+            )
+            return
+        if self._active_list_kind == "liked_artists":
+            self._execute(
+                lambda: BrowserContent(
+                    title=self._t("library.list.my_artists"),
+                    items=self._artist_items(self._library_service.load_liked_artists()),
+                    recent_searches=self.recent_searches(),
+                )
+            )
+            return
+        if self._active_list_kind == "playlists":
+            self._execute(
+                lambda: BrowserContent(
+                    title=self._t("library.list.playlists"),
+                    items=(
+                        *self._playlist_items(
+                            self._library_service.load_generated_playlists(),
+                            kind="generated_playlist",
+                        ),
+                        *self._playlist_items(
+                            self._unique_playlists(
+                                self._library_service.load_liked_playlists(),
+                                self._library_service.load_user_playlists(),
+                            ),
+                            kind="playlist",
+                        ),
+                    ),
+                    recent_searches=self.recent_searches(),
+                )
+            )
+
     def load_my_wave(self) -> None:
         self.open_station(Station(id="user:onyourwave", title=self._t("nav.my_wave")))
 
