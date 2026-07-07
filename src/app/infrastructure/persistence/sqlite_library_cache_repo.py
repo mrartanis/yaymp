@@ -114,6 +114,16 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
 
         if row is None:
             return None
+        return self._decode_track_row(row)
+
+    def save_track_metadata(self, track: Track) -> None:
+        try:
+            with self._connect() as connection:
+                self._save_track_metadata_with_connection(connection, track)
+        except sqlite3.Error as exc:
+            raise StorageError("Failed to save cached track metadata") from exc
+
+    def _decode_track_row(self, row) -> Track | None:
         if self._is_expired(row["cached_at"]):
             return None
         try:
@@ -149,13 +159,6 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
             )
         except (TypeError, ValueError, json.JSONDecodeError) as exc:
             raise StorageError("Cached track metadata is invalid") from exc
-
-    def save_track_metadata(self, track: Track) -> None:
-        try:
-            with self._connect() as connection:
-                self._save_track_metadata_with_connection(connection, track)
-        except sqlite3.Error as exc:
-            raise StorageError("Failed to save cached track metadata") from exc
 
     def load_liked_track_ids(self, user_id: str) -> LikedTrackIds | None:
         try:
@@ -274,7 +277,8 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                     return None
                 rows = connection.execute(
                     (
-                        "select s.track_id from liked_track_snapshot_items s "
+                        "select t.* from liked_track_snapshot_items s "
+                        "join tracks t on t.id = s.track_id "
                         "where s.user_id = ? "
                         "order by s.position asc"
                     ),
@@ -283,12 +287,7 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
         except sqlite3.Error as exc:
             raise StorageError("Failed to load liked track snapshot") from exc
 
-        tracks = tuple(
-            track
-            for track_id in (str(snapshot_row["track_id"]) for snapshot_row in rows)
-            for track in (self.load_track_metadata(track_id),)
-            if track is not None
-        )
+        tracks = tuple(track for row in rows for track in (self._decode_track_row(row),) if track)
         return LikedTrackSnapshot(
             user_id=user_id,
             revision=int(row["revision"]),

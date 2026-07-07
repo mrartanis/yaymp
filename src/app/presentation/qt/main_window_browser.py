@@ -312,14 +312,25 @@ class MainWindowBrowserMixin:
             if browser_item.source_type == "station" and browser_item.source_id:
                 self._controller.play_station(browser_item.source_id)
                 return
+            source_tracks = browser_item.source_tracks
+            current_content = self._current_browser_content
             if (
-                browser_item.source_tracks
+                current_content is not None
+                and browser_item.source_type
+                and browser_item.source_id
+                and current_content.source_type == browser_item.source_type
+                and current_content.source_id == browser_item.source_id
+                and current_content.source_tracks
+            ):
+                source_tracks = current_content.source_tracks
+            if (
+                source_tracks
                 and browser_item.source_type
                 and browser_item.source_id
                 and browser_item.source_index is not None
             ):
                 self._controller.play_tracks(
-                    browser_item.source_tracks,
+                    source_tracks,
                     start_index=browser_item.source_index,
                     source_type=browser_item.source_type,
                     source_id=browser_item.source_id,
@@ -370,6 +381,13 @@ class MainWindowBrowserMixin:
     def _render_content(self, content: BrowserContent) -> None:
         if self._browser_auto_open_enabled:
             self._show_browser_panel()
+        if self._should_append_browser_content(content):
+            merged_content = self._merge_browser_content(content)
+            self._current_browser_content = merged_content
+            self._loading_more_content = False
+            self._append_filtered_browser_items(content.items)
+            self._update_browser_source_actions(merged_content)
+            return
         self._current_browser_content = content
         self._loading_more_content = False
         if content.search_query is not None:
@@ -379,6 +397,36 @@ class MainWindowBrowserMixin:
             self._search_input.clear()
             self._search_input.blockSignals(False)
         self._apply_filtered_browser_content(content)
+
+    def _should_append_browser_content(self, content: BrowserContent) -> bool:
+        current = self._current_browser_content
+        return bool(
+            content.append_items
+            and current is not None
+            and current.list_key == "liked_tracks"
+            and content.list_key == current.list_key
+            and not self._search_input.text().strip()
+            and self._content_list.viewMode() == QListView.ViewMode.ListMode
+        )
+
+    def _merge_browser_content(self, content: BrowserContent) -> BrowserContent:
+        current = self._current_browser_content
+        assert current is not None
+        return BrowserContent(
+            title=content.title,
+            items=(*current.items, *content.items),
+            recent_searches=content.recent_searches,
+            tabs=content.tabs,
+            active_tab=content.active_tab,
+            search_query=content.search_query,
+            source_type=content.source_type,
+            source_id=content.source_id,
+            source_tracks=content.source_tracks,
+            bulk_mode=content.bulk_mode,
+            list_key=content.list_key,
+            has_more=content.has_more,
+            is_loading=content.is_loading,
+        )
 
     def _apply_filtered_browser_content(self, content: BrowserContent) -> None:
         filtered_content = self._filtered_browser_content(content, self._search_input.text())
@@ -398,32 +446,11 @@ class MainWindowBrowserMixin:
             empty_item.setFlags(empty_item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
             self._content_list.addItem(empty_item)
         for browser_item in filtered_content.items:
-            text = browser_item.title
-            if browser_item.subtitle:
-                text = f"{browser_item.title}\n{browser_item.subtitle}"
-            widget_item = QListWidgetItem(text)
-            widget_item.setData(Qt.ItemDataRole.UserRole, browser_item)
-            if browser_item.kind == "section":
-                widget_item.setFlags(widget_item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
-            elif self._browser_item_uses_art(browser_item):
-                widget = (
-                    self._browser_album_card_widget(browser_item)
-                    if use_art_cards and browser_item.kind in {"album", "artist"}
-                    else self._browser_art_row_widget(browser_item)
-                )
-                if use_art_cards and browser_item.kind in {"album", "artist"}:
-                    widget_item.setSizeHint(
-                        QSize(self._ALBUM_CARD_WIDTH, self._ALBUM_CARD_HEIGHT)
-                    )
-                else:
-                    widget_item.setSizeHint(widget.sizeHint())
-                widget_item.setText("")
-            self._content_list.addItem(widget_item)
-            if browser_item.kind != "section" and self._browser_item_uses_art(browser_item):
-                added_item = self._content_list.item(self._content_list.count() - 1)
-                if added_item is not None:
-                    self._content_list.setItemWidget(added_item, widget)
+            self._add_browser_list_item(browser_item)
         self._content_list.blockSignals(False)
+        self._update_browser_source_actions(content)
+
+    def _update_browser_source_actions(self, content: BrowserContent) -> None:
         can_play_source = bool(
             content.source_type
             and content.source_id
@@ -434,6 +461,20 @@ class MainWindowBrowserMixin:
         )
         self._play_all_button.setEnabled(can_play_source)
         self._append_all_button.setEnabled(can_play_source)
+
+    def _append_filtered_browser_items(self, items: tuple[BrowserItem, ...]) -> None:
+        if (
+            self._content_list.count() == 1
+            and not isinstance(
+                self._content_list.item(0).data(Qt.ItemDataRole.UserRole),
+                BrowserItem,
+            )
+        ):
+            self._content_list.clear()
+        self._content_list.blockSignals(True)
+        for browser_item in items:
+            self._add_browser_list_item(browser_item)
+        self._content_list.blockSignals(False)
 
     def _filtered_browser_content(self, content: BrowserContent, query: str) -> BrowserContent:
         normalized_query = query.strip().casefold()
@@ -475,6 +516,7 @@ class MainWindowBrowserMixin:
                 list_key=content.list_key,
                 has_more=content.has_more,
                 is_loading=content.is_loading,
+                append_items=content.append_items,
             )
 
         return BrowserContent(
@@ -495,6 +537,7 @@ class MainWindowBrowserMixin:
             list_key=content.list_key,
             has_more=content.has_more,
             is_loading=content.is_loading,
+            append_items=content.append_items,
         )
 
     def _browser_item_matches_query(self, item: BrowserItem, normalized_query: str) -> bool:
@@ -621,6 +664,35 @@ class MainWindowBrowserMixin:
             + max(0, columns - 1) * spacing
         )
         self._content_list.setFixedWidth(min(used_width, available_width))
+
+    def _add_browser_list_item(self, browser_item: BrowserItem) -> None:
+        text = browser_item.title
+        if browser_item.subtitle:
+            text = f"{browser_item.title}\n{browser_item.subtitle}"
+        widget_item = QListWidgetItem(text)
+        widget_item.setData(Qt.ItemDataRole.UserRole, browser_item)
+        if browser_item.kind == "section":
+            widget_item.setFlags(widget_item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+        elif self._browser_item_uses_art(browser_item):
+            use_art_cards = (
+                self._content_list.viewMode() == QListView.ViewMode.IconMode
+                and browser_item.kind in {"album", "artist"}
+            )
+            widget = (
+                self._browser_album_card_widget(browser_item)
+                if use_art_cards
+                else self._browser_art_row_widget(browser_item)
+            )
+            if use_art_cards:
+                widget_item.setSizeHint(QSize(self._ALBUM_CARD_WIDTH, self._ALBUM_CARD_HEIGHT))
+            else:
+                widget_item.setSizeHint(widget.sizeHint())
+            widget_item.setText("")
+        self._content_list.addItem(widget_item)
+        if browser_item.kind != "section" and self._browser_item_uses_art(browser_item):
+            added_item = self._content_list.item(self._content_list.count() - 1)
+            if added_item is not None:
+                self._content_list.setItemWidget(added_item, widget)
 
     def _browser_art_row_widget(self, item: BrowserItem) -> QWidget:
         row = QWidget()

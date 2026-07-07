@@ -43,6 +43,9 @@ class StubLibraryService:
     def load_liked_tracks(self, *, limit: int = 100) -> tuple[Track, ...]:
         return self.all_liked_tracks[:limit]
 
+    def load_liked_tracks_page(self, *, offset: int = 0, limit: int = 100) -> tuple[Track, ...]:
+        return self.all_liked_tracks[offset: offset + limit]
+
     def load_all_liked_tracks(self) -> tuple[Track, ...]:
         return self.all_liked_tracks
 
@@ -234,3 +237,33 @@ def test_refresh_active_list_reloads_liked_artists_without_history_push() -> Non
     content = rendered[0]
     assert content.title == "library.list.my_artists"
     assert [item.payload.id for item in content.items] == ["artist-1", "artist-2"]
+
+
+def test_load_more_liked_tracks_emits_only_next_page() -> None:
+    library_service = StubLibraryService()
+    library_service.all_liked_tracks = tuple(
+        Track(id=f"liked-{index}", title=f"Liked {index}", artists=())
+        for index in range(205)
+    )
+    controller = LibraryController(
+        search_service=StubSearchService(),
+        library_service=library_service,
+        logger=StubLogger(),
+        translate=_translate,
+    )
+    rendered: list[object] = []
+    controller.content_changed.connect(rendered.append)
+    try:
+        controller.load_liked_tracks()
+        controller.load_more_current_list()
+    finally:
+        controller.shutdown()
+
+    initial = rendered[0]
+    appended = rendered[1]
+    assert len(initial.items) == 100
+    assert appended.append_items is True
+    assert len(appended.items) == 100
+    assert appended.items[0].payload.id == "liked-100"
+    assert appended.items[-1].payload.id == "liked-199"
+    assert len(appended.source_tracks) == 200

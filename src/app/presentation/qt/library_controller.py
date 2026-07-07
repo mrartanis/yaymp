@@ -46,6 +46,7 @@ class BrowserContent:
     list_key: str | None = None
     has_more: bool = False
     is_loading: bool = False
+    append_items: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,6 +116,8 @@ class LibraryController(QObject):
         self._active_page: tuple[str, object | None] = ("search", None)
         self._active_list_kind: str | None = None
         self._liked_tracks_limit = 100
+        self._liked_tracks_page_size = 100
+        self._loaded_liked_tracks: tuple[Track, ...] = ()
         self._history: list[BrowserHistoryEntry] = []
         self._search_request_id = 0
         self._search_thread = QThread(self)
@@ -321,15 +324,15 @@ class LibraryController(QObject):
         self._push_history()
         self._active_page = ("list", None)
         self._active_list_kind = "liked_tracks"
-        self._liked_tracks_limit = 100
-        self._execute(lambda: self._liked_tracks_content(limit=self._liked_tracks_limit))
+        self._liked_tracks_limit = self._liked_tracks_page_size
+        self._loaded_liked_tracks = ()
+        self._execute(self._load_initial_liked_tracks_content)
 
     def load_more_current_list(self) -> None:
         page, _payload = self._active_page
-        if page != "list":
+        if page != "list" or self._active_list_kind != "liked_tracks":
             return
-        self._liked_tracks_limit += 100
-        self._execute(lambda: self._liked_tracks_content(limit=self._liked_tracks_limit))
+        self._execute(self._load_more_liked_tracks_content)
 
     def load_liked_albums(self) -> None:
         self._push_history()
@@ -889,21 +892,74 @@ class LibraryController(QObject):
 
     def _liked_tracks_content(self, *, limit: int) -> BrowserContent:
         tracks = self._library_service.load_liked_tracks(limit=limit)
+        return self._liked_tracks_browser_content(
+            tracks=tracks,
+            source_tracks=tracks,
+            has_more=len(tracks) >= limit,
+        )
+
+    def _load_initial_liked_tracks_content(self) -> BrowserContent:
+        tracks = self._library_service.load_liked_tracks(limit=self._liked_tracks_limit)
+        self._loaded_liked_tracks = tracks
+        return self._liked_tracks_browser_content(
+            tracks=tracks,
+            source_tracks=tracks,
+            has_more=len(tracks) >= self._liked_tracks_limit,
+        )
+
+    def _load_more_liked_tracks_content(self) -> BrowserContent:
+        page_tracks = self._library_service.load_liked_tracks_page(
+            offset=len(self._loaded_liked_tracks),
+            limit=self._liked_tracks_page_size,
+        )
+        if not page_tracks:
+            return BrowserContent(
+                title=self._t("library.list.my_tracks"),
+                items=(),
+                recent_searches=self.recent_searches(),
+                source_type="collection",
+                source_id="liked_tracks",
+                source_tracks=self._loaded_liked_tracks,
+                bulk_mode="load_all",
+                list_key="liked_tracks",
+                has_more=False,
+                append_items=True,
+            )
+        self._loaded_liked_tracks = (*self._loaded_liked_tracks, *page_tracks)
+        self._liked_tracks_limit = len(self._loaded_liked_tracks)
+        return self._liked_tracks_browser_content(
+            tracks=page_tracks,
+            source_tracks=self._loaded_liked_tracks,
+            has_more=len(page_tracks) >= self._liked_tracks_page_size,
+            append_items=True,
+        )
+
+    def _liked_tracks_browser_content(
+        self,
+        *,
+        tracks: tuple[Track, ...],
+        source_tracks: tuple[Track, ...],
+        has_more: bool,
+        append_items: bool = False,
+    ) -> BrowserContent:
+        start_index = len(source_tracks) - len(tracks)
         return BrowserContent(
             title=self._t("library.list.my_tracks"),
             items=self._track_items(
                 tracks,
                 source_type="collection",
                 source_id="liked_tracks",
-                source_tracks=tracks,
+                source_tracks=source_tracks,
+                source_index_offset=start_index,
             ),
             recent_searches=self.recent_searches(),
             source_type="collection",
             source_id="liked_tracks",
-            source_tracks=tracks,
+            source_tracks=source_tracks,
             bulk_mode="load_all",
             list_key="liked_tracks",
-            has_more=len(tracks) >= limit,
+            has_more=has_more,
+            append_items=append_items,
         )
 
     def _track_items(
@@ -913,6 +969,7 @@ class LibraryController(QObject):
         source_type: str | None = None,
         source_id: str | None = None,
         source_tracks: tuple[Track, ...] = (),
+        source_index_offset: int = 0,
     ) -> tuple[BrowserItem, ...]:
         return tuple(
             BrowserItem(
@@ -923,7 +980,7 @@ class LibraryController(QObject):
                 source_type=source_type,
                 source_id=source_id,
                 source_tracks=source_tracks,
-                source_index=index if source_tracks else None,
+                source_index=(source_index_offset + index) if source_tracks else None,
             )
             for index, track in enumerate(tracks)
         )

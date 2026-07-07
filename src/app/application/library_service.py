@@ -84,6 +84,12 @@ class LibraryService:
         self._logger.info("Loaded %s liked tracks", len(tracks))
         return tracks
 
+    def load_liked_tracks_page(self, *, offset: int = 0, limit: int = 100) -> tuple[Track, ...]:
+        if limit <= 0:
+            return ()
+        tracks = self.load_liked_tracks(limit=offset + limit)
+        return tracks[offset: offset + limit]
+
     def load_all_liked_tracks(self) -> tuple[Track, ...]:
         user_id = self._current_user_id()
         cached_snapshot = self._safe_load_liked_track_snapshot(user_id)

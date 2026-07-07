@@ -341,6 +341,70 @@ def test_search_input_filters_current_card_content_locally(qtbot) -> None:
     assert title.text() == "Beta"
 
 
+def test_liked_tracks_append_renders_only_new_page_without_clearing(qtbot) -> None:
+    window = _BrowserHarness()
+    qtbot.addWidget(window)
+    initial_tracks = tuple(
+        BrowserItem(
+            kind="track",
+            title=f"Track {index}",
+            subtitle="Artist",
+            payload=Track(id=str(index), title=f"Track {index}", artists=("Artist",)),
+            source_type="collection",
+            source_id="liked_tracks",
+            source_tracks=(),
+            source_index=index,
+        )
+        for index in range(2)
+    )
+    appended_tracks = tuple(
+        BrowserItem(
+            kind="track",
+            title=f"Track {index}",
+            subtitle="Artist",
+            payload=Track(id=str(index), title=f"Track {index}", artists=("Artist",)),
+            source_type="collection",
+            source_id="liked_tracks",
+            source_tracks=(),
+            source_index=index,
+        )
+        for index in range(2, 4)
+    )
+
+    window._render_content(
+        BrowserContent(
+            title="Tracks",
+            items=initial_tracks,
+            source_type="collection",
+            source_id="liked_tracks",
+            source_tracks=tuple(item.payload for item in initial_tracks),
+            bulk_mode="load_all",
+            list_key="liked_tracks",
+            has_more=True,
+        )
+    )
+    first_item = window._content_list.item(0)
+
+    window._render_content(
+        BrowserContent(
+            title="Tracks",
+            items=appended_tracks,
+            source_type="collection",
+            source_id="liked_tracks",
+            source_tracks=tuple(item.payload for item in (*initial_tracks, *appended_tracks)),
+            bulk_mode="load_all",
+            list_key="liked_tracks",
+            has_more=True,
+            append_items=True,
+        )
+    )
+
+    assert window._content_list.count() == 4
+    assert window._content_list.item(0) is first_item
+    assert window._content_list.item(3).data(Qt.ItemDataRole.UserRole).payload.id == "3"
+    assert len(window._current_browser_content.items) == 4
+
+
 def test_elided_wrap_label_truncates_long_word_horizontally(qtbot) -> None:
     label = _ElidedWrapLabel(
         "pesnitrushchebnadezhdrazbitykhserdets - chast 1. Dnevniki odinochki",
