@@ -40,13 +40,14 @@ class MainWindowLayoutMixin:
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Fixed,
         )
-        self._seek_label = self._panel_label("0:00 / 0:00")
+        self._seek_label = self._panel_label("0:00/0:00")
         self._seek_label.setObjectName("seek-label")
         self._seek_label.setFixedHeight(28)
         self._seek_label.setAlignment(
             Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
         )
-        self._seek_label.setMinimumWidth(92)
+        self._seek_label.setMinimumWidth(self._progress_side_width())
+        self._seek_label.setFixedWidth(self._progress_side_width())
         self._seek_label.setSizePolicy(
             QSizePolicy.Policy.Fixed,
             QSizePolicy.Policy.Fixed,
@@ -219,9 +220,18 @@ class MainWindowLayoutMixin:
         progress_row = QHBoxLayout(self._progress_widget)
         progress_row.setSpacing(8)
         progress_row.setContentsMargins(0, 0, 0, 0)
-        progress_row.addWidget(self._seek_slider, 1)
-        progress_row.addWidget(self._seek_label)
-        progress_row.addWidget(self._volume_button)
+        self._wide_progress_side_width = self._progress_side_width()
+        self._wide_progress_left_slot = QWidget()
+        self._wide_progress_left_slot.setFixedWidth(self._wide_progress_side_width)
+        self._wide_progress_left_layout = QHBoxLayout(self._wide_progress_left_slot)
+        self._wide_progress_left_layout.setContentsMargins(0, 0, 0, 0)
+        self._wide_progress_left_layout.setSpacing(0)
+        self._wide_progress_right_slot = QWidget()
+        self._wide_progress_right_slot.setFixedWidth(self._wide_progress_side_width)
+        self._wide_progress_right_layout = QHBoxLayout(self._wide_progress_right_slot)
+        self._wide_progress_right_layout.setContentsMargins(0, 0, 0, 0)
+        self._wide_progress_right_layout.setSpacing(0)
+        self._rebuild_progress_row(wide=False)
 
         self._player_right_widget = QWidget()
         self._player_right_widget.setMinimumWidth(self._PLAYER_MIN_WIDTH)
@@ -515,6 +525,7 @@ class MainWindowLayoutMixin:
     def _configure_player_right_layout(self, *, wide: bool) -> None:
         self._apply_player_visual_mode(wide=wide)
         self._rebuild_hero_layout(wide=wide)
+        self._rebuild_progress_row(wide=wide)
         self._player_right_layout.removeWidget(self._hero_widget)
         self._player_right_layout.removeWidget(self._transport_widget)
         self._player_right_layout.removeWidget(self._progress_widget)
@@ -621,6 +632,38 @@ class MainWindowLayoutMixin:
         self._hero_info_layout.addStretch(1)
         self._hero_info_layout.addWidget(self._transport_widget)
         self._hero_info_layout.addSpacing(10)
+
+    def _rebuild_progress_row(self, *, wide: bool) -> None:
+        progress_layout = self._progress_widget.layout()
+        if progress_layout is None:
+            return
+        self._clear_layout_widgets(progress_layout)
+        if wide:
+            self._clear_layout_widgets(self._wide_progress_left_layout)
+            self._clear_layout_widgets(self._wide_progress_right_layout)
+            self._wide_progress_left_layout.addWidget(
+                self._volume_button,
+                0,
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            )
+            self._wide_progress_right_layout.addWidget(
+                self._seek_label,
+                0,
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+            )
+            progress_layout.addWidget(self._wide_progress_left_slot, 0)
+            progress_layout.addWidget(self._seek_slider, 1)
+            progress_layout.addWidget(self._wide_progress_right_slot, 0)
+            return
+        self._clear_layout_widgets(self._wide_progress_left_layout)
+        self._clear_layout_widgets(self._wide_progress_right_layout)
+        progress_layout.addWidget(self._seek_slider, 1)
+        progress_layout.addWidget(self._seek_label)
+        progress_layout.addWidget(self._volume_button)
+
+    def _progress_side_width(self) -> int:
+        width = self._seek_label.fontMetrics().horizontalAdvance("00:00/00:00")
+        return width + 6
 
     def _clear_layout_widgets(self, layout) -> None:
         while layout.count():

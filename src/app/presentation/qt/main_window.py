@@ -671,7 +671,7 @@ class MainWindow(
         )
         self._seek_slider.blockSignals(False)
         self._seek_label.setText(
-            f"{self._format_ms(state.position_ms)} / {self._format_ms(state.duration_ms)}"
+            f"{self._format_ms(state.position_ms)}/{self._format_ms(state.duration_ms)}"
         )
         self._volume_slider.blockSignals(True)
         self._volume_slider.setValue(state.volume)
@@ -1059,8 +1059,12 @@ class MainWindow(
     def _format_ms(self, value: int | None) -> str:
         if value is None:
             return "0:00"
-        minutes, remainder = divmod(value // 1000, 60)
-        return f"{minutes}:{remainder:02d}"
+        total_seconds = value // 1000
+        minutes, seconds = divmod(total_seconds, 60)
+        if minutes > 99:
+            tens_of_seconds = seconds // 10
+            return f"{minutes}:{tens_of_seconds}"
+        return f"{minutes}:{seconds:02d}"
 
     def _handle_frame_resize_event(self, watched: object, event: QEvent) -> bool:
         if self._updating_resize_cursor:

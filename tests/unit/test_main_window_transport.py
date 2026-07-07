@@ -63,6 +63,9 @@ class _TransportHarness(MainWindowLayoutMixin, QWidget):
     def _render_current_track_dislike_button(self, is_disliked: bool) -> None:
         return MainWindow._render_current_track_dislike_button(self, is_disliked)
 
+    def _format_ms(self, value: int | None) -> str:
+        return MainWindow._format_ms(self, value)
+
     def _icon_button(self, icon_name: str, tooltip: str) -> QPushButton:
         button = QPushButton(self)
         button.setIconSize(QSize(20, 20))
@@ -147,3 +150,51 @@ def test_progress_row_keeps_only_seek_timer_and_volume(qtbot) -> None:
     ]
     assert isinstance(window._like_track_button, QPushButton)
     assert isinstance(window._dislike_track_button, QPushButton)
+
+
+def test_progress_row_moves_volume_left_only_in_wide_mode(qtbot) -> None:
+    window = _TransportHarness()
+    qtbot.addWidget(window)
+
+    window._build_player_panel()
+    window._configure_player_right_layout(wide=True)
+
+    progress_layout = window._progress_widget.layout()
+    widgets = [
+        progress_layout.itemAt(index).widget()
+        for index in range(progress_layout.count())
+        if progress_layout.itemAt(index).widget() is not None
+    ]
+
+    assert widgets == [
+        window._wide_progress_left_slot,
+        window._seek_slider,
+        window._wide_progress_right_slot,
+    ]
+
+
+def test_wide_progress_uses_symmetric_side_slots(qtbot) -> None:
+    window = _TransportHarness()
+    qtbot.addWidget(window)
+
+    window._build_player_panel()
+    window._configure_player_right_layout(wide=True)
+
+    assert window._wide_progress_left_slot.width() == window._wide_progress_right_slot.width()
+    assert window._wide_progress_left_slot.width() == window._seek_label.width()
+
+    left_layout = window._wide_progress_left_slot.layout()
+    right_layout = window._wide_progress_right_slot.layout()
+
+    assert left_layout.itemAt(0).widget() is window._volume_button
+    assert right_layout.itemAt(0).widget() is window._seek_label
+
+
+def test_format_ms_drops_to_tens_for_very_long_tracks() -> None:
+    window = _TransportHarness()
+
+    assert window._format_ms(None) == "0:00"
+    assert window._format_ms(5 * 60 * 1000 + 7 * 1000) == "5:07"
+    assert window._format_ms(99 * 60 * 1000 + 59 * 1000) == "99:59"
+    assert window._format_ms(100 * 60 * 1000) == "100:0"
+    assert window._format_ms(123 * 60 * 1000 + 45 * 1000) == "123:4"
