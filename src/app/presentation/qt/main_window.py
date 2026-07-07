@@ -8,7 +8,7 @@ from os import environ
 from pathlib import Path
 from time import monotonic
 
-from PySide6.QtCore import QEvent, QModelIndex, QPoint, QPointF, Qt, QTimer
+from PySide6.QtCore import QEvent, QModelIndex, QPoint, QPointF, QSize, Qt, QTimer
 from PySide6.QtGui import QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager
 from PySide6.QtWidgets import (
@@ -250,25 +250,52 @@ class MainWindow(
 
     def _build_transport_bar(self) -> QHBoxLayout:
         layout = QHBoxLayout()
-        layout.setSpacing(8)
+        layout.setSpacing(0)
+        layout.setContentsMargins(0, 0, 0, 0)
         self._previous_button = self._icon_button("previous.svg", self._t("action.previous"))
         self._play_pause_button = self._icon_button("play.svg", self._t("action.play"))
         self._play_pause_button.setObjectName("play-button")
-        self._play_pause_button.setFixedSize(52, 44)
         self._next_button = self._icon_button("next.svg", self._t("action.next"))
         self._like_track_button = QPushButton()
         self._like_track_button.setObjectName("like-current-button")
-        self._like_track_button.setIcon(create_icon("heart_outline.svg"))
         self._like_track_button.setToolTip(self._t("track.tooltip.like"))
-        self._like_track_button.setFixedSize(34, 32)
+        self._like_track_button.setAccessibleName(self._t("track.tooltip.like"))
         self._dislike_track_button = QPushButton()
         self._dislike_track_button.setObjectName("like-current-button")
-        self._dislike_track_button.setIcon(create_icon("heart_slash_outline.svg"))
         self._dislike_track_button.setToolTip(self._t("track.tooltip.dislike"))
-        self._dislike_track_button.setFixedSize(34, 32)
+        self._dislike_track_button.setAccessibleName(self._t("track.tooltip.dislike"))
+        self._transport_gap_dislike_prev = QWidget()
+        self._transport_gap_dislike_prev.setSizePolicy(
+            QSizePolicy.Policy.Fixed,
+            QSizePolicy.Policy.Fixed,
+        )
+        self._transport_gap_prev_play = QWidget()
+        self._transport_gap_prev_play.setSizePolicy(
+            QSizePolicy.Policy.Fixed,
+            QSizePolicy.Policy.Fixed,
+        )
+        self._transport_gap_play_next = QWidget()
+        self._transport_gap_play_next.setSizePolicy(
+            QSizePolicy.Policy.Fixed,
+            QSizePolicy.Policy.Fixed,
+        )
+        self._transport_gap_next_like = QWidget()
+        self._transport_gap_next_like.setSizePolicy(
+            QSizePolicy.Policy.Fixed,
+            QSizePolicy.Policy.Fixed,
+        )
+        layout.addStretch(1)
+        layout.addWidget(self._dislike_track_button)
+        layout.addWidget(self._transport_gap_dislike_prev)
         layout.addWidget(self._previous_button)
+        layout.addWidget(self._transport_gap_prev_play)
         layout.addWidget(self._play_pause_button)
+        layout.addWidget(self._transport_gap_play_next)
         layout.addWidget(self._next_button)
+        layout.addWidget(self._transport_gap_next_like)
+        layout.addWidget(self._like_track_button)
+        layout.addStretch(1)
+        self._apply_transport_visual_mode(wide=False)
         return layout
 
     def _build_body(self) -> QHBoxLayout:
@@ -745,23 +772,34 @@ class MainWindow(
         self._render_current_track_dislike_button(bool(track and track.is_disliked))
 
     def _render_current_track_like_button(self, is_liked: bool) -> None:
-        self._like_track_button.setIcon(
-            create_icon(
+        self._set_button_icon(
+            self._like_track_button,
+            (
                 preference_marker_icon_name("liked", theme_mode=self._resolved_theme_mode()),
-                color=self._accent_color,
             )
             if is_liked
-            else create_icon("heart_outline.svg", color=self._theme_icon_color())
+            else "heart_outline.svg",
+            color=(
+                self._accent_color
+                if is_liked
+                else self._theme_icon_color()
+            )
         )
         tooltip = self._t("track.tooltip.unlike") if is_liked else self._t("track.tooltip.like")
         self._like_track_button.setToolTip(tooltip)
         self._like_track_button.setAccessibleName(tooltip)
 
     def _render_current_track_dislike_button(self, is_disliked: bool) -> None:
-        self._dislike_track_button.setIcon(
-            create_icon("heart_slash.svg", color=self._theme_muted_icon_color())
+        self._set_button_icon(
+            self._dislike_track_button,
+            "heart_slash.svg"
             if is_disliked
-            else create_icon("heart_slash_outline.svg", color=self._theme_icon_color())
+            else "heart_slash_outline.svg",
+            color=(
+                self._theme_muted_icon_color()
+                if is_disliked
+                else self._theme_icon_color()
+            ),
         )
         tooltip = (
             self._t("track.tooltip.undislike")
@@ -774,13 +812,19 @@ class MainWindow(
     def _render_play_pause_button(self, status: PlaybackStatus) -> None:
         self._play_pause_button.setProperty("playback_status", status.value)
         if status is PlaybackStatus.PLAYING:
-            self._play_pause_button.setIcon(
-                create_icon("pause.svg", color=self._accent_text_color())
+            self._set_button_icon(
+                self._play_pause_button,
+                "pause.svg",
+                color=self._accent_text_color(),
             )
             self._play_pause_button.setToolTip(self._t("action.pause"))
             self._play_pause_button.setAccessibleName(self._t("action.pause"))
             return
-        self._play_pause_button.setIcon(create_icon("play.svg", color=self._accent_text_color()))
+        self._set_button_icon(
+            self._play_pause_button,
+            "play.svg",
+            color=self._accent_text_color(),
+        )
         self._play_pause_button.setToolTip(self._t("action.play"))
         self._play_pause_button.setAccessibleName(self._t("action.play"))
 
@@ -938,11 +982,81 @@ class MainWindow(
 
     def _icon_button(self, icon_name: str, tooltip: str) -> QPushButton:
         button = QPushButton()
-        button.setIcon(create_icon(icon_name))
+        button.setIconSize(QSize(20, 20))
+        self._set_button_icon(button, icon_name)
         button.setToolTip(tooltip)
         button.setAccessibleName(tooltip)
         button.setFixedSize(34, 32)
         return button
+
+    def _set_button_icon(
+        self,
+        button: QPushButton,
+        icon_name: str,
+        *,
+        color: str = "#ffffff",
+    ) -> None:
+        icon_size = button.iconSize()
+        target_size = max(1, icon_size.width(), icon_size.height())
+        button.setIcon(create_icon(icon_name, color=color, size=target_size))
+
+    def _apply_transport_visual_mode(self, *, wide: bool) -> None:
+        if wide:
+            dislike_size = QSize(36, 34)
+            dislike_icon_size = QSize(16, 16)
+            nav_size = QSize(40, 38)
+            nav_icon_size = QSize(18, 18)
+            play_size = QSize(52, 52)
+            play_icon_size = QSize(24, 24)
+            outer_gap = 18
+            inner_gap = 10
+        else:
+            dislike_size = QSize(32, 30)
+            dislike_icon_size = QSize(15, 15)
+            nav_size = QSize(34, 32)
+            nav_icon_size = QSize(17, 17)
+            play_size = QSize(46, 46)
+            play_icon_size = QSize(22, 22)
+            outer_gap = 14
+            inner_gap = 8
+
+        self._dislike_track_button.setFixedSize(dislike_size)
+        self._dislike_track_button.setIconSize(dislike_icon_size)
+        self._like_track_button.setFixedSize(dislike_size)
+        self._like_track_button.setIconSize(dislike_icon_size)
+        self._previous_button.setFixedSize(nav_size)
+        self._previous_button.setIconSize(nav_icon_size)
+        self._next_button.setFixedSize(nav_size)
+        self._next_button.setIconSize(nav_icon_size)
+        self._play_pause_button.setFixedSize(play_size)
+        self._play_pause_button.setIconSize(play_icon_size)
+        self._transport_gap_dislike_prev.setFixedWidth(outer_gap)
+        self._transport_gap_prev_play.setFixedWidth(inner_gap)
+        self._transport_gap_play_next.setFixedWidth(inner_gap)
+        self._transport_gap_next_like.setFixedWidth(outer_gap)
+
+        self._set_button_icon(
+            self._previous_button,
+            "previous.svg",
+            color=self._theme_icon_color(),
+        )
+        self._set_button_icon(
+            self._next_button,
+            "next.svg",
+            color=self._theme_icon_color(),
+        )
+        status_value = (
+            self._play_pause_button.property("playback_status")
+            or PlaybackStatus.STOPPED.value
+        )
+        self._render_play_pause_button(PlaybackStatus(status_value))
+        current_track = getattr(self, "_current_track", None)
+        self._render_current_track_like_button(
+            bool(current_track and current_track.is_liked)
+        )
+        self._render_current_track_dislike_button(
+            bool(current_track and current_track.is_disliked)
+        )
 
     def _format_ms(self, value: int | None) -> str:
         if value is None:

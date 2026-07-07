@@ -222,8 +222,6 @@ class MainWindowLayoutMixin:
         progress_row.addWidget(self._seek_slider, 1)
         progress_row.addWidget(self._seek_label)
         progress_row.addWidget(self._volume_button)
-        progress_row.addWidget(self._like_track_button)
-        progress_row.addWidget(self._dislike_track_button)
 
         self._player_right_widget = QWidget()
         self._player_right_widget.setMinimumWidth(self._PLAYER_MIN_WIDTH)
@@ -540,6 +538,7 @@ class MainWindowLayoutMixin:
     def _apply_player_visual_mode(self, *, wide: bool) -> None:
         artwork_size = self._WIDE_ARTWORK_SIZE if wide else self._COMPACT_ARTWORK_SIZE
         self._artwork_label.setFixedSize(artwork_size, artwork_size)
+        self._apply_transport_visual_mode(wide=wide)
         if wide:
             if self._player_panel_frame is not None:
                 self._player_panel_frame.setMinimumHeight(self._PLAYER_PANEL_COMPACT_HEIGHT)

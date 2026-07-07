@@ -483,9 +483,9 @@ class MainWindowPreferencesMixin:
         if hasattr(self, "_settings_button"):
             self._settings_button.setIcon(create_icon("settings.svg", color=icon_color))
         if hasattr(self, "_previous_button"):
-            self._previous_button.setIcon(create_icon("previous.svg", color=icon_color))
+            self._set_button_icon(self._previous_button, "previous.svg", color=icon_color)
         if hasattr(self, "_next_button"):
-            self._next_button.setIcon(create_icon("next.svg", color=icon_color))
+            self._set_button_icon(self._next_button, "next.svg", color=icon_color)
         if hasattr(self, "_play_all_button"):
             self._play_all_button.setIcon(create_icon("play.svg", color=icon_color))
         if hasattr(self, "_append_all_button"):

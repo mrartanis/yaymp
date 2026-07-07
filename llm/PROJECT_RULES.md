@@ -247,6 +247,42 @@ Do not spend time on:
 - layout spacing
 - cosmetic-only helpers
 
+## Local Environment Rules
+
+Local development and verification in this repo should use the project-managed virtualenv and scripts.
+
+Rules:
+
+- Do not assume a globally installed `python`, `pytest`, `ruff`, or `PySide6`; prefer the repo-local `.venv`.
+- Do not rely on `source .venv/bin/activate` as the primary workflow; the standard path here is to run the repo scripts directly.
+- Prefer the provided scripts first:
+  - `./scripts/run_lint.sh`
+  - `./scripts/run_tests.sh`
+  - `./scripts/run_smoke.sh`
+  - `./scripts/run_app.sh`
+- These scripts already resolve `.venv/bin/...` and export `PYTHONPATH=src`; do not duplicate that logic unless a narrower one-off command is necessary.
+- If you need a narrower direct invocation, prefer `.venv/bin/python -m pytest ...` or `.venv/bin/ruff ...` with `PYTHONPATH="${PROJECT_ROOT}/src"`.
+- When reporting verification status, distinguish clearly between:
+  - full project script runs,
+  - targeted direct tool runs,
+  - syntax-only or static checks.
+
+## Sandbox And Escalation Rules
+
+Agent runs may be constrained by sandbox policy even when the repo and `.venv` are correct.
+
+Rules:
+
+- First prefer commands that stay inside the sandbox and avoid unnecessary writes.
+- If `ruff` cache writes are blocked, prefer a bounded fallback such as `./.venv/bin/ruff check --no-cache ...`.
+- If `pytest` temp files or cache writes are blocked, prefer bounded fallbacks such as `-s` and `-p no:cacheprovider` before assuming the environment is broken.
+- If a standard repo command fails because the sandbox blocks temp/cache writes, say explicitly that the failure is sandbox-related, not a project dependency problem.
+- If a bounded, user-relevant command still requires unsandboxed execution, request escalation normally.
+- If auto-review rejects that escalation, do not keep retrying the same path indirectly; either:
+  - use a materially safer bounded fallback that stays in the sandbox, or
+  - ask for human approval / manual confirmation that unsandboxed execution is acceptable.
+- When an escalated command succeeds only because it escaped sandbox restrictions, report that fact in the result so the next agent does not misdiagnose it as a repo issue.
+
 ## Error Handling Rules
 
 Never leak raw infrastructure exceptions into application or presentation.

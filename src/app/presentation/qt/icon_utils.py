@@ -4,8 +4,8 @@ import re
 from functools import lru_cache
 from importlib import resources
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QIcon, QPainter, QPixmap
+from PySide6.QtCore import QRectF, Qt
+from PySide6.QtGui import QGuiApplication, QIcon, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 
 _FILL_DOUBLE_QUOTED_RE = re.compile(r'(?<!data-fixed-)fill="(?!none)([^"]*)"')
@@ -23,11 +23,20 @@ _FIXED_STROKE_SINGLE_QUOTED_RE = re.compile(r"data-fixed-stroke='([^']*)'")
 def create_icon(name: str, color: str = "#ffffff", size: int = 20) -> QIcon:
     svg_text = _recolor_svg(_read_icon_svg(name), color)
     renderer = QSvgRenderer(bytes(svg_text, "utf-8"))
-    pixmap = QPixmap(size, size)
+    dpr = 1.0
+    app = QGuiApplication.instance()
+    if app is not None:
+        screen = app.primaryScreen()
+        if screen is not None:
+            dpr = max(1.0, screen.devicePixelRatio())
+    pixel_size = max(1, int(round(size * dpr)))
+    pixmap = QPixmap(pixel_size, pixel_size)
+    pixmap.setDevicePixelRatio(dpr)
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
     try:
-        renderer.render(painter)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        renderer.render(painter, QRectF(0, 0, size, size))
     finally:
         painter.end()
     return QIcon(pixmap)
