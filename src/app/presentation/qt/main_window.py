@@ -774,9 +774,7 @@ class MainWindow(
     def _render_current_track_like_button(self, is_liked: bool) -> None:
         self._set_button_icon(
             self._like_track_button,
-            (
-                preference_marker_icon_name("liked", theme_mode=self._resolved_theme_mode()),
-            )
+            preference_marker_icon_name("liked", theme_mode=self._resolved_theme_mode())
             if is_liked
             else "heart_outline.svg",
             color=(
