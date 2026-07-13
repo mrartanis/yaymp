@@ -3,8 +3,16 @@ from __future__ import annotations
 from pathlib import Path
 
 import shiboken6
-from PySide6.QtCore import QSize, Qt, QUrl
-from PySide6.QtGui import QFontMetrics, QPixmap, QTextLayout, QTextOption
+from PySide6.QtCore import QModelIndex, QRect, QSize, Qt, QUrl
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QFontMetrics,
+    QPainter,
+    QPixmap,
+    QTextLayout,
+    QTextOption,
+)
 from PySide6.QtNetwork import QNetworkRequest
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -19,6 +27,9 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QSizePolicy,
+    QStyle,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -27,10 +38,158 @@ from PySide6.QtWidgets import (
 from app.domain import Album, Artist, Playlist, Station, Track
 from app.presentation.qt.icon_utils import create_icon
 from app.presentation.qt.library_controller import BrowserContent, BrowserItem, BrowserTab
+from app.presentation.qt.main_window_styles import _palette_for_theme
 from app.presentation.qt.preference_markers import (
     preference_marker_icon_name,
     preference_marker_kind,
 )
+
+
+class _BrowserListItemDelegate(QStyledItemDelegate):
+    _ROW_HEIGHT = 56
+    _THUMB_SIZE = 46
+    _TEXT_GAP = 9
+    _MARKER_SIZE = 16
+    _MARKER_GAP = 8
+
+    def __init__(
+        self,
+        *,
+        parent: QWidget,
+        thumb_provider,
+        thumb_requester,
+        accent_provider,
+        theme_provider,
+    ) -> None:
+        super().__init__(parent)
+        self._view = parent
+        self._thumb_provider = thumb_provider
+        self._thumb_requester = thumb_requester
+        self._accent_provider = accent_provider
+        self._theme_provider = theme_provider
+
+    def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex) -> QSize:
+        if self._view.viewMode() == QListView.ViewMode.IconMode:
+            return super().sizeHint(option, index)
+        item = index.data(Qt.ItemDataRole.UserRole)
+        if isinstance(item, BrowserItem) and item.kind != "section":
+            return QSize(0, self._ROW_HEIGHT)
+        return super().sizeHint(option, index)
+
+    def paint(
+        self,
+        painter: QPainter,
+        option: QStyleOptionViewItem,
+        index: QModelIndex,
+    ) -> None:
+        if self._view.viewMode() == QListView.ViewMode.IconMode:
+            super().paint(painter, option, index)
+            return
+        item = index.data(Qt.ItemDataRole.UserRole)
+        if not isinstance(item, BrowserItem) or item.kind == "section":
+            super().paint(painter, option, index)
+            return
+
+        palette = _palette_for_theme(self._theme_provider())
+        selected = bool(option.state & QStyle.StateFlag.State_Selected)
+        accent = QColor(self._accent_provider())
+        title_color = QColor("#ffffff") if selected else QColor(palette.text_title)
+        subtitle_color = QColor("#ffffff") if selected else QColor(palette.text_secondary)
+
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        if selected:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(accent)
+            painter.drawRect(option.rect)
+
+        content_rect = option.rect.adjusted(6, 5, -6, -5)
+        thumb_rect = QRect(
+            content_rect.left(),
+            content_rect.top(),
+            self._THUMB_SIZE,
+            self._THUMB_SIZE,
+        )
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(palette.art_thumb_bg))
+        painter.drawRoundedRect(thumb_rect, 6, 6)
+        artwork_ref = getattr(item.payload, "artwork_ref", None)
+        pixmap = self._thumb_provider(artwork_ref, self._THUMB_SIZE)
+        if pixmap is None and artwork_ref:
+            self._thumb_requester(artwork_ref, self._THUMB_SIZE, index.row())
+        if pixmap is not None:
+            painter.drawPixmap(thumb_rect, pixmap)
+        else:
+            painter.setPen(QColor(palette.album_art_text))
+            painter.drawText(thumb_rect, Qt.AlignmentFlag.AlignCenter, "♪")
+
+        marker_kind = preference_marker_kind(item.payload)
+        marker_width = self._MARKER_SIZE + self._MARKER_GAP if marker_kind else 0
+        text_left = thumb_rect.right() + 1 + self._TEXT_GAP
+        text_rect = QRect(
+            text_left,
+            content_rect.top(),
+            max(10, content_rect.right() - text_left - marker_width + 1),
+            content_rect.height(),
+        )
+        title_rect = QRect(text_rect.left(), text_rect.top(), text_rect.width(), 22)
+        subtitle_rect = QRect(text_rect.left(), text_rect.bottom() - 19, text_rect.width(), 19)
+        title_font = QFont(option.font)
+        title_font.setWeight(QFont.Weight.DemiBold)
+        painter.setFont(title_font)
+        painter.setPen(title_color)
+        painter.drawText(
+            title_rect,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            painter.fontMetrics().elidedText(
+                item.title,
+                Qt.TextElideMode.ElideRight,
+                title_rect.width(),
+            ),
+        )
+        subtitle_font = QFont(option.font)
+        subtitle_font.setPointSize(max(9, option.font.pointSize() - 1))
+        painter.setFont(subtitle_font)
+        painter.setPen(subtitle_color)
+        painter.drawText(
+            subtitle_rect,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            painter.fontMetrics().elidedText(
+                item.subtitle or "",
+                Qt.TextElideMode.ElideRight,
+                subtitle_rect.width(),
+            ),
+        )
+
+        if marker_kind is not None:
+            marker_rect = QRect(
+                content_rect.right() - self._MARKER_SIZE + 1,
+                content_rect.center().y() - self._MARKER_SIZE // 2,
+                self._MARKER_SIZE,
+                self._MARKER_SIZE,
+            )
+            icon_name = preference_marker_icon_name(
+                marker_kind,
+                theme_mode=self._theme_provider(),
+            )
+            marker_color = accent.name() if marker_kind == "liked" else palette.text_muted
+            painter.drawPixmap(
+                marker_rect,
+                create_icon(
+                    icon_name,
+                    color=marker_color,
+                    size=self._MARKER_SIZE,
+                ).pixmap(self._MARKER_SIZE, self._MARKER_SIZE),
+            )
+        painter.restore()
+
+    def update_row(self, row: int) -> None:
+        model = self._view.model()
+        if model is None:
+            return
+        index = model.index(row, 0)
+        if index.isValid():
+            self._view.viewport().update(self._view.visualRect(index))
 
 
 class _CenteredGridListWidget(QListWidget):
@@ -236,6 +395,14 @@ class MainWindowBrowserMixin:
         self._content_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._content_list.setMovement(QListView.Movement.Static)
         self._content_list.setResizeMode(QListView.ResizeMode.Adjust)
+        self._browser_list_delegate = _BrowserListItemDelegate(
+            parent=self._content_list,
+            thumb_provider=self._browser_thumb_pixmap,
+            thumb_requester=self._request_thumb_for_browser_row,
+            accent_provider=lambda: self._accent_color,
+            theme_provider=self._resolved_theme_mode,
+        )
+        self._content_list.setItemDelegate(self._browser_list_delegate)
         self._content_list_host = _BrowserContentHost()
         self._content_list_host.set_resize_callback(self._update_art_card_content_width)
         self._content_list_host_layout = QHBoxLayout(self._content_list_host)
@@ -438,6 +605,10 @@ class MainWindowBrowserMixin:
         self._search_button.setEnabled(not content.is_loading)
         self._sync_browser_view_mode_controls(content)
         self._apply_browser_content_layout(use_album_cards=use_art_cards)
+        self._content_list.setUniformItemSizes(
+            use_art_cards
+            or all(item.kind != "section" for item in filtered_content.items)
+        )
 
         self._content_list.blockSignals(True)
         self._content_list.clear()
@@ -635,7 +806,7 @@ class MainWindowBrowserMixin:
         self._content_list.setSpacing(0)
         self._content_list.setGridSize(QSize())
         self._content_list.setWordWrap(False)
-        self._content_list.setUniformItemSizes(False)
+        self._content_list.setUniformItemSizes(True)
         self._content_list.setMinimumWidth(0)
         self._content_list.setMaximumWidth(16_777_215)
         self._content_list.setSizePolicy(
@@ -673,7 +844,10 @@ class MainWindowBrowserMixin:
         widget_item.setData(Qt.ItemDataRole.UserRole, browser_item)
         if browser_item.kind == "section":
             widget_item.setFlags(widget_item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
-        elif self._browser_item_uses_art(browser_item):
+        elif (
+            self._content_list.viewMode() == QListView.ViewMode.IconMode
+            and self._browser_item_uses_art(browser_item)
+        ):
             use_art_cards = (
                 self._content_list.viewMode() == QListView.ViewMode.IconMode
                 and browser_item.kind in {"album", "artist"}
@@ -689,10 +863,43 @@ class MainWindowBrowserMixin:
                 widget_item.setSizeHint(widget.sizeHint())
             widget_item.setText("")
         self._content_list.addItem(widget_item)
-        if browser_item.kind != "section" and self._browser_item_uses_art(browser_item):
+        if (
+            self._content_list.viewMode() == QListView.ViewMode.IconMode
+            and browser_item.kind != "section"
+            and self._browser_item_uses_art(browser_item)
+        ):
             added_item = self._content_list.item(self._content_list.count() - 1)
             if added_item is not None:
                 self._content_list.setItemWidget(added_item, widget)
+
+    def _browser_thumb_pixmap(self, artwork_ref: str | None, size: int) -> QPixmap | None:
+        if not artwork_ref:
+            return None
+        artwork_url = self._container.services.artwork_cache.normalize_url(artwork_ref)
+        if artwork_url is None:
+            return None
+        return self._thumb_pixmap_for_url(artwork_url, size=size)
+
+    def _request_thumb_for_browser_row(
+        self,
+        artwork_ref: str | None,
+        size: int,
+        row: int,
+    ) -> None:
+        del size
+        if not artwork_ref:
+            return
+        artwork_url = self._container.services.artwork_cache.normalize_url(artwork_ref)
+        if artwork_url is None:
+            return
+        if artwork_url in self._pending_thumb_callbacks:
+            return
+        cache_path = self._container.services.artwork_cache.cache_path_for_url(artwork_url)
+        self._queue_thumb_download(
+            artwork_url,
+            cache_path,
+            on_ready=lambda: self._browser_list_delegate.update_row(row),
+        )
 
     def _browser_art_row_widget(self, item: BrowserItem) -> QWidget:
         row = QWidget()

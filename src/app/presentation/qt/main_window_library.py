@@ -239,6 +239,10 @@ class MainWindowLibraryMixin:
     def _refresh_content_item_widget(self, item, browser_item: BrowserItem) -> None:
         if not self._browser_item_uses_art(browser_item):
             return
+        if self._content_list.viewMode() == QListView.ViewMode.ListMode:
+            self._content_list.removeItemWidget(item)
+            self._content_list.viewport().update()
+            return
         use_art_cards = (
             self._content_list.viewMode() == QListView.ViewMode.IconMode
             and browser_item.kind in {"album", "artist"}

@@ -217,11 +217,9 @@ def test_track_rows_render_preference_marker_in_list_mode(qtbot) -> None:
 
     window._render_content(content)
 
-    row = window._content_list.itemWidget(window._content_list.item(0))
-    assert row is not None
-    marker = row.findChild(QLabel, "browser-preference-marker")
-    assert marker is not None
-    assert marker.pixmap() is not None
+    item = window._content_list.item(0)
+    assert window._content_list.itemWidget(item) is None
+    assert item.data(Qt.ItemDataRole.UserRole).payload.is_disliked is True
 
 
 def test_artist_cards_render_preference_badge(qtbot) -> None:
@@ -299,13 +297,57 @@ def test_search_input_filters_current_list_content_locally(qtbot) -> None:
 
     assert window._content_list.viewMode() == QListView.ViewMode.ListMode
     assert window._content_list.count() == 1
-    row = window._content_list.itemWidget(window._content_list.item(0))
-    assert row is not None
-    labels = [
-        row.findChild(QLabel, "browser-art-title"),
-        row.findChild(QLabel, "browser-art-subtitle"),
-    ]
-    assert [label.text() for label in labels] == ["Beta", "Two"]
+    item = window._content_list.item(0)
+    assert window._content_list.itemWidget(item) is None
+    browser_item = item.data(Qt.ItemDataRole.UserRole)
+    assert (browser_item.title, browser_item.subtitle) == ("Beta", "Two")
+
+
+def test_large_track_page_uses_virtualized_rows(qtbot) -> None:
+    window = _BrowserHarness()
+    qtbot.addWidget(window)
+    content = BrowserContent(
+        title="Tracks",
+        items=tuple(
+            BrowserItem(
+                kind="track",
+                title=f"Track {index}",
+                subtitle="Artist",
+                payload=Track(
+                    id=str(index),
+                    title=f"Track {index}",
+                    artists=("Artist",),
+                    artwork_ref=f"art-{index}",
+                ),
+            )
+            for index in range(100)
+        ),
+    )
+
+    window._render_content(content)
+
+    assert window._content_list.count() == 100
+    assert window._content_list.uniformItemSizes() is True
+    assert all(
+        window._content_list.itemWidget(window._content_list.item(index)) is None
+        for index in range(window._content_list.count())
+    )
+
+
+def test_sectioned_list_keeps_variable_item_sizes(qtbot) -> None:
+    window = _BrowserHarness()
+    qtbot.addWidget(window)
+    content = BrowserContent(
+        title="Search",
+        items=(
+            BrowserItem(kind="section", title="Tracks", subtitle=None, payload=None),
+            BrowserItem(kind="track", title="Track", subtitle="Artist", payload=None),
+        ),
+    )
+
+    window._render_content(content)
+
+    assert window._content_list.uniformItemSizes() is False
 
 
 def test_search_input_filters_current_card_content_locally(qtbot) -> None:

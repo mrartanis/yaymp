@@ -80,6 +80,8 @@ class _SearchWorker(QObject):
 
 
 class LibraryController(QObject):
+    _LIKED_TRACKS_PAGE_SIZE = 500
+
     content_changed = Signal(object)
     content_failed = Signal(str)
     track_liked = Signal(object)
@@ -115,8 +117,8 @@ class LibraryController(QObject):
         self._active_artist_tab = "top_tracks"
         self._active_page: tuple[str, object | None] = ("search", None)
         self._active_list_kind: str | None = None
-        self._liked_tracks_limit = 100
-        self._liked_tracks_page_size = 100
+        self._liked_tracks_limit = self._LIKED_TRACKS_PAGE_SIZE
+        self._liked_tracks_page_size = self._LIKED_TRACKS_PAGE_SIZE
         self._loaded_liked_tracks: tuple[Track, ...] = ()
         self._history: list[BrowserHistoryEntry] = []
         self._search_request_id = 0
@@ -672,7 +674,9 @@ class LibraryController(QObject):
             self._active_page = ("list", None)
             self._active_list_kind = entry.list_kind
             if entry.list_kind == "liked_tracks":
-                self._liked_tracks_limit = entry.liked_tracks_limit or 100
+                self._liked_tracks_limit = (
+                    entry.liked_tracks_limit or self._LIKED_TRACKS_PAGE_SIZE
+                )
                 self._execute(lambda: self._liked_tracks_content(limit=self._liked_tracks_limit))
                 return
             if entry.list_kind == "liked_albums":

@@ -243,7 +243,7 @@ def test_load_more_liked_tracks_emits_only_next_page() -> None:
     library_service = StubLibraryService()
     library_service.all_liked_tracks = tuple(
         Track(id=f"liked-{index}", title=f"Liked {index}", artists=())
-        for index in range(205)
+        for index in range(1_005)
     )
     controller = LibraryController(
         search_service=StubSearchService(),
@@ -261,9 +261,9 @@ def test_load_more_liked_tracks_emits_only_next_page() -> None:
 
     initial = rendered[0]
     appended = rendered[1]
-    assert len(initial.items) == 100
+    assert len(initial.items) == 500
     assert appended.append_items is True
-    assert len(appended.items) == 100
-    assert appended.items[0].payload.id == "liked-100"
-    assert appended.items[-1].payload.id == "liked-199"
-    assert len(appended.source_tracks) == 200
+    assert len(appended.items) == 500
+    assert appended.items[0].payload.id == "liked-500"
+    assert appended.items[-1].payload.id == "liked-999"
+    assert len(appended.source_tracks) == 1_000
