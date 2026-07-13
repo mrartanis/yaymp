@@ -113,6 +113,40 @@ def test_search_tracks_content_uses_loaded_only_bulk_mode() -> None:
     assert len(content.source_tracks) == 1
 
 
+def test_empty_search_hides_result_tabs() -> None:
+    controller = LibraryController(
+        search_service=StubSearchService(),
+        library_service=StubLibraryService(),
+        logger=StubLogger(),
+        translate=_translate,
+    )
+    try:
+        content = controller._empty_search_content("tracks")
+    finally:
+        controller.shutdown()
+
+    assert content.tabs == ()
+    assert content.active_tab is None
+    assert content.title == "library.search"
+
+
+def test_search_with_no_matches_keeps_result_tabs() -> None:
+    controller = LibraryController(
+        search_service=StubSearchService(),
+        library_service=StubLibraryService(),
+        logger=StubLogger(),
+        translate=_translate,
+    )
+    controller._last_search_results = CatalogSearchResults()
+    try:
+        content = controller._search_content("missing", tab="tracks", refresh=False)
+    finally:
+        controller.shutdown()
+
+    assert content.tabs
+    assert content.active_tab == "tracks"
+
+
 def test_source_content_marks_station_as_loaded_only() -> None:
     controller = LibraryController(
         search_service=StubSearchService(),

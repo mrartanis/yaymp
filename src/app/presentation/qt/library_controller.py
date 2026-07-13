@@ -746,12 +746,12 @@ class LibraryController(QObject):
         )
 
     def _empty_search_content(self, tab: str) -> BrowserContent:
+        del tab
         return BrowserContent(
-            title=f"{self._t('library.search')} | {self._search_tab_title(tab)}",
+            title=self._t("library.search"),
             items=(),
             recent_searches=self.recent_searches(),
-            tabs=self._search_tabs(),
-            active_tab=tab,
+            tabs=(),
             search_query=self._last_search_query,
             bulk_mode="loaded_only",
         )
