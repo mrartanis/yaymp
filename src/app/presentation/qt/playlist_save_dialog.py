@@ -2,15 +2,18 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QFrame,
     QLabel,
     QLineEdit,
+    QPushButton,
     QRadioButton,
     QVBoxLayout,
     QWidget,
@@ -23,6 +26,8 @@ from app.domain import (
     PlaylistVisibility,
     Track,
 )
+from app.presentation.qt.dialog_chrome import WindowTitleBar
+from app.presentation.qt.icon_utils import create_icon
 
 
 class SavePlaylistDialog(QDialog):
@@ -33,6 +38,7 @@ class SavePlaylistDialog(QDialog):
         *,
         tracks: tuple[Track, ...],
         translate: Callable[..., str],
+        icon_color: str = "#ffffff",
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -40,11 +46,39 @@ class SavePlaylistDialog(QDialog):
         self._t = translate
         self._playlists: tuple[Playlist, ...] = ()
         self._saving = False
+        self.setObjectName("playlist-save-dialog")
+        self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setWindowTitle(self._t("dialog.save_playlist.title"))
         self.setModal(True)
         self.setMinimumWidth(420)
 
-        layout = QVBoxLayout(self)
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setContentsMargins(8, 8, 8, 8)
+        self._dialog_root = QFrame()
+        self._dialog_root.setObjectName("dialog-root")
+        outer_layout.addWidget(self._dialog_root)
+
+        layout = QVBoxLayout(self._dialog_root)
+        layout.setContentsMargins(14, 8, 14, 14)
+        layout.setSpacing(10)
+        self._title_bar = WindowTitleBar(self._dialog_root)
+        self._title_bar.setObjectName("top-bar")
+        self._title_bar.setFixedHeight(32)
+        title_layout = self._title_bar.controls_layout
+        title_layout.addStretch(1)
+        self._close_button = QPushButton()
+        self._close_button.setObjectName("window-close-button")
+        self._close_button.setIconSize(QSize(16, 16))
+        self._close_button.setIcon(
+            create_icon("window-close.svg", color=icon_color, size=16)
+        )
+        self._close_button.setFixedSize(32, 30)
+        self._close_button.setToolTip(self._t("action.cancel"))
+        self._close_button.clicked.connect(self.reject)
+        title_layout.addWidget(self._close_button)
+        layout.addWidget(self._title_bar)
+
         form = QFormLayout()
         self._form = form
         self._destination_combo = QComboBox()
@@ -77,9 +111,10 @@ class SavePlaylistDialog(QDialog):
         layout.addWidget(self._buttons)
         self._save_button = self._buttons.button(QDialogButtonBox.StandardButton.Save)
         self._save_button.setText(self._t("action.save_playlist"))
-        self._buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(
-            self._t("action.cancel")
-        )
+        self._save_button.setIcon(QIcon())
+        cancel_button = self._buttons.button(QDialogButtonBox.StandardButton.Cancel)
+        cancel_button.setText(self._t("action.cancel"))
+        cancel_button.setIcon(QIcon())
         self._buttons.accepted.connect(self._submit)
         self._buttons.rejected.connect(self.reject)
         self._destination_combo.currentIndexChanged.connect(self._validate)
@@ -190,3 +225,4 @@ class SavePlaylistDialog(QDialog):
         self._append_radio.setEnabled(enabled)
         self._replace_radio.setEnabled(enabled)
         self._buttons.button(QDialogButtonBox.StandardButton.Cancel).setEnabled(enabled)
+        self._close_button.setEnabled(enabled)

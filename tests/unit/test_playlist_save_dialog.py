@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDialogButtonBox
 
 from app.domain import Playlist, PlaylistSaveMode, PlaylistSaveRequest, Track
+from app.presentation.qt.dialog_chrome import WindowTitleBar
 from app.presentation.qt.playlist_save_dialog import SavePlaylistDialog
 
 
@@ -30,6 +32,20 @@ def test_dialog_highlights_duplicate_name_before_submit(qtbot) -> None:
     assert save_button.isEnabled() is False
     assert dialog._title_input.property("validation_error") is True
     assert dialog._error_label.text() == "dialog.save_playlist.name_exists"
+
+
+def test_dialog_uses_custom_frame_and_text_only_action_buttons(qtbot) -> None:
+    dialog = _dialog(qtbot)
+
+    save_button = dialog._buttons.button(QDialogButtonBox.StandardButton.Save)
+    cancel_button = dialog._buttons.button(QDialogButtonBox.StandardButton.Cancel)
+    assert bool(dialog.windowFlags() & Qt.WindowType.FramelessWindowHint)
+    assert dialog.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+    assert dialog._dialog_root.objectName() == "dialog-root"
+    assert isinstance(dialog._title_bar, WindowTitleBar)
+    assert dialog._title_bar.objectName() == "top-bar"
+    assert save_button.icon().isNull()
+    assert cancel_button.icon().isNull()
 
 
 def test_dialog_builds_replace_request_for_existing_playlist(qtbot) -> None:

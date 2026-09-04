@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 from app.bootstrap.container import AppContainer
 from app.domain import Album, Artist, PlaybackStatus, Track
 from app.presentation.qt.auth_dialog import AuthDialog
+from app.presentation.qt.dialog_chrome import WindowTitleBar
 from app.presentation.qt.i18n import UiTextCatalog
 from app.presentation.qt.icon_utils import create_icon
 from app.presentation.qt.library_controller import BrowserContent, LibraryController
@@ -151,7 +152,6 @@ class MainWindow(
         self._queue_host_layout: QVBoxLayout | None = None
         self._sidebar_docked = False
         self._title_bar: QFrame | None = None
-        self._title_drag_handle: QWidget | None = None
         self._player_panel_frame: QFrame | None = None
         self._track_metadata_zone: QWidget | None = None
         self._browser_host: QWidget | None = None
@@ -227,14 +227,12 @@ class MainWindow(
         self._apply_theme()
 
     def _build_title_bar(self) -> QFrame:
-        frame = self._plain_frame("top-bar")
+        frame = WindowTitleBar(self)
         frame.setObjectName("top-bar")
         frame.setFixedHeight(32)
-        frame.installEventFilter(self)
+        frame.double_clicked.connect(self._toggle_maximized)
         self._title_bar = frame
-        layout = QHBoxLayout(frame)
-        layout.setContentsMargins(2, 0, 0, 0)
-        layout.setSpacing(6)
+        layout = frame.controls_layout
         self._window_minimize_button = self._icon_button(
             "window-minimize.svg",
             self._t("action.minimize"),
@@ -255,10 +253,7 @@ class MainWindow(
         if environ.get("QT_QPA_PLATFORM") != "offscreen" and sys.platform == "darwin":
             for button in window_buttons:
                 layout.addWidget(button, 0, Qt.AlignmentFlag.AlignVCenter)
-        self._title_drag_handle = QWidget()
-        self._title_drag_handle.setObjectName("title-drag-handle")
-        self._title_drag_handle.installEventFilter(self)
-        layout.addWidget(self._title_drag_handle, 1)
+        layout.addStretch(1)
         if environ.get("QT_QPA_PLATFORM") == "offscreen" or sys.platform != "darwin":
             for button in (
                 self._window_minimize_button,

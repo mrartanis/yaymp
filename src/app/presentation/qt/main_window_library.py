@@ -43,7 +43,12 @@ class MainWindowLibraryMixin:
         )
         if not tracks:
             return
-        dialog = SavePlaylistDialog(tracks=tracks, translate=self._t, parent=self)
+        dialog = SavePlaylistDialog(
+            tracks=tracks,
+            translate=self._t,
+            icon_color=self._theme_icon_color(),
+            parent=self,
+        )
         dialog.setStyleSheet(self.styleSheet())
         dialog.save_requested.connect(self._playlist_save_controller.save)
         dialog.finished.connect(self._clear_playlist_save_dialog)

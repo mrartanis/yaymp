@@ -1,4 +1,5 @@
 from app.bootstrap.startup import build_startup_context
+from app.presentation.qt.dialog_chrome import WindowTitleBar
 
 
 def test_main_window_can_be_constructed(qtbot, qapp, tmp_path, monkeypatch) -> None:
@@ -14,6 +15,7 @@ def test_main_window_can_be_constructed(qtbot, qapp, tmp_path, monkeypatch) -> N
     context.main_window.show()
 
     assert context.main_window.windowTitle() == "YAYMP"
+    assert isinstance(context.main_window._title_bar, WindowTitleBar)
     assert context.container.config.settings_file.name == "settings.json"
     assert context.container.services.settings_service.load_volume() == 100
     assert context.main_window.isVisible()

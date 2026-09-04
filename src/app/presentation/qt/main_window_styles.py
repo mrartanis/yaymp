@@ -93,13 +93,18 @@ def build_main_window_stylesheet(
                 background: {palette.dialog_bg};
                 border-radius: {window_radius}px;
             }}
+            QDialog#playlist-save-dialog {{
+                background: transparent;
+            }}
+            QFrame#dialog-root {{
+                background: {palette.dialog_bg};
+                border: 1px solid {palette.button_border};
+                border-radius: {window_radius}px;
+            }}
             QFrame#top-bar {{
                 background: {palette.top_bar_bg};
                 border: 0;
                 border-radius: {top_bar_radius}px;
-            }}
-            QWidget#title-drag-handle {{
-                background: transparent;
             }}
             QFrame {{
                 background: transparent;

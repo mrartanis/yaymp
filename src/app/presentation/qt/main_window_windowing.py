@@ -52,8 +52,6 @@ class MainWindowWindowingMixin:
         if self._handle_frame_resize_event(watched, event):
             return True
         auth_label = getattr(self, "_auth_label", None)
-        title_bar = getattr(self, "_title_bar", None)
-        title_drag_handle = getattr(self, "_title_drag_handle", None)
         settings_popup = getattr(self, "_settings_popup", None)
         volume_button = getattr(self, "_volume_button", None)
         volume_popup = getattr(self, "_volume_popup", None)
@@ -75,48 +73,6 @@ class MainWindowWindowingMixin:
                     self._show_settings_popup()
                 return True
             return False
-        if watched in {title_bar, title_drag_handle}:
-            if event.type() == QEvent.Type.MouseButtonDblClick:
-                self._pending_system_move = False
-                self._manual_window_drag_active = False
-                self._toggle_maximized()
-                return True
-            if event.type() == QEvent.Type.MouseButtonPress:
-                mouse_event = self._as_mouse_event(event)
-                if (
-                    mouse_event is not None
-                    and mouse_event.button() == Qt.MouseButton.LeftButton
-                    and not self.isMaximized()
-                ):
-                    self._pending_system_move = True
-                    self._pending_system_move_origin = mouse_event.globalPosition()
-                    self._manual_window_drag_active = False
-                    self._manual_window_drag_origin = QPointF()
-                    return True
-            if event.type() == QEvent.Type.MouseMove:
-                mouse_event = self._as_mouse_event(event)
-                if self._manual_window_drag_active and mouse_event is not None:
-                    self._apply_manual_window_drag(mouse_event)
-                    return True
-                if (
-                    self._pending_system_move
-                    and mouse_event is not None
-                    and bool(mouse_event.buttons() & Qt.MouseButton.LeftButton)
-                    and not self.isMaximized()
-                ):
-                    distance = (
-                        mouse_event.globalPosition() - self._pending_system_move_origin
-                    ).manhattanLength()
-                    if distance < self._drag_threshold():
-                        return True
-                    self._pending_system_move = False
-                    if not self._start_system_move():
-                        self._start_manual_window_drag(mouse_event)
-                    return True
-            if event.type() == QEvent.Type.MouseButtonRelease:
-                self._pending_system_move = False
-                self._finish_manual_window_drag()
-                return False
         if watched in {
             player_panel_frame,
             track_metadata_zone,
