@@ -34,6 +34,10 @@ class MainWindowWindowingMixin:
         refresh_window_button = getattr(self, "_refresh_window_maximize_button", None)
         if callable(refresh_window_button) and event.type() == QEvent.Type.WindowStateChange:
             refresh_window_button()
+        if event.type() == QEvent.Type.WindowStateChange:
+            queue_list = getattr(self, "_queue_list", None)
+            if queue_list is not None:
+                queue_list.refresh_waveform_visibility()
 
     def closeEvent(self, event: QCloseEvent) -> None:
         flush_my_wave_history = getattr(self, "_flush_my_wave_history", None)

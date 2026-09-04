@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from PySide6.QtCore import QModelIndex
 
+from app.domain import Track
 from app.domain.playback import QueueItem
 
 
@@ -15,7 +18,14 @@ class MainWindowQueueMixin:
         status_changed = playback_status != self._rendered_playback_status
 
         if queue_changed:
-            self._queue_model.set_queue(snapshot.queue)
+            self._queue_model.set_queue(tuple(
+                replace(item, track=self._track_with_preference_override(item.track))
+                if (
+                    item.track.id in self._track_like_overrides
+                    or item.track.id in self._track_dislike_overrides
+                ) else item
+                for item in snapshot.queue
+            ))
             self._rendered_queue_key = queue_key
             if (
                 self._queue_selected_index is not None
@@ -64,14 +74,5 @@ class MainWindowQueueMixin:
     def _queue_key(
         self,
         queue: tuple[QueueItem, ...],
-    ) -> tuple[tuple[str, str, str, str, str], ...]:
-        return tuple(
-            (
-                item.track.id,
-                item.track.title,
-                item.track.version or "",
-                item.track.album_title or "",
-                ",".join(item.track.artists),
-            )
-            for item in queue
-        )
+    ) -> tuple[Track, ...]:
+        return tuple(item.track for item in queue)

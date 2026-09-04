@@ -3,12 +3,15 @@ from __future__ import annotations
 import logging
 from collections import OrderedDict
 from pathlib import Path
+from threading import Event, get_ident
 from types import SimpleNamespace
 
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QColor, QImage, QPixmap
 from PySide6.QtWidgets import QLabel, QWidget
 
 from app.infrastructure.persistence.file_artwork_cache import FileArtworkCache
+from app.presentation.qt.library_task_runner import LibraryTaskRunner
 from app.presentation.qt.main_window_artwork import MainWindowArtworkMixin
 
 
@@ -37,6 +40,49 @@ def _write_image(path: Path, fill: str, *, center_fill: str | None = None) -> No
             for x in range(45, 135):
                 image.setPixelColor(x, y, QColor(center_fill))
     assert image.save(str(path))
+
+
+def test_artwork_preparation_runs_in_background_and_discards_stale_result(
+    qtbot, tmp_path, monkeypatch,
+):
+    from app.presentation.qt.artwork_processing import prepare_artwork
+
+    window = _ArtworkHarness(cache_dir=tmp_path)
+    qtbot.addWidget(window)
+    runner = LibraryTaskRunner(logger=logging.getLogger("test-artwork"), parent=window)
+    window._library_task_runner = runner
+    runner.completed.connect(window._handle_artwork_prepared)
+    runner.failed.connect(window._handle_artwork_preparation_failed)
+    first, second = tmp_path / "first.png", tmp_path / "second.png"
+    _write_image(first, "#ff2222")
+    _write_image(second, "#2288ff")
+    started, release = Event(), Event()
+    threads = []
+
+    def slow_prepare(path, **kwargs):
+        threads.append(get_ident())
+        if path == first:
+            started.set()
+            assert release.wait(3)
+        return prepare_artwork(path, **kwargs)
+
+    monkeypatch.setattr("app.presentation.qt.main_window_artwork.prepare_artwork", slow_prepare)
+    try:
+        window._set_artwork_pixmap(first)
+        qtbot.waitUntil(started.is_set)
+        window._set_artwork_pixmap(second)
+        ticks = []
+        QTimer.singleShot(0, lambda: ticks.append(True))
+        qtbot.waitUntil(lambda: bool(ticks))
+        assert window._accent_color == "#526ee8"
+        release.set()
+        qtbot.waitUntil(lambda: window._artwork_prepare_task_id is None)
+        assert window._accent_color == "#2288ff"
+        assert len(threads) == 2
+        assert all(thread != get_ident() for thread in threads)
+    finally:
+        release.set()
+        runner.shutdown()
 
 
 def test_artwork_prefers_pixel_accent_over_api_color(qtbot, tmp_path) -> None:

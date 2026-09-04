@@ -42,6 +42,23 @@ def test_ui_text_catalog_formats_translated_strings() -> None:
     assert catalog.text("status.authenticated_as", username="alice") == "Вошли как alice"
 
 
+def test_catalog_resolves_system_language_once_and_tracks_preference_changes(monkeypatch):
+    calls = []
+
+    def resolve():
+        calls.append(True)
+        return "ru"
+
+    monkeypatch.setattr("app.presentation.qt.i18n.resolve_system_language", resolve)
+    settings = StubSettingsService("system")
+    catalog = UiTextCatalog(settings_service=settings)
+    for _ in range(100):
+        assert catalog.text("action.search") == "Поиск"
+    assert len(calls) == 1
+    settings._language = "en"
+    assert catalog.text("action.search") == "Search"
+
+
 def test_resolve_system_language_uses_linux_locale_environment(monkeypatch) -> None:
     class StubLocale:
         @staticmethod

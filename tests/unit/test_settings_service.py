@@ -99,3 +99,23 @@ def test_settings_service_logs_storage_failures_and_uses_defaults() -> None:
     service.save_volume(25)
 
     assert logger.warnings
+
+
+def test_repeated_ui_reads_use_cache_and_preserve_other_settings():
+    class CountingRepo(InMemorySettingsRepo):
+        reads = 0
+
+        def load_settings(self):
+            self.reads += 1
+            return super().load_settings()
+
+    repo = CountingRepo({"volume": 40, "theme": "dark", "extra": "keep"})
+    service = SettingsService(settings_repo=repo, logger=RecordingLogger())
+    for _ in range(100):
+        assert service.load_volume() == 40
+        assert service.load_theme_preference() == "dark"
+        service.load_language_preference()
+    service.save_volume(75)
+    assert service.load_volume() == 75
+    assert repo.reads == 1
+    assert repo.settings == {"volume": 75, "theme": "dark", "extra": "keep"}

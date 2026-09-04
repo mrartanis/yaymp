@@ -413,12 +413,18 @@ def resolve_language(preference: str | None) -> str:
 class UiTextCatalog:
     def __init__(self, *, settings_service) -> None:
         self._settings_service = settings_service
+        self._cached_preference: str | None = None
+        self._cached_language = "en"
 
     def language_preference(self) -> str:
         return self._settings_service.load_language_preference()
 
     def resolved_language(self) -> str:
-        return resolve_language(self.language_preference())
+        preference = self.language_preference()
+        if preference != self._cached_preference:
+            self._cached_language = resolve_language(preference)
+            self._cached_preference = preference
+        return self._cached_language
 
     def text(self, key: str, **params: object) -> str:
         language = self.resolved_language()

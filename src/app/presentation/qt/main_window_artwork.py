@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import colorsys
-import math
 from collections import OrderedDict
 from pathlib import Path
 
@@ -13,6 +11,13 @@ from PySide6.QtNetwork import QNetworkReply, QNetworkRequest
 from app.domain import Track
 from app.domain.errors import DomainError
 from app.domain.playback import QueueItem
+from app.presentation.qt.artwork_processing import (
+    PreparedArtwork,
+    accent_sampling_step,
+    extract_accent_color,
+    has_usable_accent_contrast,
+    prepare_artwork,
+)
 
 
 class MainWindowArtworkMixin:
@@ -173,6 +178,8 @@ class MainWindowArtworkMixin:
             cache.popitem(last=False)
 
     def _render_artwork(self, track: Track) -> None:
+        self._cancel_artwork_preparation()
+        self._pending_artwork_track_id = track.id
         if not track.artwork_ref:
             self._clear_artwork()
             self._set_accent_color("#526ee8")
@@ -185,9 +192,6 @@ class MainWindowArtworkMixin:
             return
 
         cache_path = self._container.services.artwork_cache.cache_path_for_url(artwork_url)
-        cached_accent = self._container.services.artwork_cache.load_accent_color(cache_path)
-        if cached_accent:
-            self._set_accent_color(cached_accent)
         if cache_path.exists():
             self._set_artwork_pixmap(cache_path, preferred_accent=track.accent_color)
             return
@@ -262,52 +266,46 @@ class MainWindowArtworkMixin:
         self._start_next_thumb_downloads()
 
     def _set_artwork_pixmap(self, path: Path, *, preferred_accent: str | None = None) -> None:
-        pixmap = QPixmap(str(path))
-        if pixmap.isNull():
+        cache = self._container.services.artwork_cache
+        logger = self._container.logger
+
+        def prepare() -> PreparedArtwork:
+            return prepare_artwork(
+                path, cache=cache, logger=logger, preferred_accent=preferred_accent
+            )
+
+        runner = getattr(self, "_library_task_runner", None)
+        if runner is None:
+            self._display_prepared_artwork(prepare())
+            return
+        self._cancel_artwork_preparation()
+        self._artwork_prepare_task_id = runner.submit(prepare)
+
+    def _cancel_artwork_preparation(self) -> None:
+        task_id = getattr(self, "_artwork_prepare_task_id", None)
+        if task_id is not None:
+            self._library_task_runner.cancel(task_id)
+            self._artwork_prepare_task_id = None
+
+    def _handle_artwork_prepared(self, task_id: int, result: object) -> None:
+        if task_id != getattr(self, "_artwork_prepare_task_id", None):
+            return
+        self._artwork_prepare_task_id = None
+        if isinstance(result, PreparedArtwork):
+            self._display_prepared_artwork(result)
+
+    def _handle_artwork_preparation_failed(self, task_id: int, error: object) -> None:
+        if task_id == getattr(self, "_artwork_prepare_task_id", None):
+            self._artwork_prepare_task_id = None
+            self._container.logger.warning("Artwork preparation failed: %s", error)
+
+    def _display_prepared_artwork(self, artwork: PreparedArtwork) -> None:
+        if artwork.image.isNull():
             self._clear_artwork()
             return
-        accent = self._container.services.artwork_cache.load_accent_color(path)
-        if accent is None:
-            pixel_accent = self._extract_accent_color(pixmap)
-            if pixel_accent and self._has_usable_accent_contrast(pixel_accent):
-                accent = pixel_accent
-                self._container.logger.debug(
-                    "Artwork accent source=pixels image=%s color=%s preferred=%s",
-                    path.name,
-                    accent,
-                    preferred_accent or "none",
-                )
-            elif preferred_accent and self._has_usable_accent_contrast(preferred_accent):
-                accent = preferred_accent
-                self._container.logger.debug(
-                    (
-                        "Artwork accent source=api-fallback image=%s color=%s "
-                        "pixel_candidate=%s preferred=%s"
-                    ),
-                    path.name,
-                    accent,
-                    pixel_accent,
-                    preferred_accent,
-                )
-            else:
-                accent = "#526ee8"
-                self._container.logger.debug(
-                    (
-                        "Artwork accent source=default-fallback image=%s color=%s "
-                        "pixel_candidate=%s preferred=%s"
-                    ),
-                    path.name,
-                    accent,
-                    pixel_accent,
-                    preferred_accent or "none",
-                )
-            try:
-                self._container.services.artwork_cache.save_accent_color(path, accent)
-            except DomainError as exc:
-                self._container.logger.warning("Artwork accent cache write failed: %s", exc)
-        self._set_accent_color(accent)
+        self._set_accent_color(artwork.accent)
         self._artwork_label.setPixmap(
-            pixmap.scaled(
+            QPixmap.fromImage(artwork.image).scaled(
                 self._artwork_label.size(),
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
@@ -315,111 +313,19 @@ class MainWindowArtworkMixin:
         )
 
     def _clear_artwork(self) -> None:
+        self._cancel_artwork_preparation()
         self._pending_artwork_track_id = None
         self._artwork_label.clear()
         self._artwork_label.setText("No cover")
 
     def _extract_accent_color(self, pixmap: QPixmap) -> str | None:
-        image = pixmap.toImage()
-        width = image.width()
-        height = image.height()
-        if width <= 0 or height <= 0:
-            return None
-        step = self._accent_sampling_step(width, height)
-        origin_x = width % step
-        origin_y = height % step
-        center_x = (width - 1) / 2.0
-        center_y = (height - 1) / 2.0
-        max_distance = math.hypot(center_x, center_y) or 1.0
-        buckets: dict[tuple[int, int, int], dict[str, float]] = {}
-
-        for y in range(origin_y, height, step):
-            for x in range(origin_x, width, step):
-                color = image.pixelColor(x, y)
-                if color.alpha() < 40:
-                    continue
-                red = color.red()
-                green = color.green()
-                blue = color.blue()
-                hue, lightness, saturation = colorsys.rgb_to_hls(
-                    red / 255.0,
-                    green / 255.0,
-                    blue / 255.0,
-                )
-                if lightness < 0.08 or lightness > 0.94:
-                    continue
-                if saturation < 0.12:
-                    continue
-                key = (
-                    min(35, int(hue * 36)),
-                    min(7, int(lightness * 8)),
-                    min(5, int(saturation * 6)),
-                )
-                distance = math.hypot(x - center_x, y - center_y) / max_distance
-                center_weight = 1.0 - max(0.0, min(1.0, distance))
-                bucket = buckets.setdefault(
-                    key,
-                    {
-                        "count": 0.0,
-                        "red": 0.0,
-                        "green": 0.0,
-                        "blue": 0.0,
-                        "saturation": 0.0,
-                        "lightness": 0.0,
-                        "center": 0.0,
-                    },
-                )
-                bucket["count"] += 1.0
-                bucket["red"] += red
-                bucket["green"] += green
-                bucket["blue"] += blue
-                bucket["saturation"] += saturation
-                bucket["lightness"] += lightness
-                bucket["center"] += center_weight
-
-        if not buckets:
-            return None
-        total_count = sum(bucket["count"] for bucket in buckets.values()) or 1.0
-        best_score = -1.0
-        best_rgb = (82, 110, 232)
-        for bucket in buckets.values():
-            count = bucket["count"] or 1.0
-            area = count / total_count
-            saturation = bucket["saturation"] / count
-            lightness = bucket["lightness"] / count
-            center = bucket["center"] / count
-            lightness_score = 1.0 - abs(lightness - 0.55) / 0.45
-            lightness_score = max(0.0, min(1.0, lightness_score))
-            score = (
-                (area**0.55)
-                * (saturation**1.45)
-                * (0.25 + 0.75 * lightness_score)
-                * (0.75 + 0.25 * center)
-            )
-            if score <= best_score:
-                continue
-            best_score = score
-            best_rgb = (
-                int(bucket["red"] / count),
-                int(bucket["green"] / count),
-                int(bucket["blue"] / count),
-            )
-        return "#{:02x}{:02x}{:02x}".format(*best_rgb)
+        return extract_accent_color(pixmap.toImage())
 
     def _accent_sampling_step(self, width: int, height: int) -> int:
-        longest_side = max(width, height)
-        return max(3, min(8, longest_side // 220 or 3))
+        return accent_sampling_step(width, height)
 
     def _has_usable_accent_contrast(self, color: str) -> bool:
-        qcolor = QColor(color)
-        luminance = (
-            0.2126 * qcolor.redF()
-            + 0.7152 * qcolor.greenF()
-            + 0.0722 * qcolor.blueF()
-        )
-        background = 0.055
-        contrast = (max(luminance, background) + 0.05) / (min(luminance, background) + 0.05)
-        return contrast >= 2.2
+        return has_usable_accent_contrast(color)
 
     def _set_accent_color(self, color: str) -> None:
         if color == self._accent_color:

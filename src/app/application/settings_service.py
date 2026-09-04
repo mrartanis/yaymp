@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from threading import Lock
+
 from app.domain import AudioQuality, Logger, SettingsRepo
 from app.domain.errors import StorageError
 
 
 class SettingsService:
+    """Keep runtime preferences in memory and serialize writes across callers."""
+
     _VOLUME_KEY = "volume"
     _AUDIO_QUALITY_KEY = "audio_quality"
     _THEME_KEY = "theme"
@@ -17,6 +21,13 @@ class SettingsService:
     def __init__(self, *, settings_repo: SettingsRepo, logger: Logger) -> None:
         self._settings_repo = settings_repo
         self._logger = logger
+        self._cache_lock = Lock()
+        self._write_lock = Lock()
+        try:
+            self._settings = dict(settings_repo.load_settings())
+        except StorageError as exc:
+            self._logger.warning("Failed to load settings: %s", exc)
+            self._settings = None
 
     def load_volume(self, *, default: int = 100) -> int:
         value = self._load_value(self._VOLUME_KEY)
@@ -136,17 +147,18 @@ class SettingsService:
         self._save_value(self._BROWSER_VIEW_MODE_KEY, mode)
 
     def _load_value(self, key: str) -> object | None:
-        try:
-            settings = self._settings_repo.load_settings()
-        except StorageError as exc:
-            self._logger.warning("Failed to load setting %s: %s", key, exc)
-            return None
-        return settings.get(key)
+        with self._cache_lock:
+            return self._settings.get(key) if self._settings is not None else None
 
     def _save_value(self, key: str, value: object) -> None:
-        try:
-            settings = dict(self._settings_repo.load_settings())
-            settings[key] = value
-            self._settings_repo.save_settings(settings)
-        except StorageError as exc:
-            self._logger.warning("Failed to save setting %s: %s", key, exc)
+        with self._write_lock:
+            with self._cache_lock:
+                if self._settings is None:
+                    return  # Do not overwrite a file that could not be read.
+                self._settings[key] = value
+                settings = dict(self._settings)
+            # Readers never wait for disk IO.
+            try:
+                self._settings_repo.save_settings(settings)
+            except StorageError as exc:
+                self._logger.warning("Failed to save setting %s: %s", key, exc)

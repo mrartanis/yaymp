@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from bisect import bisect_right
 from math import ceil
 
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QLineF, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPaintEvent, QPen
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
@@ -28,6 +29,9 @@ class WaveformSeekBar(QWidget):
         self._waveform_known_position_ms = 0
         self._waveform_mode = "plain"
         self._waveform_enabled = False
+        self._geometry_key: tuple | None = None
+        self._waveform_lines: list[QLineF] = []
+        self._waveform_offsets: list[float] = []
         self.setMouseTracking(True)
         self.setObjectName("seek-slider")
         self.setMinimumHeight(26)
@@ -40,7 +44,10 @@ class WaveformSeekBar(QWidget):
         self._page_step = max(1, value)
 
     def setMaximum(self, value: int) -> None:  # noqa: N802
-        self._maximum = max(1, value)
+        maximum = max(1, value)
+        if maximum == self._maximum:
+            return
+        self._maximum = maximum
         self._value = min(self._value, self._maximum)
         self.update()
 
@@ -79,6 +86,13 @@ class WaveformSeekBar(QWidget):
         waveform_known_position_ms: int,
         waveform_mode: str,
     ) -> None:
+        if (
+            self._buffered_position_ms == buffered_position_ms
+            and self._waveform_bins == waveform_bins
+            and self._waveform_known_position_ms == waveform_known_position_ms
+            and self._waveform_mode == waveform_mode
+        ):
+            return
         self._buffered_position_ms = buffered_position_ms
         self._waveform_bins = waveform_bins
         self._waveform_known_position_ms = waveform_known_position_ms
@@ -90,6 +104,10 @@ class WaveformSeekBar(QWidget):
         if enabled == self._waveform_enabled:
             return
         self._waveform_enabled = enabled
+        if not enabled:
+            self._geometry_key = None
+            self._waveform_lines = []
+            self._waveform_offsets = []
         self.update()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
@@ -200,20 +218,36 @@ class WaveformSeekBar(QWidget):
         half_height = max(5.0, waveform_base_height * 2.15)
         pen_width = max(1.0, known_width / max(known_bins, 120))
         played_limit = played_ratio * groove_rect.width()
-
-        for index in range(known_bins):
-            amplitude = max(0.08, min(1.0, bins[index]))
-            if known_bins == 1:
-                x = groove_rect.left() + known_width / 2
-            else:
-                x = groove_rect.left() + known_width * (index / (known_bins - 1))
-            height = half_height * amplitude
-            color = played_color if (x - groove_rect.left()) <= played_limit else pending_color
-            painter.setPen(QPen(color, pen_width, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-            painter.drawLine(
-                QPointF(x, groove_rect.center().y() - height / 2),
-                QPointF(x, groove_rect.center().y() + height / 2),
-            )
+        played_pen = QPen(
+            played_color, pen_width, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap
+        )
+        pending_pen = QPen(
+            pending_color, pen_width, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap
+        )
+        geometry_key = (bins, known_bins, known_width, groove_rect)
+        if geometry_key != self._geometry_key:
+            self._geometry_key = geometry_key
+            self._waveform_lines = []
+            self._waveform_offsets = []
+            for index in range(known_bins):
+                amplitude = max(0.08, min(1.0, bins[index]))
+                if known_bins == 1:
+                    x = groove_rect.left() + known_width / 2
+                else:
+                    x = groove_rect.left() + known_width * (index / (known_bins - 1))
+                height = half_height * amplitude
+                self._waveform_offsets.append(x - groove_rect.left())
+                self._waveform_lines.append(QLineF(
+                    x, groove_rect.center().y() - height / 2,
+                    x, groove_rect.center().y() + height / 2,
+                ))
+        split = bisect_right(self._waveform_offsets, played_limit)
+        painter.setPen(played_pen)
+        for line in self._waveform_lines[:split]:
+            painter.drawLine(line)
+        painter.setPen(pending_pen)
+        for line in self._waveform_lines[split:]:
+            painter.drawLine(line)
 
         if not is_placeholder and known_bins < len(bins):
             tail_rect = QRectF(
