@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from collections.abc import Callable
 
 from PySide6.QtCore import QSize, Qt, Signal
@@ -32,6 +33,7 @@ from app.presentation.qt.icon_utils import create_icon
 
 class SavePlaylistDialog(QDialog):
     save_requested = Signal(object)
+    _INPUT_MIN_WIDTH = 500
 
     def __init__(
         self,
@@ -66,7 +68,6 @@ class SavePlaylistDialog(QDialog):
         self._title_bar.setObjectName("top-bar")
         self._title_bar.setFixedHeight(32)
         title_layout = self._title_bar.controls_layout
-        title_layout.addStretch(1)
         self._close_button = QPushButton()
         self._close_button.setObjectName("window-close-button")
         self._close_button.setIconSize(QSize(16, 16))
@@ -76,16 +77,23 @@ class SavePlaylistDialog(QDialog):
         self._close_button.setFixedSize(32, 30)
         self._close_button.setToolTip(self._t("action.cancel"))
         self._close_button.clicked.connect(self.reject)
-        title_layout.addWidget(self._close_button)
+        if _macos_window_controls_on_left():
+            title_layout.addWidget(self._close_button)
+            title_layout.addStretch(1)
+        else:
+            title_layout.addStretch(1)
+            title_layout.addWidget(self._close_button)
         layout.addWidget(self._title_bar)
 
         form = QFormLayout()
         self._form = form
         self._destination_combo = QComboBox()
+        self._destination_combo.setMinimumWidth(self._INPUT_MIN_WIDTH)
         self._destination_combo.addItem(self._t("dialog.save_playlist.new"), None)
         self._destination_combo.setEnabled(False)
         form.addRow(self._t("dialog.save_playlist.destination"), self._destination_combo)
         self._title_input = QLineEdit()
+        self._title_input.setMinimumWidth(self._INPUT_MIN_WIDTH)
         form.addRow(self._t("dialog.save_playlist.name"), self._title_input)
         self._public_checkbox = QCheckBox(self._t("dialog.save_playlist.public"))
         form.addRow("", self._public_checkbox)
@@ -226,3 +234,7 @@ class SavePlaylistDialog(QDialog):
         self._replace_radio.setEnabled(enabled)
         self._buttons.button(QDialogButtonBox.StandardButton.Cancel).setEnabled(enabled)
         self._close_button.setEnabled(enabled)
+
+
+def _macos_window_controls_on_left() -> bool:
+    return sys.platform == "darwin"

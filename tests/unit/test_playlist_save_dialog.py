@@ -4,6 +4,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDialogButtonBox
 
 from app.domain import Playlist, PlaylistSaveMode, PlaylistSaveRequest, Track
+from app.presentation.qt import playlist_save_dialog
 from app.presentation.qt.dialog_chrome import WindowTitleBar
 from app.presentation.qt.playlist_save_dialog import SavePlaylistDialog
 
@@ -46,6 +47,25 @@ def test_dialog_uses_custom_frame_and_text_only_action_buttons(qtbot) -> None:
     assert dialog._title_bar.objectName() == "top-bar"
     assert save_button.icon().isNull()
     assert cancel_button.icon().isNull()
+    assert dialog._title_input.minimumWidth() == 500
+    assert dialog._destination_combo.minimumWidth() == 500
+
+
+def test_dialog_places_close_button_on_left_on_macos(qtbot, monkeypatch) -> None:
+    monkeypatch.setattr(playlist_save_dialog, "_macos_window_controls_on_left", lambda: True)
+
+    dialog = _dialog(qtbot)
+
+    assert dialog._title_bar.controls_layout.itemAt(0).widget() is dialog._close_button
+
+
+def test_dialog_places_close_button_on_right_elsewhere(qtbot, monkeypatch) -> None:
+    monkeypatch.setattr(playlist_save_dialog, "_macos_window_controls_on_left", lambda: False)
+
+    dialog = _dialog(qtbot)
+
+    layout = dialog._title_bar.controls_layout
+    assert layout.itemAt(layout.count() - 1).widget() is dialog._close_button
 
 
 def test_dialog_builds_replace_request_for_existing_playlist(qtbot) -> None:
