@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QRadioButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -33,7 +34,6 @@ from app.presentation.qt.icon_utils import create_icon
 
 class SavePlaylistDialog(QDialog):
     save_requested = Signal(object)
-    _INPUT_MIN_WIDTH = 500
 
     def __init__(
         self,
@@ -53,7 +53,7 @@ class SavePlaylistDialog(QDialog):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setWindowTitle(self._t("dialog.save_playlist.title"))
         self.setModal(True)
-        self.setMinimumWidth(420)
+        self.setMinimumWidth(360)
 
         outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(8, 8, 8, 8)
@@ -86,14 +86,19 @@ class SavePlaylistDialog(QDialog):
         layout.addWidget(self._title_bar)
 
         form = QFormLayout()
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         self._form = form
         self._destination_combo = QComboBox()
-        self._destination_combo.setMinimumWidth(self._INPUT_MIN_WIDTH)
+        self._destination_combo.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
         self._destination_combo.addItem(self._t("dialog.save_playlist.new"), None)
         self._destination_combo.setEnabled(False)
         form.addRow(self._t("dialog.save_playlist.destination"), self._destination_combo)
         self._title_input = QLineEdit()
-        self._title_input.setMinimumWidth(self._INPUT_MIN_WIDTH)
+        self._title_input.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
         form.addRow(self._t("dialog.save_playlist.name"), self._title_input)
         self._public_checkbox = QCheckBox(self._t("dialog.save_playlist.public"))
         form.addRow("", self._public_checkbox)
@@ -129,6 +134,7 @@ class SavePlaylistDialog(QDialog):
         self._title_input.textChanged.connect(self._validate)
         self._set_new_playlist_fields(True)
         self._validate()
+        self.resize(480, self.sizeHint().height())
 
     def set_destinations(self, playlists: tuple[Playlist, ...]) -> None:
         self._playlists = playlists

@@ -47,8 +47,22 @@ def test_dialog_uses_custom_frame_and_text_only_action_buttons(qtbot) -> None:
     assert dialog._title_bar.objectName() == "top-bar"
     assert save_button.icon().isNull()
     assert cancel_button.icon().isNull()
-    assert dialog._title_input.minimumWidth() == 500
-    assert dialog._destination_combo.minimumWidth() == 500
+
+
+def test_dialog_fields_expand_with_window(qtbot) -> None:
+    dialog = _dialog(qtbot)
+    dialog.show()
+    dialog.resize(400, dialog.height())
+    qtbot.wait(1)
+    narrow_title_width = dialog._title_input.width()
+    narrow_destination_width = dialog._destination_combo.width()
+
+    dialog.resize(700, dialog.height())
+    qtbot.wait(1)
+
+    assert dialog.minimumWidth() == 360
+    assert dialog._title_input.width() > narrow_title_width
+    assert dialog._destination_combo.width() > narrow_destination_width
 
 
 def test_dialog_places_close_button_on_left_on_macos(qtbot, monkeypatch) -> None:
