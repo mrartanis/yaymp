@@ -309,6 +309,7 @@ class MainWindowPreferencesMixin:
             button.setChecked(candidate == enabled)
 
     def _logout(self) -> None:
+        self._library_warmup_controller.cancel()
         self._container.services.auth_service.clear_session()
         self._container.services.music_service.clear_auth_session()
         if self._settings_popup is not None:
@@ -376,6 +377,11 @@ class MainWindowPreferencesMixin:
         self._auth_dialog.raise_()
         self._auth_dialog.activateWindow()
 
+    def _maybe_start_library_warmup(self) -> None:
+        if self._container.services.auth_service.current_session() is None:
+            return
+        self._library_warmup_controller.start()
+
     def _complete_auth_flow(self, token: str, expires_in: int | None) -> None:
         try:
             session = self._container.services.auth_service.authenticate_with_token(
@@ -393,6 +399,7 @@ class MainWindowPreferencesMixin:
         username = session.display_name or session.user_id
         self._status_label.setText(self._t("status.authenticated_as", username=username))
         self._render_auth_state()
+        self._maybe_start_library_warmup()
 
     def _clear_auth_dialog(self) -> None:
         if (
@@ -494,6 +501,8 @@ class MainWindowPreferencesMixin:
             self._queue_shuffle_button.setIcon(
                 create_icon("shuffle_playlist.svg", color=icon_color)
             )
+        if hasattr(self, "_save_queue_button"):
+            self._save_queue_button.setIcon(create_icon("save_playlist.svg", color=icon_color))
         if hasattr(self, "_clear_queue_button"):
             self._clear_queue_button.setIcon(create_icon("clear_playlist.svg", color=icon_color))
         if hasattr(self, "_play_pause_button"):

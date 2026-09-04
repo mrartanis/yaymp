@@ -385,6 +385,9 @@ def build_main_window_stylesheet(
                 color: {palette.text_primary};
                 padding: 4px 7px;
             }}
+            QLineEdit[validation_error="true"] {{
+                border-color: #d45b67;
+            }}
             QComboBox QAbstractItemView {{
                 background: {palette.popup_bg};
                 border: 1px solid {accent};

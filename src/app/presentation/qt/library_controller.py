@@ -3,13 +3,14 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot
+from PySide6.QtCore import QObject, Signal
 
 from app.application.error_presenter import user_facing_error_message
 from app.application.library_service import LibraryService
 from app.application.search_service import SearchService
 from app.domain import Album, Artist, CatalogSearchResults, Logger, Playlist, Station, Track
 from app.domain.errors import DomainError
+from app.presentation.qt.library_task_runner import LibraryTaskRunner
 from app.presentation.qt.track_display import display_track_title
 
 
@@ -59,26 +60,6 @@ class BrowserHistoryEntry:
     list_kind: str | None = None
 
 
-class _SearchWorker(QObject):
-    search_ready = Signal(int, str, object)
-    search_failed = Signal(int, str)
-
-    def __init__(self, *, search_service: SearchService, logger: Logger) -> None:
-        super().__init__()
-        self._search_service = search_service
-        self._logger = logger
-
-    @Slot(int, str)
-    def run_search(self, request_id: int, query: str) -> None:
-        try:
-            results = self._search_service.search_catalog(query)
-        except DomainError as exc:
-            self._logger.warning("Library search failed: %s", exc)
-            self.search_failed.emit(request_id, user_facing_error_message(exc))
-            return
-        self.search_ready.emit(request_id, query, results)
-
-
 class LibraryController(QObject):
     _LIKED_TRACKS_PAGE_SIZE = 500
 
@@ -96,7 +77,7 @@ class LibraryController(QObject):
     artist_undisliked = Signal(object)
     playlist_liked = Signal(object)
     playlist_unliked = Signal(object)
-    _search_requested = Signal(int, str)
+    bulk_tracks_ready = Signal(str, object)
 
     def __init__(
         self,
@@ -105,6 +86,7 @@ class LibraryController(QObject):
         library_service: LibraryService,
         logger: Logger,
         translate: Callable[..., str],
+        task_runner: LibraryTaskRunner | None = None,
     ) -> None:
         super().__init__()
         self._search_service = search_service
@@ -122,20 +104,15 @@ class LibraryController(QObject):
         self._loaded_liked_tracks: tuple[Track, ...] = ()
         self._history: list[BrowserHistoryEntry] = []
         self._search_request_id = 0
-        self._search_thread = QThread(self)
-        self._search_worker = _SearchWorker(
-            search_service=search_service,
-            logger=logger,
-        )
-        self._search_worker.moveToThread(self._search_thread)
-        self._search_requested.connect(
-            self._search_worker.run_search,
-            Qt.ConnectionType.QueuedConnection,
-        )
-        self._search_worker.search_ready.connect(self._handle_search_ready)
-        self._search_worker.search_failed.connect(self._handle_search_failed)
-        self._search_thread.finished.connect(self._search_worker.deleteLater)
-        self._search_thread.start()
+        self._task_runner = task_runner or LibraryTaskRunner(logger=logger, parent=self)
+        self._owns_task_runner = task_runner is None
+        self._task_handlers: dict[
+            int,
+            tuple[Callable[[object], None], Callable[[object], None]],
+        ] = {}
+        self._content_task_id: int | None = None
+        self._task_runner.completed.connect(self._handle_task_completed)
+        self._task_runner.failed.connect(self._handle_task_failed)
 
     def initialize(self) -> None:
         self._emit_content(self._empty_search_content(self._active_search_tab))
@@ -234,8 +211,11 @@ class LibraryController(QObject):
                 )
 
     def shutdown(self) -> None:
-        self._search_thread.quit()
-        self._search_thread.wait(3000)
+        for task_id in tuple(self._task_handlers):
+            self._task_runner.cancel(task_id)
+        self._task_handlers.clear()
+        if self._owns_task_runner:
+            self._task_runner.shutdown()
 
     def recent_searches(self) -> tuple[str, ...]:
         return self._search_service.load_recent_searches()
@@ -274,6 +254,15 @@ class LibraryController(QObject):
                 payload.id,
             )
         return None
+
+    def request_full_current_source_tracks(self, action: str) -> None:
+        task_id = self._task_runner.submit(self.load_full_current_source_tracks)
+        if task_id is None:
+            return
+        self._task_handlers[task_id] = (
+            lambda result: self.bulk_tracks_ready.emit(action, result),
+            self._emit_background_error,
+        )
 
     def show_search_page(self) -> None:
         if self._active_page != ("search", None):
@@ -328,7 +317,13 @@ class LibraryController(QObject):
         self._active_list_kind = "liked_tracks"
         self._liked_tracks_limit = self._liked_tracks_page_size
         self._loaded_liked_tracks = ()
-        self._execute(self._load_initial_liked_tracks_content)
+        cached_loader = getattr(self._library_service, "load_cached_liked_tracks", lambda **_: ())
+        self._execute_cached_then_refresh(
+            lambda: self._liked_tracks_content_from_tracks(
+                tuple(cached_loader(limit=self._liked_tracks_limit))
+            ),
+            self._load_initial_liked_tracks_content,
+        )
 
     def load_more_current_list(self) -> None:
         page, _payload = self._active_page
@@ -340,48 +335,46 @@ class LibraryController(QObject):
         self._push_history()
         self._active_page = ("list", None)
         self._active_list_kind = "liked_albums"
-        self._execute(
-            lambda: BrowserContent(
-                title=self._t("library.list.my_albums"),
-                items=self._album_items(self._library_service.load_liked_albums()),
-                recent_searches=self.recent_searches(),
-            )
+        cached_loader = getattr(self._library_service, "load_cached_liked_albums", lambda: ())
+        self._execute_cached_then_refresh(
+            lambda: self._liked_albums_content(tuple(cached_loader())),
+            lambda: self._liked_albums_content(
+                self._library_service.load_liked_albums(force_refresh=True)
+            ),
         )
 
     def load_liked_artists(self) -> None:
         self._push_history()
         self._active_page = ("list", None)
         self._active_list_kind = "liked_artists"
-        self._execute(
-            lambda: BrowserContent(
-                title=self._t("library.list.my_artists"),
-                items=self._artist_items(self._library_service.load_liked_artists()),
-                recent_searches=self.recent_searches(),
-            )
+        cached_loader = getattr(self._library_service, "load_cached_liked_artists", lambda: ())
+        self._execute_cached_then_refresh(
+            lambda: self._liked_artists_content(tuple(cached_loader())),
+            lambda: self._liked_artists_content(
+                self._library_service.load_liked_artists(force_refresh=True)
+            ),
         )
 
     def load_playlists(self) -> None:
         self._push_history()
         self._active_page = ("list", None)
         self._active_list_kind = "playlists"
-        self._execute(
-            lambda: BrowserContent(
-                title=self._t("library.list.playlists"),
-                items=(
-                    *self._playlist_items(
-                        self._library_service.load_generated_playlists(),
-                        kind="generated_playlist",
-                    ),
-                    *self._playlist_items(
-                        self._unique_playlists(
-                            self._library_service.load_liked_playlists(),
-                            self._library_service.load_user_playlists(),
-                        ),
-                        kind="playlist",
-                    ),
-                ),
-                recent_searches=self.recent_searches(),
-            )
+        cached_generated = getattr(
+            self._library_service, "load_cached_generated_playlists", lambda: ()
+        )
+        cached_liked = getattr(
+            self._library_service, "load_cached_liked_playlists", lambda: ()
+        )
+        cached_user = getattr(self._library_service, "load_cached_user_playlists", lambda: ())
+        self._execute_cached_then_refresh(
+            lambda: self._playlists_content(
+                tuple(cached_generated()), tuple(cached_liked()), tuple(cached_user())
+            ),
+            lambda: self._playlists_content(
+                self._library_service.load_generated_playlists(force_refresh=True),
+                self._library_service.load_liked_playlists(force_refresh=True),
+                self._library_service.load_user_playlists(force_refresh=True),
+            ),
         )
 
     def active_list_kind(self) -> str | None:
@@ -469,13 +462,17 @@ class LibraryController(QObject):
         )
 
     def open_album_by_id(self, album_id: str) -> None:
-        try:
-            album = self._library_service.load_album(album_id)
-        except DomainError as exc:
-            self._logger.warning("Library operation failed: %s", exc)
-            self.content_failed.emit(user_facing_error_message(exc))
+        if self._content_task_id is not None:
+            self._task_runner.cancel(self._content_task_id)
+            self._task_handlers.pop(self._content_task_id, None)
+        task_id = self._task_runner.submit(lambda: self._library_service.load_album(album_id))
+        if task_id is None:
             return
-        self.open_album(album)
+        self._content_task_id = task_id
+        self._task_handlers[task_id] = (
+            lambda result: self.open_album(result) if isinstance(result, Album) else None,
+            self._emit_background_error,
+        )
 
     def open_station(self, station: Station) -> None:
         self._push_history()
@@ -507,78 +504,149 @@ class LibraryController(QObject):
         self._restore_history_entry(entry)
 
     def like_track(self, track: Track) -> None:
-        self._execute_mutation(
-            lambda: self.track_liked.emit(self._library_service.like_track(track))
-        )
+        self._execute_mutation(lambda: self._library_service.like_track(track), self.track_liked)
 
     def unlike_track(self, track: Track) -> None:
         self._execute_mutation(
-            lambda: self.track_unliked.emit(self._library_service.unlike_track(track))
+            lambda: self._library_service.unlike_track(track), self.track_unliked
         )
 
     def dislike_track(self, track: Track) -> None:
         self._execute_mutation(
-            lambda: self.track_disliked.emit(self._library_service.dislike_track(track))
+            lambda: self._library_service.dislike_track(track), self.track_disliked
         )
 
     def undislike_track(self, track: Track) -> None:
         self._execute_mutation(
-            lambda: self.track_undisliked.emit(self._library_service.undislike_track(track))
+            lambda: self._library_service.undislike_track(track), self.track_undisliked
         )
 
     def like_album(self, album: Album) -> None:
-        self._execute_mutation(
-            lambda: self.album_liked.emit(self._library_service.like_album(album))
-        )
+        self._execute_mutation(lambda: self._library_service.like_album(album), self.album_liked)
 
     def unlike_album(self, album: Album) -> None:
         self._execute_mutation(
-            lambda: self.album_unliked.emit(self._library_service.unlike_album(album))
+            lambda: self._library_service.unlike_album(album), self.album_unliked
         )
 
     def like_artist(self, artist: Artist) -> None:
-        self._execute_mutation(
-            lambda: self.artist_liked.emit(self._library_service.like_artist(artist))
-        )
+        self._execute_mutation(lambda: self._library_service.like_artist(artist), self.artist_liked)
 
     def unlike_artist(self, artist: Artist) -> None:
         self._execute_mutation(
-            lambda: self.artist_unliked.emit(self._library_service.unlike_artist(artist))
+            lambda: self._library_service.unlike_artist(artist), self.artist_unliked
         )
 
     def dislike_artist(self, artist: Artist) -> None:
         self._execute_mutation(
-            lambda: self.artist_disliked.emit(self._library_service.dislike_artist(artist))
+            lambda: self._library_service.dislike_artist(artist), self.artist_disliked
         )
 
     def undislike_artist(self, artist: Artist) -> None:
         self._execute_mutation(
-            lambda: self.artist_undisliked.emit(self._library_service.undislike_artist(artist))
+            lambda: self._library_service.undislike_artist(artist), self.artist_undisliked
         )
 
     def like_playlist(self, playlist: Playlist) -> None:
         self._execute_mutation(
-            lambda: self.playlist_liked.emit(self._library_service.like_playlist(playlist))
+            lambda: self._library_service.like_playlist(playlist), self.playlist_liked
         )
 
     def unlike_playlist(self, playlist: Playlist) -> None:
         self._execute_mutation(
-            lambda: self.playlist_unliked.emit(self._library_service.unlike_playlist(playlist))
+            lambda: self._library_service.unlike_playlist(playlist), self.playlist_unliked
         )
 
     def _execute(self, operation) -> None:
-        try:
-            self._emit_content(operation())
-        except DomainError as exc:
-            self._logger.warning("Library operation failed: %s", exc)
-            self.content_failed.emit(user_facing_error_message(exc))
+        if self._content_task_id is not None:
+            self._task_runner.cancel(self._content_task_id)
+            self._task_handlers.pop(self._content_task_id, None)
+        task_id = self._task_runner.submit(operation)
+        if task_id is None:
+            return
+        self._content_task_id = task_id
+        self._task_handlers[task_id] = (
+            lambda result: (
+                self._emit_content(result) if isinstance(result, BrowserContent) else None
+            ),
+            self._emit_background_error,
+        )
 
-    def _execute_mutation(self, operation) -> None:
-        try:
-            operation()
-        except DomainError as exc:
-            self._logger.warning("Library mutation failed: %s", exc)
-            self.content_failed.emit(user_facing_error_message(exc))
+    def _execute_cached_then_refresh(self, cached_operation, refresh_operation) -> None:
+        if self._content_task_id is not None:
+            self._task_runner.cancel(self._content_task_id)
+            self._task_handlers.pop(self._content_task_id, None)
+        state: dict[str, BrowserContent | bool | None] = {
+            "cached": None,
+            "shown": False,
+        }
+
+        def start_refresh() -> None:
+            task_id = self._task_runner.submit(refresh_operation)
+            if task_id is None:
+                return
+            self._content_task_id = task_id
+
+            def apply_refresh(result: object) -> None:
+                if not isinstance(result, BrowserContent):
+                    return
+                if result != state["cached"]:
+                    self._emit_content(result)
+
+            def handle_refresh_error(error: object) -> None:
+                if state["shown"]:
+                    self._logger.warning("Background library refresh failed: %s", error)
+                    return
+                self._emit_background_error(error)
+
+            self._task_handlers[task_id] = (apply_refresh, handle_refresh_error)
+
+        task_id = self._task_runner.submit(cached_operation)
+        if task_id is None:
+            return
+        self._content_task_id = task_id
+
+        def apply_cached(result: object) -> None:
+            if isinstance(result, BrowserContent) and result.items:
+                state["cached"] = result
+                state["shown"] = True
+                self._emit_content(result)
+            start_refresh()
+
+        def handle_cache_error(error: object) -> None:
+            self._logger.warning("Library cache read failed: %s", error)
+            start_refresh()
+
+        self._task_handlers[task_id] = (apply_cached, handle_cache_error)
+
+    def _execute_mutation(self, operation, result_signal) -> None:
+        task_id = self._task_runner.submit(operation)
+        if task_id is None:
+            return
+        self._task_handlers[task_id] = (result_signal.emit, self._emit_background_error)
+
+    def _emit_background_error(self, error: object) -> None:
+        if isinstance(error, DomainError):
+            message = user_facing_error_message(error)
+        else:
+            message = str(error)
+        self.content_failed.emit(message)
+
+    def _handle_task_completed(self, task_id: int, result: object) -> None:
+        handlers = self._task_handlers.pop(task_id, None)
+        if handlers is None:
+            return
+        if task_id == self._content_task_id:
+            self._content_task_id = None
+        handlers[0](result)
+
+    def _handle_task_failed(self, task_id: int, error: object) -> None:
+        handlers = self._task_handlers.pop(task_id, None)
+        if handlers is None:
+            return
+        if task_id == self._content_task_id:
+            self._content_task_id = None
+        handlers[1](error)
 
     def _emit_content(self, content: BrowserContent) -> None:
         self.content_changed.emit(content)
@@ -781,15 +849,29 @@ class LibraryController(QObject):
         self._emit_content(
             self._loading_search_content(normalized_query, self._active_search_tab)
         )
-        self._search_requested.emit(request_id, normalized_query)
+        if self._content_task_id is not None:
+            self._task_runner.cancel(self._content_task_id)
+            self._task_handlers.pop(self._content_task_id, None)
+        task_id = self._task_runner.submit(
+            lambda: self._search_service.search_catalog(normalized_query)
+        )
+        if task_id is None:
+            return
+        self._content_task_id = task_id
+        self._task_handlers[task_id] = (
+            lambda results: self._handle_search_ready(request_id, normalized_query, results),
+            lambda error: self._handle_search_failed(request_id, error),
+        )
 
     def _handle_search_ready(
         self,
         request_id: int,
         query: str,
-        results: CatalogSearchResults,
+        results: object,
     ) -> None:
         if request_id != self._search_request_id:
+            return
+        if not isinstance(results, CatalogSearchResults):
             return
         self._last_search_query = query
         self._last_search_results = results
@@ -803,10 +885,10 @@ class LibraryController(QObject):
             )
         )
 
-    def _handle_search_failed(self, request_id: int, message: str) -> None:
+    def _handle_search_failed(self, request_id: int, error: object) -> None:
         if request_id != self._search_request_id:
             return
-        self.content_failed.emit(message)
+        self._emit_background_error(error)
 
     def _artist_content(self, artist: Artist, *, tab: str) -> BrowserContent:
         if tab == "playlists":
@@ -900,6 +982,46 @@ class LibraryController(QObject):
             tracks=tracks,
             source_tracks=tracks,
             has_more=len(tracks) >= limit,
+        )
+
+    def _liked_tracks_content_from_tracks(self, tracks: tuple[Track, ...]) -> BrowserContent:
+        self._loaded_liked_tracks = tracks
+        return self._liked_tracks_browser_content(
+            tracks=tracks,
+            source_tracks=tracks,
+            has_more=bool(tracks) and len(tracks) >= self._liked_tracks_limit,
+        )
+
+    def _liked_albums_content(self, albums: tuple[Album, ...]) -> BrowserContent:
+        return BrowserContent(
+            title=self._t("library.list.my_albums"),
+            items=self._album_items(albums),
+            recent_searches=self.recent_searches(),
+        )
+
+    def _liked_artists_content(self, artists: tuple[Artist, ...]) -> BrowserContent:
+        return BrowserContent(
+            title=self._t("library.list.my_artists"),
+            items=self._artist_items(artists),
+            recent_searches=self.recent_searches(),
+        )
+
+    def _playlists_content(
+        self,
+        generated: tuple[Playlist, ...],
+        liked: tuple[Playlist, ...],
+        user: tuple[Playlist, ...],
+    ) -> BrowserContent:
+        return BrowserContent(
+            title=self._t("library.list.playlists"),
+            items=(
+                *self._playlist_items(generated, kind="generated_playlist"),
+                *self._playlist_items(
+                    self._unique_playlists(liked, user),
+                    kind="playlist",
+                ),
+            ),
+            recent_searches=self.recent_searches(),
         )
 
     def _load_initial_liked_tracks_content(self) -> BrowserContent:

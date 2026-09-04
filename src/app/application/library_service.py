@@ -84,6 +84,10 @@ class LibraryService:
         self._logger.info("Loaded %s liked tracks", len(tracks))
         return tracks
 
+    def load_cached_liked_tracks(self, *, limit: int = 100) -> tuple[Track, ...]:
+        snapshot = self._safe_load_liked_track_snapshot(self._current_user_id())
+        return snapshot.tracks[:limit] if snapshot is not None else ()
+
     def load_liked_tracks_page(self, *, offset: int = 0, limit: int = 100) -> tuple[Track, ...]:
         if limit <= 0:
             return ()
@@ -176,45 +180,74 @@ class LibraryService:
             disliked_tracks.revision,
         )
 
-    def load_liked_albums(self, *, limit: int = 100) -> tuple[Album, ...]:
+    def load_liked_albums(
+        self,
+        *,
+        limit: int = 100,
+        force_refresh: bool = False,
+    ) -> tuple[Album, ...]:
         user_id = self._current_user_id()
-        cached = (
-            tuple(self._library_cache_repo.load_liked_album_snapshot(user_id) or ())
-            if user_id is not None
-            else ()
-        )
-        if cached:
-            return cached[:limit]
+        cached = self.load_cached_liked_albums(limit=limit) if not force_refresh else ()
+        if cached and not force_refresh:
+            return cached
         albums = tuple(self._music_service.get_liked_albums(limit=limit))
         if user_id is not None:
-            self._library_cache_repo.save_liked_album_snapshot(user_id, albums)
+            try:
+                self._library_cache_repo.save_liked_album_snapshot(user_id, albums)
+            except StorageError as exc:
+                self._logger.warning("Liked album snapshot cache save failed: %s", exc)
         self._logger.info("Loaded %s liked albums", len(albums))
         return albums
 
-    def load_liked_artists(self, *, limit: int = 100) -> tuple[Artist, ...]:
+    def load_cached_liked_albums(self, *, limit: int = 100) -> tuple[Album, ...]:
         user_id = self._current_user_id()
-        cached = (
-            tuple(
-                merge_cached_artist_preference_states(
-                    tuple(self._library_cache_repo.load_liked_artist_snapshot(user_id) or ()),
-                    self._library_cache_repo,
-                    user_id=user_id,
-                )
-            )
-            if user_id is not None
-            else ()
-        )
-        if cached:
-            return cached[:limit]
+        if user_id is None:
+            return ()
+        try:
+            return tuple(self._library_cache_repo.load_liked_album_snapshot(user_id) or ())[:limit]
+        except StorageError as exc:
+            self._logger.warning("Liked album snapshot cache load failed: %s", exc)
+            return ()
+
+    def load_liked_artists(
+        self,
+        *,
+        limit: int = 100,
+        force_refresh: bool = False,
+    ) -> tuple[Artist, ...]:
+        user_id = self._current_user_id()
+        cached = self.load_cached_liked_artists(limit=limit) if not force_refresh else ()
+        if cached and not force_refresh:
+            return cached
         artists = merge_cached_artist_preference_states(
             tuple(self._music_service.get_liked_artists(limit=limit)),
             self._library_cache_repo,
             user_id=user_id,
         )
         if user_id is not None:
-            self._library_cache_repo.save_liked_artist_snapshot(user_id, artists)
+            try:
+                self._library_cache_repo.save_liked_artist_snapshot(user_id, artists)
+            except StorageError as exc:
+                self._logger.warning("Liked artist snapshot cache save failed: %s", exc)
         self._logger.info("Loaded %s liked artists", len(artists))
         return artists
+
+    def load_cached_liked_artists(self, *, limit: int = 100) -> tuple[Artist, ...]:
+        user_id = self._current_user_id()
+        if user_id is None:
+            return ()
+        try:
+            artists = tuple(self._library_cache_repo.load_liked_artist_snapshot(user_id) or ())
+        except StorageError as exc:
+            self._logger.warning("Liked artist snapshot cache load failed: %s", exc)
+            return ()
+        return tuple(
+            merge_cached_artist_preference_states(
+                artists,
+                self._library_cache_repo,
+                user_id=user_id,
+            )
+        )[:limit]
 
     def load_disliked_artists(self, *, limit: int = 100) -> tuple[Artist, ...]:
         user_id = self._current_user_id()
@@ -273,48 +306,91 @@ class LibraryService:
             return
         self._logger.info("Refreshed disliked artist snapshot: %s artists", len(artists))
 
-    def load_liked_playlists(self, *, limit: int = 100) -> tuple[Playlist, ...]:
+    def load_liked_playlists(
+        self,
+        *,
+        limit: int = 100,
+        force_refresh: bool = False,
+    ) -> tuple[Playlist, ...]:
         user_id = self._current_user_id()
-        cached = (
-            tuple(self._library_cache_repo.load_liked_playlist_snapshot(user_id) or ())
-            if user_id is not None
-            else ()
-        )
-        if cached:
-            return cached[:limit]
+        cached = self.load_cached_liked_playlists(limit=limit) if not force_refresh else ()
+        if cached and not force_refresh:
+            return cached
         playlists = tuple(self._music_service.get_liked_playlists(limit=limit))
         if user_id is not None:
-            self._library_cache_repo.save_liked_playlist_snapshot(user_id, playlists)
+            try:
+                self._library_cache_repo.save_liked_playlist_snapshot(user_id, playlists)
+            except StorageError as exc:
+                self._logger.warning("Liked playlist snapshot cache save failed: %s", exc)
         self._logger.info("Loaded %s liked playlists", len(playlists))
         return playlists
 
-    def load_user_playlists(self) -> tuple[Playlist, ...]:
+    def load_cached_liked_playlists(self, *, limit: int = 100) -> tuple[Playlist, ...]:
         user_id = self._current_user_id()
-        cached = (
-            tuple(self._library_cache_repo.load_user_playlist_snapshot(user_id) or ())
-            if user_id is not None
-            else ()
-        )
-        if cached:
+        if user_id is None:
+            return ()
+        try:
+            return tuple(self._library_cache_repo.load_liked_playlist_snapshot(user_id) or ())[
+                :limit
+            ]
+        except StorageError as exc:
+            self._logger.warning("Liked playlist snapshot cache load failed: %s", exc)
+            return ()
+
+    def load_user_playlists(self, *, force_refresh: bool = False) -> tuple[Playlist, ...]:
+        user_id = self._current_user_id()
+        cached = self.load_cached_user_playlists() if not force_refresh else ()
+        if cached and not force_refresh:
             return cached
         playlists = tuple(self._music_service.get_user_playlists())
         if user_id is not None:
-            self._library_cache_repo.save_user_playlist_snapshot(user_id, playlists)
+            try:
+                self._library_cache_repo.save_user_playlist_snapshot(user_id, playlists)
+            except StorageError as exc:
+                self._logger.warning("User playlist snapshot cache save failed: %s", exc)
         self._logger.info("Loaded %s user playlists", len(playlists))
         return playlists
 
-    def load_generated_playlists(self) -> tuple[Playlist, ...]:
+    def load_cached_user_playlists(self) -> tuple[Playlist, ...]:
+        user_id = self._current_user_id()
+        if user_id is None:
+            return ()
+        try:
+            return tuple(self._library_cache_repo.load_user_playlist_snapshot(user_id) or ())
+        except StorageError as exc:
+            self._logger.warning("User playlist snapshot cache load failed: %s", exc)
+            return ()
+
+    def update_user_playlist_snapshot(self, playlists: tuple[Playlist, ...]) -> None:
+        user_id = self._current_user_id()
+        if user_id is None:
+            return
+        try:
+            self._library_cache_repo.save_user_playlist_snapshot(user_id, playlists)
+        except StorageError as exc:
+            self._logger.warning("User playlist snapshot cache save failed: %s", exc)
+
+    def load_generated_playlists(self, *, force_refresh: bool = False) -> tuple[Playlist, ...]:
         user_id = self._current_user_id()
         cache_user_id = user_id or "__anonymous__"
-        cached = tuple(
-            self._library_cache_repo.load_generated_playlist_snapshot(cache_user_id) or ()
-        )
-        if cached:
+        cached = self.load_cached_generated_playlists() if not force_refresh else ()
+        if cached and not force_refresh:
             return cached
         playlists = tuple(self._music_service.get_generated_playlists())
-        self._library_cache_repo.save_generated_playlist_snapshot(cache_user_id, playlists)
+        try:
+            self._library_cache_repo.save_generated_playlist_snapshot(cache_user_id, playlists)
+        except StorageError as exc:
+            self._logger.warning("Generated playlist snapshot cache save failed: %s", exc)
         self._logger.info("Loaded %s generated playlists", len(playlists))
         return playlists
+
+    def load_cached_generated_playlists(self) -> tuple[Playlist, ...]:
+        user_id = self._current_user_id() or "__anonymous__"
+        try:
+            return tuple(self._library_cache_repo.load_generated_playlist_snapshot(user_id) or ())
+        except StorageError as exc:
+            self._logger.warning("Generated playlist snapshot cache load failed: %s", exc)
+            return ()
 
     def load_stations(self) -> tuple[Station, ...]:
         stations = tuple(self._music_service.get_stations())
@@ -537,6 +613,10 @@ class LibraryService:
             artwork_ref=playlist.artwork_ref,
             is_generated=playlist.is_generated,
             is_liked=True,
+            revision=playlist.revision,
+            snapshot=playlist.snapshot,
+            visibility=playlist.visibility,
+            modified=playlist.modified,
         )
         self._logger.info("Liked playlist %s", playlist.id)
         return liked_playlist
@@ -553,6 +633,10 @@ class LibraryService:
             artwork_ref=playlist.artwork_ref,
             is_generated=playlist.is_generated,
             is_liked=False,
+            revision=playlist.revision,
+            snapshot=playlist.snapshot,
+            visibility=playlist.visibility,
+            modified=playlist.modified,
         )
         self._logger.info("Unliked playlist %s", playlist.id)
         return unliked_playlist

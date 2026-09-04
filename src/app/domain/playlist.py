@@ -14,3 +14,7 @@ class Playlist:
     artwork_ref: str | None = None
     is_generated: bool = False
     is_liked: bool = False
+    revision: int | None = None
+    snapshot: int | None = None
+    visibility: str | None = None
+    modified: str | None = None

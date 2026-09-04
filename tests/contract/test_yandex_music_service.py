@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 from yandex_music.exceptions import NotFoundError, UnauthorizedError
 
@@ -90,6 +92,10 @@ class PlaylistStub:
         self.tracks = [PlaylistEntryStub(track) for track in tracks]
         self.description = f"Description {playlist_id}"
         self.track_count = len(tracks)
+        self.revision = 3
+        self.snapshot = 2
+        self.visibility = "private"
+        self.modified = "2026-09-04T00:00:00+00:00"
         self.owner = type("Owner", (), {"uid": owner_uid, "name": "listener"})()
 
     def get_og_image_url(self):
@@ -245,6 +251,9 @@ class FakeYandexClient:
         self.liked_playlist_ids: list[str] = []
         self.unliked_playlist_ids: list[str] = []
         self.playlist_requests: list[tuple[str, str | None]] = []
+        self.created_playlists: list[tuple[str, str]] = []
+        self.changed_playlists: list[tuple[str, str, int, str | None]] = []
+        self.deleted_playlists: list[tuple[str, str | None]] = []
         self.station_track_queue: str | None = None
         self.play_audio_calls: list[dict[str, object]] = []
         self.plays_calls: list[dict[str, object]] = []
@@ -429,6 +438,28 @@ class FakeYandexClient:
         self.playlist_requests.append((playlist_id, user_id))
         return self.playlist
 
+    def users_playlists_create(self, title: str, *, visibility: str = "public"):
+        self.created_playlists.append((title, visibility))
+        playlist = PlaylistStub("created-1", [])
+        playlist.title = title
+        playlist.visibility = visibility
+        return playlist
+
+    def users_playlists_change(
+        self,
+        playlist_id: str,
+        diff: str,
+        *,
+        revision: int,
+        user_id: str | None = None,
+    ):
+        self.changed_playlists.append((playlist_id, diff, revision, user_id))
+        return self.playlist
+
+    def users_playlists_delete(self, playlist_id: str, *, user_id: str | None = None):
+        self.deleted_playlists.append((playlist_id, user_id))
+        return True
+
     def albums(self, album_id: str):
         del album_id
         return [self.album]
@@ -590,6 +621,10 @@ def test_yandex_music_service_maps_track_and_playlist_data() -> None:
         description="Description playlist-1",
         track_count=1,
         artwork_ref=None,
+        revision=3,
+        snapshot=2,
+        visibility="private",
+        modified="2026-09-04T00:00:00+00:00",
     )
     assert client.playlist_requests == [("playlist-1", None), ("playlist-1", None)]
     assert [item.id for item in playlist_tracks] == ["track-1"]
@@ -989,6 +1024,77 @@ def test_yandex_music_service_likes_and_unlikes_album_artist_and_playlist() -> N
     assert client.unliked_artist_ids == ["artist-1"]
     assert client.liked_playlist_ids == ["7:playlist-1"]
     assert client.unliked_playlist_ids == ["7:playlist-1"]
+
+
+def test_yandex_music_service_creates_and_deletes_playlist() -> None:
+    client = FakeYandexClient()
+    service = YandexMusicService(
+        session=AuthSession(user_id="user-1", token="token"),
+        client=client,
+    )
+
+    playlist = service.create_playlist("Road trip", visibility="private")
+    service.delete_playlist(playlist.id, owner_id=playlist.owner_id)
+
+    assert playlist.title == "Road trip"
+    assert playlist.visibility == "private"
+    assert client.created_playlists == [("Road trip", "private")]
+    assert client.deleted_playlists == [("created-1", "7")]
+
+
+def test_yandex_music_service_appends_playlist_tracks_with_fresh_revision() -> None:
+    client = FakeYandexClient()
+    service = YandexMusicService(
+        session=AuthSession(user_id="user-1", token="token"),
+        client=client,
+    )
+    tracks = (
+        Track(id="track-2", title="Two", artists=("Artist",), album_id="album-2"),
+        Track(id="track-3", title="Three", artists=("Artist",), album_id="album-3"),
+    )
+
+    service.append_playlist_tracks("playlist-1", tracks, owner_id="7")
+
+    assert client.playlist_requests == [("playlist-1", "7")]
+    playlist_id, raw_diff, revision, owner_id = client.changed_playlists[0]
+    assert (playlist_id, revision, owner_id) == ("playlist-1", 3, 7)
+    assert json.loads(raw_diff) == [
+        {
+            "op": "insert",
+            "at": 1,
+            "tracks": [
+                {"id": "track-2", "albumId": "album-2"},
+                {"id": "track-3", "albumId": "album-3"},
+            ],
+        }
+    ]
+
+
+def test_yandex_music_service_replaces_playlist_tracks_atomically() -> None:
+    client = FakeYandexClient()
+    service = YandexMusicService(
+        session=AuthSession(user_id="user-1", token="token"),
+        client=client,
+    )
+    track = Track(
+        id="track-2",
+        title="Two",
+        artists=("Artist",),
+        album_id="album-2",
+    )
+
+    service.replace_playlist_tracks("playlist-1", (track,), owner_id="7")
+
+    _playlist_id, raw_diff, revision, owner_id = client.changed_playlists[0]
+    assert (revision, owner_id) == (3, 7)
+    assert json.loads(raw_diff) == [
+        {"op": "delete", "from": 0, "to": 1},
+        {
+            "op": "insert",
+            "at": 0,
+            "tracks": [{"id": "track-2", "albumId": "album-2"}],
+        }
+    ]
 
 
 def test_yandex_music_service_rejects_unavailable_tracks() -> None:

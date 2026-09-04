@@ -30,6 +30,8 @@ from app.presentation.qt.auth_dialog import AuthDialog
 from app.presentation.qt.i18n import UiTextCatalog
 from app.presentation.qt.icon_utils import create_icon
 from app.presentation.qt.library_controller import BrowserContent, LibraryController
+from app.presentation.qt.library_task_runner import LibraryTaskRunner
+from app.presentation.qt.library_warmup_controller import LibraryWarmupController
 from app.presentation.qt.main_window_artwork import MainWindowArtworkMixin
 from app.presentation.qt.main_window_browser import MainWindowBrowserMixin
 from app.presentation.qt.main_window_layout import MainWindowLayoutMixin
@@ -43,6 +45,7 @@ from app.presentation.qt.main_window_queue_view import (
 )
 from app.presentation.qt.main_window_windowing import MainWindowWindowingMixin
 from app.presentation.qt.playback_controller import PlaybackController
+from app.presentation.qt.playlist_save_controller import PlaylistSaveController
 from app.presentation.qt.preference_markers import preference_marker_icon_name
 from app.presentation.qt.system_media import build_system_media_integration
 from app.presentation.qt.track_display import display_track_title
@@ -92,11 +95,27 @@ class MainWindow(
             playback_service=container.services.playback_service,
             logger=container.logger,
         )
+        self._library_task_runner = LibraryTaskRunner(logger=container.logger, parent=self)
         self._library_controller = LibraryController(
             search_service=container.services.search_service,
             library_service=container.services.library_service,
             logger=container.logger,
             translate=self._t,
+            task_runner=self._library_task_runner,
+        )
+        self._playlist_save_controller = PlaylistSaveController(
+            service=container.services.playlist_save_service,
+            task_runner=self._library_task_runner,
+        )
+        self._library_warmup_task_runner = LibraryTaskRunner(
+            logger=container.logger,
+            parent=self,
+        )
+        self._library_warmup_controller = LibraryWarmupController(
+            library_service=container.services.library_service,
+            task_runner=self._library_warmup_task_runner,
+            logger=container.logger,
+            parent=self,
         )
         self._current_track: Track | None = None
         self._current_browser_content: BrowserContent | None = None
@@ -110,6 +129,7 @@ class MainWindow(
         self._thumb_source_pixmap_cache: OrderedDict[object, QPixmap] = OrderedDict()
         self._thumb_scaled_pixmap_cache: OrderedDict[object, QPixmap] = OrderedDict()
         self._auth_dialog: AuthDialog | None = None
+        self._playlist_save_dialog = None
         self._auth_flow_checked = False
         self._browser_tab_ids: tuple[str, ...] = ()
         self._updating_browser_tabs = False
@@ -419,12 +439,18 @@ class MainWindow(
         self._queue_shuffle_button.setFixedSize(34, 32)
         self._queue_shuffle_button.setCheckable(True)
         self._queue_shuffle_button.setIcon(create_icon("shuffle_playlist.svg"))
+        self._save_queue_button = QPushButton()
+        self._save_queue_button.setObjectName("queue-icon-button")
+        self._save_queue_button.setToolTip(self._t("action.save_queue_playlist"))
+        self._save_queue_button.setFixedSize(34, 32)
+        self._save_queue_button.setIcon(create_icon("save_playlist.svg"))
         self._clear_queue_button = QPushButton()
         self._clear_queue_button.setObjectName("queue-icon-button")
         self._clear_queue_button.setToolTip(self._t("action.clear_queue"))
         self._clear_queue_button.setFixedSize(34, 32)
         self._clear_queue_button.setIcon(create_icon("clear_playlist.svg"))
         self._clear_queue_button.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        footer.addWidget(self._save_queue_button)
         footer.addWidget(self._queue_shuffle_button)
         footer.addWidget(self._clear_queue_button)
         layout.addWidget(self._queue_list)
@@ -436,6 +462,16 @@ class MainWindow(
         self._controller.playback_failed.connect(self._render_error)
         self._library_controller.content_changed.connect(self._render_content)
         self._library_controller.content_failed.connect(self._render_library_error)
+        self._library_controller.bulk_tracks_ready.connect(self._handle_bulk_tracks_ready)
+        self._playlist_save_controller.destinations_loaded.connect(
+            self._handle_playlist_destinations_loaded
+        )
+        self._playlist_save_controller.save_succeeded.connect(
+            self._handle_playlist_save_succeeded
+        )
+        self._playlist_save_controller.operation_failed.connect(
+            self._handle_playlist_save_failed
+        )
         self._library_controller.track_liked.connect(self._render_track_liked)
         self._library_controller.track_unliked.connect(self._render_track_unliked)
         self._library_controller.track_disliked.connect(self._render_track_disliked)
@@ -462,6 +498,7 @@ class MainWindow(
         assert selection_model is not None
         selection_model.currentChanged.connect(self._select_queue_highlight_row)
         self._clear_queue_button.clicked.connect(self._controller.clear_queue)
+        self._save_queue_button.clicked.connect(self._show_playlist_save_dialog)
         self._clear_queue_button.customContextMenuRequested.connect(
             self._show_clear_queue_context_menu
         )
@@ -692,6 +729,7 @@ class MainWindow(
         )
         self._render_queue(snapshot)
         self._render_auth_state()
+        self._update_save_queue_button_state()
         self._defer_system_media_update(snapshot)
 
     def _defer_artwork_render(self, track: Track) -> None:
@@ -901,11 +939,15 @@ class MainWindow(
             self._auth_label.setText(self._t("label.login_required"))
             if hasattr(self, "_logout_button"):
                 self._logout_button.setEnabled(False)
+            if hasattr(self, "_save_queue_button"):
+                self._update_save_queue_button_state()
             return
         username = session.display_name or session.user_id
         self._auth_label.setText(username)
         if hasattr(self, "_logout_button"):
             self._logout_button.setEnabled(True)
+        if hasattr(self, "_save_queue_button"):
+            self._update_save_queue_button_state()
 
     def _t(self, key: str, **params: object) -> str:
         return self._ui_text_catalog.text(key, **params)
@@ -925,6 +967,7 @@ class MainWindow(
         self._settings_button.setAccessibleName(self._t("action.settings"))
         self._volume_button.setToolTip(self._t("action.volume"))
         self._queue_shuffle_button.setToolTip(self._t("action.shuffle_queue"))
+        self._save_queue_button.setToolTip(self._t("action.save_queue_playlist"))
         self._clear_queue_button.setToolTip(self._t("action.clear_queue"))
         self._search_button.setText(self._t("action.search"))
         self._play_all_button.setText(self._t("action.play_all"))

@@ -11,13 +11,112 @@ from PySide6.QtCore import QPoint, QStandardPaths, Qt
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QApplication, QFileDialog, QListView, QMenu
 
-from app.domain import Album, Artist, Playlist, Station, Track
+from app.application.error_presenter import user_facing_error_message
+from app.domain import (
+    Album,
+    Artist,
+    NoSaveableTracksError,
+    Playlist,
+    PlaylistNameConflictError,
+    PlaylistSaveResult,
+    PlaylistTargetNotFoundError,
+    Station,
+    Track,
+)
+from app.domain.errors import DomainError
 from app.domain.playback import QueueItem
 from app.presentation.qt.library_controller import BrowserItem
+from app.presentation.qt.playlist_save_dialog import SavePlaylistDialog
 from app.presentation.qt.track_display import display_track_title
 
 
 class MainWindowLibraryMixin:
+    def _show_playlist_save_dialog(self) -> None:
+        if self._playlist_save_dialog is not None:
+            self._playlist_save_dialog.raise_()
+            self._playlist_save_dialog.activateWindow()
+            return
+        tracks = tuple(
+            queue_item.track
+            for row in range(self._queue_model.rowCount())
+            if isinstance((queue_item := self._queue_model.queue_item_at(row)), QueueItem)
+        )
+        if not tracks:
+            return
+        dialog = SavePlaylistDialog(tracks=tracks, translate=self._t, parent=self)
+        dialog.setStyleSheet(self.styleSheet())
+        dialog.save_requested.connect(self._playlist_save_controller.save)
+        dialog.finished.connect(self._clear_playlist_save_dialog)
+        self._playlist_save_dialog = dialog
+        self._update_save_queue_button_state()
+        dialog.open()
+        self._playlist_save_controller.load_destinations()
+
+    def _handle_playlist_destinations_loaded(self, result: object) -> None:
+        dialog = self._playlist_save_dialog
+        if dialog is None or not isinstance(result, tuple):
+            return
+        playlists = tuple(item for item in result if isinstance(item, Playlist))
+        dialog.set_destinations(playlists)
+
+    def _handle_playlist_save_succeeded(self, result: object) -> None:
+        if not isinstance(result, PlaylistSaveResult):
+            return
+        dialog = self._playlist_save_dialog
+        if dialog is not None:
+            dialog.complete()
+        self._status_label.setText(
+            self._t(
+                "status.save_playlist.saved",
+                title=result.playlist.title,
+                saved=result.saved_count,
+                skipped=result.skipped_count,
+            )
+        )
+        if self._library_controller.active_list_kind() == "playlists":
+            self._library_controller.refresh_active_list()
+        self._update_save_queue_button_state()
+
+    def _handle_playlist_save_failed(self, error: object) -> None:
+        dialog = self._playlist_save_dialog
+        if isinstance(error, PlaylistNameConflictError):
+            message = self._t("dialog.save_playlist.name_exists")
+            if dialog is not None:
+                dialog.set_error(message, name_conflict=True)
+            return
+        if isinstance(error, PlaylistTargetNotFoundError):
+            message = self._t("dialog.save_playlist.target_missing")
+        elif isinstance(error, NoSaveableTracksError):
+            message = self._t("dialog.save_playlist.no_tracks")
+        elif isinstance(error, DomainError):
+            message = user_facing_error_message(error)
+        else:
+            message = str(error)
+        if dialog is not None:
+            dialog.set_error(message)
+        self._status_label.setText(self._t("status.save_playlist.error", message=message))
+        self._update_save_queue_button_state()
+
+    def _clear_playlist_save_dialog(self, _result: int) -> None:
+        self._playlist_save_controller.cancel_load()
+        dialog = self._playlist_save_dialog
+        self._playlist_save_dialog = None
+        if dialog is not None:
+            dialog.deleteLater()
+        self._update_save_queue_button_state()
+
+    def _update_save_queue_button_state(self) -> None:
+        if not hasattr(self, "_save_queue_button"):
+            return
+        authenticated = self._container.services.auth_service.current_session() is not None
+        has_queue = self._queue_model.rowCount() > 0
+        self._save_queue_button.setEnabled(
+            authenticated
+            and has_queue
+            and not self._playlist_save_controller.busy
+            and self._playlist_save_dialog is None
+        )
+
     def _render_library_error(self, message: str) -> None:
         self._status_label.setText(self._t("status.library_error", message=message))
 
@@ -126,7 +225,7 @@ class MainWindowLibraryMixin:
         return self._current_track
 
     def _play_current_source(self) -> None:
-        bulk_request = self._resolve_current_source_bulk_request()
+        bulk_request = self._resolve_current_source_bulk_request(action="play")
         if bulk_request is None:
             return
         tracks, source_type, source_id = bulk_request
@@ -138,7 +237,7 @@ class MainWindowLibraryMixin:
         )
 
     def _append_current_source(self) -> None:
-        bulk_request = self._resolve_current_source_bulk_request()
+        bulk_request = self._resolve_current_source_bulk_request(action="append")
         if bulk_request is None:
             return
         tracks, source_type, source_id = bulk_request
@@ -148,16 +247,45 @@ class MainWindowLibraryMixin:
             source_id=source_id,
         )
 
-    def _resolve_current_source_bulk_request(self) -> tuple[tuple[Track, ...], str, str] | None:
+    def _resolve_current_source_bulk_request(
+        self,
+        *,
+        action: str,
+    ) -> tuple[tuple[Track, ...], str, str] | None:
         content = self._current_browser_content
         if content is None or not content.source_type or not content.source_id:
             return None
         if content.bulk_mode == "load_all":
             self._status_label.setText(self._t("status.loading_full_source"))
-            return self._library_controller.load_full_current_source_tracks()
+            self._library_controller.request_full_current_source_tracks(action)
+            return None
         if not content.source_tracks:
             return None
         return content.source_tracks, content.source_type, content.source_id
+
+    def _handle_bulk_tracks_ready(self, action: str, result: object) -> None:
+        if not isinstance(result, tuple) or len(result) != 3:
+            return
+        tracks, source_type, source_id = result
+        if (
+            not isinstance(tracks, tuple)
+            or not isinstance(source_type, str)
+            or not isinstance(source_id, str)
+        ):
+            return
+        if action == "play":
+            self._controller.play_tracks(
+                tracks,
+                start_index=0,
+                source_type=source_type,
+                source_id=source_id,
+            )
+        elif action == "append":
+            self._controller.append_tracks(
+                tracks,
+                source_type=source_type,
+                source_id=source_id,
+            )
 
     def _replace_content_track(self, track: Track) -> None:
         for index in range(self._content_list.count()):

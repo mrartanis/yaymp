@@ -107,6 +107,16 @@ class YandexMusicService(MusicService):
             raise TrackUnavailableError(f"Track {track_id} is unavailable")
         return self._map_track(raw_track)
 
+    def get_tracks(self, track_ids: Sequence[str]) -> Sequence[Track]:
+        if not track_ids:
+            return ()
+        client = self._require_client()
+        try:
+            raw_tracks = client.tracks(list(track_ids))
+        except Exception as exc:
+            raise self._map_client_error(exc, "Failed to load tracks") from exc
+        return tuple(self._map_track(track) for track in raw_tracks or ())
+
     def search_tracks(self, query: str, *, limit: int = 25) -> Sequence[Track]:
         client = self._require_client()
         try:
@@ -372,6 +382,98 @@ class YandexMusicService(MusicService):
         except Exception as exc:
             raise self._map_client_error(exc, "Failed to load user playlists") from exc
         return tuple(self._map_playlist(playlist) for playlist in raw_playlists)
+
+    def create_playlist(self, title: str, *, visibility: str) -> Playlist:
+        client = self._require_client()
+        try:
+            raw_playlist = client.users_playlists_create(title, visibility=visibility)
+        except Exception as exc:
+            raise self._map_client_error(exc, f"Failed to create playlist {title!r}") from exc
+        if raw_playlist is None:
+            raise NetworkError("Yandex Music returned no created playlist")
+        return self._map_playlist(raw_playlist)
+
+    def delete_playlist(self, playlist_id: str, *, owner_id: str | None = None) -> None:
+        client = self._require_client()
+        try:
+            deleted = client.users_playlists_delete(playlist_id, user_id=owner_id)
+        except Exception as exc:
+            raise self._map_client_error(exc, f"Failed to delete playlist {playlist_id}") from exc
+        if not deleted:
+            raise NetworkError(f"Failed to delete playlist {playlist_id}")
+
+    def append_playlist_tracks(
+        self,
+        playlist_id: str,
+        tracks: Sequence[Track],
+        *,
+        owner_id: str | None = None,
+    ) -> Playlist:
+        raw_playlist = self._load_raw_playlist_for_change(playlist_id, owner_id=owner_id)
+        return self._change_playlist_tracks(raw_playlist, tracks, replace_existing=False)
+
+    def replace_playlist_tracks(
+        self,
+        playlist_id: str,
+        tracks: Sequence[Track],
+        *,
+        owner_id: str | None = None,
+    ) -> Playlist:
+        raw_playlist = self._load_raw_playlist_for_change(playlist_id, owner_id=owner_id)
+        return self._change_playlist_tracks(raw_playlist, tracks, replace_existing=True)
+
+    def _load_raw_playlist_for_change(self, playlist_id: str, *, owner_id: str | None) -> Any:
+        client = self._require_client()
+        try:
+            raw_playlist = client.users_playlists(playlist_id, user_id=owner_id)
+        except Exception as exc:
+            raise self._map_client_error(
+                exc,
+                f"Failed to load playlist {playlist_id} for update",
+            ) from exc
+        if raw_playlist is None or isinstance(raw_playlist, list):
+            raise NetworkError(f"Playlist {playlist_id} is unavailable for update")
+        return raw_playlist
+
+    def _change_playlist_tracks(
+        self,
+        raw_playlist: Any,
+        tracks: Sequence[Track],
+        *,
+        replace_existing: bool,
+    ) -> Playlist:
+        from yandex_music.utils.difference import Difference
+
+        client = self._require_client()
+        difference = Difference()
+        track_count = int(getattr(raw_playlist, "track_count", 0) or 0)
+        if replace_existing and track_count:
+            difference.add_delete(0, track_count)
+        insert_at = 0 if replace_existing else track_count
+        difference.add_insert(
+            insert_at,
+            [
+                {"id": track.id, "album_id": track.album_id}
+                for track in tracks
+                if track.album_id is not None
+            ],
+        )
+        playlist_id = getattr(raw_playlist, "kind", None)
+        owner = getattr(raw_playlist, "owner", None)
+        owner_id = getattr(raw_playlist, "uid", None) or getattr(owner, "uid", None)
+        revision = int(getattr(raw_playlist, "revision", 1) or 1)
+        try:
+            changed = client.users_playlists_change(
+                playlist_id,
+                difference.to_json(),
+                revision=revision,
+                user_id=owner_id,
+            )
+        except Exception as exc:
+            raise self._map_client_error(exc, f"Failed to update playlist {playlist_id}") from exc
+        if changed is None:
+            raise NetworkError(f"Yandex Music returned no updated playlist {playlist_id}")
+        return self._map_playlist(changed)
 
     def get_generated_playlists(self) -> Sequence[Playlist]:
         client = self._require_client()
@@ -949,6 +1051,10 @@ class YandexMusicService(MusicService):
             artwork_ref=self._extract_artwork_ref(raw_playlist),
             is_generated=is_generated,
             is_liked=is_liked,
+            revision=getattr(raw_playlist, "revision", None),
+            snapshot=getattr(raw_playlist, "snapshot", None),
+            visibility=getattr(raw_playlist, "visibility", None),
+            modified=getattr(raw_playlist, "modified", None),
         )
 
     def _map_album(self, raw_album: Any, *, is_liked: bool = False) -> Album:

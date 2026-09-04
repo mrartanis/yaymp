@@ -21,6 +21,16 @@ from app.domain.playback import (
     WaveformState,
 )
 from app.domain.playlist import Playlist
+from app.domain.playlist_save import (
+    NoSaveableTracksError,
+    PlaylistNameConflictError,
+    PlaylistSaveMode,
+    PlaylistSaveRequest,
+    PlaylistSaveResult,
+    PlaylistSaveValidationError,
+    PlaylistTargetNotFoundError,
+    PlaylistVisibility,
+)
 from app.domain.protocols import (
     AuthRepo,
     Clock,
@@ -50,6 +60,7 @@ __all__ = [
     "Logger",
     "MusicService",
     "NetworkError",
+    "NoSaveableTracksError",
     "PlayEventReport",
     "PlaybackBackendError",
     "PlaybackEngine",
@@ -57,6 +68,13 @@ __all__ = [
     "PlaybackStateRepo",
     "PlaybackStatus",
     "Playlist",
+    "PlaylistNameConflictError",
+    "PlaylistSaveMode",
+    "PlaylistSaveRequest",
+    "PlaylistSaveResult",
+    "PlaylistSaveValidationError",
+    "PlaylistTargetNotFoundError",
+    "PlaylistVisibility",
     "QueueItem",
     "RepeatMode",
     "RadioFeedbackType",

@@ -634,6 +634,10 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
             "artwork_ref": playlist.artwork_ref,
             "is_generated": playlist.is_generated,
             "is_liked": playlist.is_liked,
+            "revision": playlist.revision,
+            "snapshot": playlist.snapshot,
+            "visibility": playlist.visibility,
+            "modified": playlist.modified,
         }
 
     def _deserialize_playlist(self, raw_playlist: object) -> Playlist:
@@ -649,6 +653,10 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
             artwork_ref=self._optional_str(raw_playlist.get("artwork_ref")),
             is_generated=bool(raw_playlist.get("is_generated", False)),
             is_liked=bool(raw_playlist.get("is_liked", False)),
+            revision=self._optional_int(raw_playlist.get("revision")),
+            snapshot=self._optional_int(raw_playlist.get("snapshot")),
+            visibility=self._optional_str(raw_playlist.get("visibility")),
+            modified=self._optional_str(raw_playlist.get("modified")),
         )
 
     def _serialize_catalog_search(self, results: CatalogSearchResults) -> dict[str, object]:

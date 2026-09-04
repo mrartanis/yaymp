@@ -59,6 +59,9 @@ class FakeMusicService:
     def get_track(self, track_id: str) -> Track:
         return Track(id=track_id, title=f"Track {track_id}", artists=("Artist",))
 
+    def get_tracks(self, track_ids: Sequence[str]) -> Sequence[Track]:
+        return [self.get_track(track_id) for track_id in track_ids]
+
     def search_tracks(self, query: str, *, limit: int = 25) -> Sequence[Track]:
         return [Track(id=f"{query}-{limit}", title=query, artists=("Artist",))]
 
@@ -151,6 +154,30 @@ class FakeMusicService:
 
     def get_user_playlists(self) -> Sequence[Playlist]:
         return [Playlist(id="playlist-1", title="Playlist")]
+
+    def create_playlist(self, title: str, *, visibility: str) -> Playlist:
+        return Playlist(id="created", title=title, visibility=visibility)
+
+    def delete_playlist(self, playlist_id: str, *, owner_id: str | None = None) -> None:
+        self.deleted_playlist = (playlist_id, owner_id)
+
+    def append_playlist_tracks(
+        self,
+        playlist_id: str,
+        tracks: Sequence[Track],
+        *,
+        owner_id: str | None = None,
+    ) -> Playlist:
+        return Playlist(id=playlist_id, title="Playlist", owner_id=owner_id)
+
+    def replace_playlist_tracks(
+        self,
+        playlist_id: str,
+        tracks: Sequence[Track],
+        *,
+        owner_id: str | None = None,
+    ) -> Playlist:
+        return Playlist(id=playlist_id, title="Playlist", owner_id=owner_id)
 
     def get_generated_playlists(self) -> Sequence[Playlist]:
         return [Playlist(id="generated-1", title="Playlist of the day")]

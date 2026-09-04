@@ -245,7 +245,7 @@ def test_album_subtitle_orders_year_before_artists_and_track_count() -> None:
     assert subtitle == "1999 | Artist One, Artist Two | library.track_count"
 
 
-def test_refresh_active_list_reloads_liked_artists_without_history_push() -> None:
+def test_refresh_active_list_reloads_liked_artists_without_history_push(qtbot) -> None:
     library_service = StubLibraryService()
     controller = LibraryController(
         search_service=StubSearchService(),
@@ -263,6 +263,7 @@ def test_refresh_active_list_reloads_liked_artists_without_history_push() -> Non
     )
     try:
         controller.refresh_active_list()
+        qtbot.waitUntil(lambda: len(rendered) == 1)
     finally:
         controller.shutdown()
 
@@ -273,7 +274,7 @@ def test_refresh_active_list_reloads_liked_artists_without_history_push() -> Non
     assert [item.payload.id for item in content.items] == ["artist-1", "artist-2"]
 
 
-def test_load_more_liked_tracks_emits_only_next_page() -> None:
+def test_load_more_liked_tracks_emits_only_next_page(qtbot) -> None:
     library_service = StubLibraryService()
     library_service.all_liked_tracks = tuple(
         Track(id=f"liked-{index}", title=f"Liked {index}", artists=())
@@ -289,7 +290,9 @@ def test_load_more_liked_tracks_emits_only_next_page() -> None:
     controller.content_changed.connect(rendered.append)
     try:
         controller.load_liked_tracks()
+        qtbot.waitUntil(lambda: len(rendered) == 1)
         controller.load_more_current_list()
+        qtbot.waitUntil(lambda: len(rendered) == 2)
     finally:
         controller.shutdown()
 

@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import logging
 import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 
 from app.application.auth_service import AuthService
 from app.application.demo_library import build_demo_tracks
 from app.application.library_service import LibraryService
 from app.application.playback_service import PlaybackService
+from app.application.playlist_save_service import PlaylistSaveService
 from app.application.search_service import SearchService
 from app.application.settings_service import SettingsService
 from app.bootstrap.config import AppConfig
@@ -20,7 +20,7 @@ from app.domain import (
     SettingsRepo,
     Track,
 )
-from app.domain.errors import AuthError, DomainError, PlaybackBackendError, StorageError
+from app.domain.errors import AuthError, PlaybackBackendError, StorageError
 from app.infrastructure.persistence import (
     FileArtworkCache,
     FileAuthRepo,
@@ -47,6 +47,7 @@ class AppServices:
     playback_engine: FakePlaybackEngine | MpvPlaybackEngine
     stream_proxy_service: StreamProxyService
     playback_service: PlaybackService
+    playlist_save_service: PlaylistSaveService
     search_service: SearchService
     demo_tracks: tuple[Track, ...]
 
@@ -97,7 +98,6 @@ def build_container(config: AppConfig, logger: logging.Logger) -> AppContainer:
         library_cache_repo=library_cache_repo,
         logger=logger,
     )
-    _refresh_library_cache_snapshots(library_service=library_service, logger=logger)
 
     playback_engine = _build_playback_engine(logger)
     stream_proxy_service = StreamProxyService(
@@ -114,6 +114,11 @@ def build_container(config: AppConfig, logger: logging.Logger) -> AppContainer:
         waveform_progress_enabled=settings_service.load_waveform_progress_enabled(),
     )
     demo_tracks = build_demo_tracks()
+    playlist_save_service = PlaylistSaveService(
+        music_service=music_service,
+        library_service=library_service,
+        logger=logger,
+    )
     playback_service.restore_saved_queue()
     playback_service.set_volume(settings_service.load_volume())
     return AppContainer(
@@ -129,38 +134,11 @@ def build_container(config: AppConfig, logger: logging.Logger) -> AppContainer:
             playback_engine=playback_engine,
             stream_proxy_service=stream_proxy_service,
             playback_service=playback_service,
+            playlist_save_service=playlist_save_service,
             search_service=search_service,
             demo_tracks=demo_tracks,
         ),
     )
-
-
-def _refresh_library_cache_snapshots(
-    *,
-    library_service: LibraryService,
-    logger: logging.Logger,
-) -> None:
-    refresh_jobs = (
-        ("liked track index", library_service.refresh_liked_track_index),
-        ("disliked track index", library_service.refresh_disliked_track_index),
-        ("liked artist snapshot", library_service.refresh_liked_artist_snapshot),
-        ("disliked artist snapshot", library_service.refresh_disliked_artist_snapshot),
-    )
-    with ThreadPoolExecutor(
-        max_workers=len(refresh_jobs),
-        thread_name_prefix="yaymp-bootstrap",
-    ) as executor:
-        futures = {
-            executor.submit(operation): label
-            for label, operation in refresh_jobs
-        }
-        for future in as_completed(futures):
-            label = futures[future]
-            try:
-                future.result()
-            except DomainError as exc:
-                logger.warning("Failed to refresh %s: %s", label, exc)
-
 
 def _build_settings_repo(config: AppConfig, logger: logging.Logger) -> SettingsRepo:
     settings_repo = FileSettingsRepo(file_path=config.settings_file)

@@ -867,6 +867,10 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
             "artwork_ref": playlist.artwork_ref,
             "is_generated": playlist.is_generated,
             "is_liked": playlist.is_liked,
+            "revision": playlist.revision,
+            "snapshot": playlist.snapshot,
+            "visibility": playlist.visibility,
+            "modified": playlist.modified,
         }
 
     def _decode_playlist(self, raw_playlist: object) -> Playlist:
@@ -902,6 +906,26 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
             ),
             is_generated=bool(raw_playlist.get("is_generated", False)),
             is_liked=bool(raw_playlist.get("is_liked", False)),
+            revision=(
+                int(raw_playlist["revision"])
+                if raw_playlist.get("revision") is not None
+                else None
+            ),
+            snapshot=(
+                int(raw_playlist["snapshot"])
+                if raw_playlist.get("snapshot") is not None
+                else None
+            ),
+            visibility=(
+                str(raw_playlist["visibility"])
+                if raw_playlist.get("visibility") is not None
+                else None
+            ),
+            modified=(
+                str(raw_playlist["modified"])
+                if raw_playlist.get("modified") is not None
+                else None
+            ),
         )
 
     def _encode_catalog_search(self, results: CatalogSearchResults) -> dict[str, object]:

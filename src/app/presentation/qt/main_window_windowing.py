@@ -17,6 +17,7 @@ class MainWindowWindowingMixin:
             return
         self._auth_flow_checked = True
         QTimer.singleShot(0, self._maybe_start_auth_flow)
+        QTimer.singleShot(0, self._maybe_start_library_warmup)
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
@@ -40,7 +41,11 @@ class MainWindowWindowingMixin:
             flush_my_wave_history()
         self._system_media.shutdown()
         self._controller.shutdown()
+        self._playlist_save_controller.shutdown()
+        self._library_warmup_controller.shutdown()
         self._library_controller.shutdown()
+        self._library_warmup_task_runner.shutdown()
+        self._library_task_runner.shutdown()
         super().closeEvent(event)
 
     def eventFilter(self, watched: object, event: QEvent) -> bool:
