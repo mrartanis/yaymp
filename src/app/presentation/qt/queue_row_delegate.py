@@ -64,6 +64,21 @@ class QueueRowDelegate(QStyledItemDelegate):
     ) -> None:
         del active_row, playback_status
 
+    def paint_indicator_background(
+        self, painter: QPainter, rect: QRect, index: QModelIndex,
+    ) -> QColor:
+        """Reproduce the row's flat interior without repainting its text/artwork."""
+        theme = self._theme_provider()
+        accent = QColor(self._accent_provider())
+        painter.fillRect(rect, QColor(_palette_for_theme(theme).list_bg))
+        if index.data(QueueListModel.SelectedRole):
+            painter.fillRect(rect, accent)
+            return QColor(self._accent_text_provider())
+        tint = QColor(accent)
+        tint.setAlphaF(0.18 if theme == "light" else 0.22)
+        painter.fillRect(rect, tint)
+        return accent
+
     def paint(
         self,
         painter: QPainter,

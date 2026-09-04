@@ -1,6 +1,6 @@
 from dataclasses import replace
 
-from PySide6.QtCore import QRect, Qt
+from PySide6.QtCore import QEvent, QObject, QRect, Qt
 from PySide6.QtGui import QColor, QImage, QPainter
 
 from app.domain import Track
@@ -11,6 +11,7 @@ from app.presentation.qt.main_window_queue_view import (
     QueueListView,
     QueueRowDelegate,
 )
+from app.presentation.qt.main_window_styles import build_main_window_stylesheet
 from app.presentation.qt.queue_indicator import animated_levels, paint_indicator
 
 
@@ -107,3 +108,64 @@ def test_animation_stops_when_hidden_or_scrolled_out(qtbot):
     view.sync_waveform(0, PlaybackStatus.PAUSED)
     assert not overlay._timer.isActive()
     assert overlay.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+
+def test_animation_does_not_repaint_viewport_and_background_matches_row(qtbot, qapp):
+    view = QueueListView()
+    qtbot.addWidget(view)
+    model = QueueListModel(view)
+    model.set_queue(_queue(4))
+    model.set_active_state(0, PlaybackStatus.PLAYING)
+    view.setModel(model)
+    theme = "light"
+    view.setItemDelegate(QueueRowDelegate(
+        parent=view, thumb_provider=lambda *_: None, thumb_requester=lambda *_: None,
+        format_ms=lambda _: "0:00", accent_provider=lambda: "#526ee8",
+        accent_text_provider=lambda: "#ffffff", theme_provider=lambda: theme,
+        corner_style_provider=lambda: "rounded",
+    ))
+    view.resize(400, 200)
+    view.show()
+    view.sync_waveform(0, PlaybackStatus.PLAYING)
+    overlay = view._waveform_overlay
+    assert overlay._timer.interval() == 42
+    overlay._timer.stop()
+
+    for theme in ("light", "dark"):
+        view.setStyleSheet(build_main_window_stylesheet(
+            accent="#526ee8", accent_text="#ffffff", theme=theme, corner_style="rounded",
+        ))
+        for selected in (None, 0):
+            model.set_selected_index(selected)
+            qapp.processEvents()
+            # The overlay's top-left corner contains only the flat row background.
+            pos = overlay.pos()
+            visible = view.viewport().grab().toImage()
+            overlay.hide()
+            hidden = view.viewport().grab().toImage()
+            assert visible.pixelColor(pos) == hidden.pixelColor(pos)
+            overlay.show()
+            overlay._timer.stop()
+
+    for _ in range(3):
+        qapp.processEvents()
+    paints = []
+
+    class Watch(QObject):
+        def eventFilter(self, watched, event):
+            if event.type() == QEvent.Type.Paint:
+                paints.append(watched)
+            return False
+
+    watch = Watch()
+    view.viewport().installEventFilter(watch)
+    overlay.installEventFilter(watch)
+    for _ in range(3):
+        overlay.update()
+        qapp.processEvents()
+    assert overlay in paints
+    assert view.viewport() not in paints
+    paints.clear()
+    model.set_selected_index(None)
+    qapp.processEvents()
+    assert overlay in paints

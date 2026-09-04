@@ -304,13 +304,7 @@ class MainWindowArtworkMixin:
             self._clear_artwork()
             return
         self._set_accent_color(artwork.accent)
-        self._artwork_label.setPixmap(
-            QPixmap.fromImage(artwork.image).scaled(
-                self._artwork_label.size(),
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-        )
+        self._artwork_label.setPixmap(QPixmap.fromImage(artwork.image))
 
     def _clear_artwork(self) -> None:
         self._cancel_artwork_preparation()

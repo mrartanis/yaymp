@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from weakref import proxy
 
 from PySide6.QtCore import QElapsedTimer, QRect, Qt, QTimer
 from PySide6.QtGui import QColor, QHideEvent, QPainter, QPaintEvent, QShowEvent
@@ -13,6 +14,7 @@ from app.presentation.qt.queue_indicator import (
     normalize_playback_status,
     paint_indicator,
 )
+from app.presentation.qt.queue_row_delegate import QueueRowDelegate
 
 if TYPE_CHECKING:
     from app.presentation.qt.main_window_queue_view import QueueListView
@@ -29,18 +31,19 @@ class QueueWaveformOverlay(QWidget):
 
     def __init__(self, *, parent: "QueueListView", accent_provider) -> None:
         super().__init__(parent.viewport())
-        self._view = parent
+        self._view = proxy(parent)
         self._accent_provider = accent_provider
         self._clock = QElapsedTimer()
         self._clock.start()
         self._active_row: int | None = None
         self._playback_status = PlaybackStatus.STOPPED
         self._timer = QTimer(self)
-        self._timer.setInterval(16)
+        self._timer.setInterval(42)  # Approximately 24 FPS; motion uses elapsed time.
         self._timer.setTimerType(Qt.TimerType.PreciseTimer)
         self._timer.timeout.connect(self._advance_animation)
         self.hide()
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
 
     def sync_state(self, active_row: int | None, playback_status: PlaybackStatus) -> None:
         self._active_row = active_row
@@ -61,7 +64,9 @@ class QueueWaveformOverlay(QWidget):
         self._sync_geometry()
 
     def hideEvent(self, event: QHideEvent) -> None:
-        self._timer.stop()
+        timer = getattr(self, "_timer", None)
+        if timer is not None:
+            timer.stop()
         super().hideEvent(event)
 
     def showEvent(self, event: QShowEvent) -> None:
@@ -72,12 +77,24 @@ class QueueWaveformOverlay(QWidget):
     def paintEvent(self, event: QPaintEvent) -> None:
         del event
         painter = QPainter(self)
+        delegate = self._view.itemDelegate()
+        model = self._view.model()
+        if (
+            isinstance(delegate, QueueRowDelegate)
+            and model is not None and self._active_row is not None
+        ):
+            color = delegate.paint_indicator_background(
+                painter, self.rect(), model.index(self._active_row, 0)
+            )
+        else:
+            painter.fillRect(self.rect(), self._view.palette().base())
+            color = QColor(self._accent_provider())
         levels = (
             animated_levels(self._clock.elapsed() / 1000.0)
             if self._playback_status == PlaybackStatus.PLAYING else IDLE_LEVELS
         )
         paint_indicator(
-            painter, self.rect().adjusted(1, 1, -1, -1), QColor(self._accent_provider()), levels
+            painter, self.rect().adjusted(1, 1, -1, -1), color, levels
         )
 
     def _advance_animation(self) -> None:

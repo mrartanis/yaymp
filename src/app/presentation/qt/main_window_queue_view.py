@@ -28,6 +28,18 @@ class QueueListView(QListView):
     def sync_waveform(self, active_row: int | None, playback_status: PlaybackStatus) -> None:
         self._waveform_overlay.sync_state(active_row, playback_status)
 
+    def setModel(self, model) -> None:  # noqa: N802
+        previous = self.model()
+        if previous is not None:
+            previous.dataChanged.disconnect(self._refresh_waveform_rows)
+        super().setModel(model)
+        if model is not None:
+            model.dataChanged.connect(self._refresh_waveform_rows)
+
+    def _refresh_waveform_rows(self, *_args: object) -> None:
+        # An opaque child does not inherit the viewport's repaint requests.
+        self._waveform_overlay.update()
+
     def refresh_waveform_visibility(self) -> None:
         self._waveform_overlay.refresh_position()
 

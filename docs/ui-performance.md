@@ -3,8 +3,10 @@
 ## Implemented
 
 - Queue fake-waveform: replace 300 ms discrete frames and integer heights with
-  elapsed-time animation, a 16 ms precise timer, six bars and antialiased fractional
-  geometry. Paint only the small overlay. Stop the timer when hidden, minimized,
+  elapsed-time animation, a 42 ms precise timer (approximately 24 FPS), six bars
+  and antialiased fractional geometry. The overlay paints an opaque background
+  matching the row, preventing Qt from repainting the delegate and ancestors on
+  each animation frame. Stop the timer when hidden, minimized,
   paused or outside the viewport. Do not replay missed frames after a stall.
 - Settings: load one runtime snapshot instead of reading and parsing JSON in row
   painting, theme access and translations. Serialize writes, but release the
@@ -22,6 +24,9 @@
 - Main cover: decode QImage, compute accent and read/write its accent cache on the
   existing library task runner. Convert to QPixmap and update widgets on the UI
   thread. Cancel pending preparations and reject stale results on track changes.
+- Cover resizing: retain the original pixmap in ArtworkLabel. Rescale it on size
+  or device-pixel-ratio changes without rereading the file or recomputing the
+  accent, and discard it when the cover is cleared.
 
 ## Verification
 
@@ -34,6 +39,16 @@ A local raster microbenchmark of 10,000 fake-waveform frames, 18 x 14 logical pi
 at DPR 2, measured approximately 0.055 ms/frame, including image clearing, painter
 creation and animation calculation. Compositor and widget propagation costs are
 excluded. Real display cadence remains dependent on the platform and UI workload.
+
+A subsequent full-window offscreen profile exposed an important limitation of
+the isolated raster benchmark: the transparent overlay caused 94 paints of the
+active row and each ancestor in 1.5 seconds at the former 16 ms cadence. With the
+opaque overlay, the same experiment recorded 94 overlay paints and zero ancestor
+or row paints. CPU time in that instrumented interval fell from 0.122 to 0.073 s.
+The timer was then reduced to approximately 24 FPS as requested. Regression tests
+check background matching in both themes and selection states, absence of viewport
+paints on animation updates, and resizing from the original cover. These results
+do not predict a specific CPU percentage on another desktop/compositor.
 
 ## Remaining synchronous work
 

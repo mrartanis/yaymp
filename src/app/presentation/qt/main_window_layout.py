@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.domain import AudioQuality
+from app.presentation.qt.artwork_label import ArtworkLabel
 from app.presentation.qt.icon_utils import create_icon
 from app.presentation.qt.my_wave_button import MyWaveButton
 from app.presentation.qt.waveform_seek_bar import WaveformSeekBar
@@ -117,7 +118,7 @@ class MainWindowLayoutMixin:
         self._status_label.setVisible(False)
         self._queue_status_label = self._panel_label(self._t("label.queue_idle"), align_right=True)
         self._queue_status_label.setObjectName("queue-summary")
-        self._artwork_label = QLabel(self._t("label.no_cover"))
+        self._artwork_label = ArtworkLabel(self._t("label.no_cover"))
         self._artwork_label.setObjectName("album-art")
         self._artwork_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._artwork_label.setFixedSize(self._COMPACT_ARTWORK_SIZE, self._COMPACT_ARTWORK_SIZE)
