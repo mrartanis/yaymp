@@ -4,6 +4,7 @@ import sys
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
+from time import monotonic
 from typing import Any
 from urllib.parse import quote
 
@@ -99,6 +100,12 @@ class MacOSSystemMediaIntegration(SystemMediaIntegration):
         self._media_player: Any | None = None
         self._foundation: Any | None = None
         self._ns_image: Any | None = None
+        self._published_key: tuple | None = None
+        self._published_position_ms = 0
+        self._published_at = 0.0
+        self._now_playing_cleared = False
+        self._artwork_key: tuple | None = None
+        self._cached_artwork: Any | None = None
 
     def initialize(self) -> None:
         try:
@@ -181,6 +188,10 @@ class MacOSSystemMediaIntegration(SystemMediaIntegration):
         self._foundation = NSMutableDictionary
         self._ns_image = NSImage
         self._initialized = True
+        self._published_key = None
+        self._now_playing_cleared = False
+        self._artwork_key = None
+        self._cached_artwork = None
 
     def update_snapshot(self, snapshot: PlaybackSnapshot) -> None:
         self._snapshot = snapshot
@@ -189,6 +200,17 @@ class MacOSSystemMediaIntegration(SystemMediaIntegration):
         current_item = snapshot.current_item
         if current_item is None:
             self.shutdown()
+            return
+
+        now = monotonic()
+        key = (_metadata_key(snapshot, self._artwork_cache), snapshot.state.status,
+               snapshot.seek_revision)
+        expected = self._published_position_ms
+        if snapshot.state.status == PlaybackStatus.PLAYING:
+            expected += (now - self._published_at) * 1000
+        # Re-anchor after stalls/backend discontinuities as well as explicit seeks.
+        tolerance = 1500 if snapshot.state.status == PlaybackStatus.PLAYING else 0
+        if key == self._published_key and abs(snapshot.state.position_ms - expected) <= tolerance:
             return
 
         info = self._foundation.alloc().init()
@@ -227,11 +249,19 @@ class MacOSSystemMediaIntegration(SystemMediaIntegration):
                 self._media_player.MPMediaItemPropertyArtwork,
             )
         self._media_player.MPNowPlayingInfoCenter.defaultCenter().setNowPlayingInfo_(info)
+        self._published_key = key
+        self._published_position_ms = snapshot.state.position_ms
+        self._published_at = now
+        self._now_playing_cleared = False
 
     def shutdown(self) -> None:
-        if self._media_player is None:
+        if self._media_player is None or self._now_playing_cleared:
             return
         self._media_player.MPNowPlayingInfoCenter.defaultCenter().setNowPlayingInfo_(None)
+        self._now_playing_cleared = True
+        self._published_key = None
+        self._artwork_key = None
+        self._cached_artwork = None
 
     def _artwork_for_track(self, artwork_ref: str | None) -> Any | None:
         if self._media_player is None or self._ns_image is None or not artwork_ref:
@@ -239,6 +269,15 @@ class MacOSSystemMediaIntegration(SystemMediaIntegration):
         artwork_url = self._artwork_cache.normalize_url(artwork_ref)
         if artwork_url is None:
             return None
+        key = (artwork_url, self._artwork_cache.revision_for_url(artwork_url))
+        if key == self._artwork_key:
+            return self._cached_artwork
+        artwork = self._load_artwork(artwork_url)
+        self._artwork_key = key
+        self._cached_artwork = artwork
+        return artwork
+
+    def _load_artwork(self, artwork_url: str) -> Any | None:
         cache_path = self._artwork_cache.cache_path_for_url(artwork_url)
         if not cache_path.exists():
             return None
