@@ -9,7 +9,11 @@ from tests.unit.test_system_media import StubLogger, StubPlaybackController
 from app.application.playback_service import PlaybackSnapshot
 from app.domain import PlaybackState, PlaybackStatus, QueueItem, Track
 from app.infrastructure.persistence.file_artwork_cache import FileArtworkCache
-from app.presentation.qt.system_media import LinuxMprisIntegration, MacOSSystemMediaIntegration
+from app.presentation.qt.system_media import (
+    LinuxMprisIntegration,
+    MacOSSystemMediaIntegration,
+    WindowsSystemMediaIntegration,
+)
 
 
 def snapshot(position=0, status=PlaybackStatus.PLAYING):
@@ -180,3 +184,42 @@ def test_macos_publishes_late_art_and_metadata_changes(tmp_path):
     integration.update_snapshot(replace(initial, current_item=item, queue=(item,)))
     assert center.setNowPlayingInfo_.call_count == 3
     assert integration._ns_image.alloc.return_value.initWithContentsOfFile_.call_count == 1
+
+
+def test_windows_updates_metadata_separately_from_timeline(tmp_path):
+    from tests.unit.test_system_media import StubWindowsPlaybackStatus, StubWindowsRepeatMode
+
+    integration = WindowsSystemMediaIntegration(
+        playback_controller=StubPlaybackController(),
+        artwork_cache=FileArtworkCache(cache_dir=tmp_path),
+        window=None,
+        logger=StubLogger(),
+    )
+    integration._smtc = MagicMock()
+    display = integration._display_updater = MagicMock()
+    integration._media_playback_status = StubWindowsPlaybackStatus
+    integration._media_playback_type = SimpleNamespace(MUSIC="music")
+    integration._media_repeat_mode = StubWindowsRepeatMode
+    integration._timeline_properties_cls = SimpleNamespace
+    integration.update_snapshot(snapshot())
+    for pos in range(1000, 31_000, 1000):
+        integration.update_snapshot(snapshot(pos))
+    assert display.update.call_count == 1
+    assert integration._smtc.update_timeline_properties.call_count == 31
+    paused = snapshot(30_000, PlaybackStatus.PAUSED)
+    for _ in range(30):
+        integration.update_snapshot(paused)
+    assert display.update.call_count == 1
+    assert integration._smtc.update_timeline_properties.call_count == 31
+    assert integration._smtc.playback_status == "paused"
+    item = replace(paused.current_item, track=replace(paused.current_item.track, title="New"))
+    integration.update_snapshot(replace(paused, current_item=item, queue=(item,)))
+    assert display.update.call_count == 2
+    assert display.music_properties.title == "New"
+    empty = PlaybackSnapshot((), PlaybackState(), None)
+    for _ in range(30):
+        integration.update_snapshot(empty)
+    assert display.clear_all.call_count == 1
+    assert display.update.call_count == 3
+    integration.update_snapshot(paused)
+    assert display.update.call_count == 4

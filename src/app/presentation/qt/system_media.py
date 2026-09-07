@@ -334,6 +334,10 @@ class WindowsSystemMediaIntegration(SystemMediaIntegration):
         self._toast_cls: Any | None = None
         self._toast_image_cls: Any | None = None
         self._toast_display_image_cls: Any | None = None
+        self._display_key: tuple | None = None
+        self._smtc_state_key: tuple | None = None
+        self._timeline_key: tuple | None = None
+        self._smtc_cleared = False
 
     def initialize(self) -> None:
         self._initialize_smtc()
@@ -390,6 +394,8 @@ class WindowsSystemMediaIntegration(SystemMediaIntegration):
         self._media_repeat_mode = MediaPlaybackAutoRepeatMode
         self._button_enum = SystemMediaTransportControlsButton
         self._timeline_properties_cls = SystemMediaTransportControlsTimelineProperties
+        self._display_key = self._smtc_state_key = self._timeline_key = None
+        self._smtc_cleared = False
 
     def _initialize_toasts(self) -> None:
         try:
@@ -440,37 +446,46 @@ class WindowsSystemMediaIntegration(SystemMediaIntegration):
 
         track = current_item.track
         try:
-            self._smtc.playback_status = _windows_playback_status(
-                snapshot.state.status,
-                self._media_playback_status,
-            )
-            self._smtc.shuffle_enabled = snapshot.state.shuffle_enabled
-            self._smtc.auto_repeat_mode = _windows_repeat_mode(
-                snapshot.state.repeat_mode,
-                self._media_repeat_mode,
-            )
-            self._display_updater.type = self._media_playback_type.MUSIC
-            self._display_updater.app_media_id = track.id
-            music = self._display_updater.music_properties
-            music.title = display_track_title(track)
-            music.artist = ", ".join(track.artists)
-            music.album_title = track.album_title or ""
-            self._display_updater.update()
-
-            timeline = self._timeline_properties_cls()
-            timeline.start_time = timedelta(0)
-            timeline.position = timedelta(milliseconds=max(0, snapshot.state.position_ms))
-            if track.duration_ms is not None:
-                duration = timedelta(milliseconds=max(0, track.duration_ms))
-                timeline.end_time = duration
-                timeline.max_seek_time = duration
-            self._smtc.update_timeline_properties(timeline)
+            state_key = (snapshot.state.status, snapshot.state.shuffle_enabled,
+                         snapshot.state.repeat_mode)
+            if state_key != self._smtc_state_key:
+                self._smtc.playback_status = _windows_playback_status(
+                    snapshot.state.status, self._media_playback_status,
+                )
+                self._smtc.shuffle_enabled = snapshot.state.shuffle_enabled
+                self._smtc.auto_repeat_mode = _windows_repeat_mode(
+                    snapshot.state.repeat_mode, self._media_repeat_mode,
+                )
+                self._smtc_state_key = state_key
+            display_key = (track.id, display_track_title(track), track.artists, track.album_title)
+            if display_key != self._display_key:
+                self._display_updater.type = self._media_playback_type.MUSIC
+                self._display_updater.app_media_id = track.id
+                music = self._display_updater.music_properties
+                music.title = display_track_title(track)
+                music.artist = ", ".join(track.artists)
+                music.album_title = track.album_title or ""
+                self._display_updater.update()
+                self._display_key = display_key
+            timeline_key = (track.id, snapshot.state.position_ms, track.duration_ms)
+            if timeline_key != self._timeline_key:
+                timeline = self._timeline_properties_cls()
+                timeline.start_time = timedelta(0)
+                timeline.position = timedelta(milliseconds=max(0, snapshot.state.position_ms))
+                if track.duration_ms is not None:
+                    duration = timedelta(milliseconds=max(0, track.duration_ms))
+                    timeline.end_time = duration
+                    timeline.max_seek_time = duration
+                self._smtc.update_timeline_properties(timeline)
+                self._timeline_key = timeline_key
+            self._smtc_cleared = False
         except Exception as exc:  # pragma: no cover - depends on WinRT runtime context
             self._logger.debug("Windows media integration update failed: %s", exc)
 
     def _clear_smtc(self) -> None:
         if (
-            self._display_updater is None
+            self._smtc_cleared
+            or self._display_updater is None
             or self._smtc is None
             or self._media_playback_status is None
         ):
@@ -479,6 +494,8 @@ class WindowsSystemMediaIntegration(SystemMediaIntegration):
             self._display_updater.clear_all()
             self._display_updater.update()
             self._smtc.playback_status = self._media_playback_status.STOPPED
+            self._display_key = self._smtc_state_key = self._timeline_key = None
+            self._smtc_cleared = True
         except Exception as exc:  # pragma: no cover - depends on WinRT runtime context
             self._logger.debug("Windows media integration clear failed: %s", exc)
 
