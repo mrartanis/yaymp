@@ -1,8 +1,10 @@
 from dataclasses import replace
 
+from PySide6.QtCore import QEvent, QObject
+
 from app.application.playback_service import PlaybackSnapshot
 from app.bootstrap.startup import build_startup_context
-from app.domain import PlaybackState, QueueItem, Track
+from app.domain import PlaybackState, PlaybackStatus, QueueItem, Track
 from app.presentation.qt.dialog_chrome import WindowTitleBar
 
 
@@ -50,3 +52,55 @@ def test_main_window_can_be_constructed(qtbot, qapp, tmp_path, monkeypatch) -> N
     window._render_snapshot(replace(snapshot, queue=(updated_item,), current_item=updated_item))
     assert window._track_title_label.text() == "Updated title"
     assert window._queue_model.queue_item_at(0).track.is_liked
+
+
+def test_position_poll_does_not_repaint_transport(qtbot, qapp, tmp_path, monkeypatch):
+    for name in ("CONFIG", "DATA", "CACHE", "LOG"):
+        monkeypatch.setenv(f"YAYMP_{name}_DIR", str(tmp_path / name.lower()))
+    monkeypatch.setenv("YAYMP_PLAYBACK_BACKEND", "fake")
+    context = build_startup_context(argv=["yaymp-test"], existing_qt_app=qapp)
+    window = context.main_window
+    qtbot.addWidget(window)
+    window._playback_poll_timer.stop()
+    window.show()
+    qtbot.wait(100)
+    item = QueueItem(Track("123", "Title", ("Artist",), duration_ms=600_000))
+    snapshot = PlaybackSnapshot(
+        (item,), PlaybackState(status=PlaybackStatus.PAUSED, duration_ms=600_000), item
+    )
+    window._render_snapshot(snapshot)
+    qtbot.wait(100)
+
+    class PaintCounter(QObject):
+        def __init__(self):
+            super().__init__()
+            self.count = 0
+
+        def eventFilter(self, watched, event):
+            if event.type() == QEvent.Type.Paint:
+                self.count += 1
+            return False
+
+    counter = PaintCounter()
+    for widget in (
+        window._play_pause_button,
+        window._transport_widget,
+        window._hero_widget,
+        window._hero_info_widget,
+    ):
+        widget.installEventFilter(counter)
+    for pos in range(1000, 31_000, 1000):
+        window._render_snapshot(replace(snapshot, state=replace(snapshot.state, position_ms=pos)))
+        qapp.processEvents()
+    assert counter.count == 0
+    before = window._play_pause_button.icon().cacheKey()
+    window._render_play_pause_button(PlaybackStatus.PLAYING)
+    assert window._play_pause_button.icon().cacheKey() != before
+    assert window._play_pause_button.property("playback_status") == "playing"
+    monkeypatch.setattr(window, "_t", lambda key: "Localized pause")
+    window._render_play_pause_button(PlaybackStatus.PLAYING)
+    assert window._play_pause_button.toolTip() == "Localized pause"
+    before = window._play_pause_button.icon().cacheKey()
+    monkeypatch.setattr(window, "_accent_text_color", lambda: "#123456")
+    window._render_play_pause_button(PlaybackStatus.PLAYING)
+    assert window._play_pause_button.icon().cacheKey() != before

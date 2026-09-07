@@ -789,7 +789,10 @@ class MainWindow(
     ) -> None:
         icon_size = button.iconSize()
         target_size = max(1, icon_size.width(), icon_size.height())
-        button.setIcon(create_icon(icon_name, color=color, size=target_size))
+        icon = create_icon(icon_name, color=color, size=target_size)
+        # Qt's setIcon invalidates geometry and paint even for the same cached icon.
+        if button.icon().cacheKey() != icon.cacheKey():
+            button.setIcon(icon)
 
     def _apply_transport_visual_mode(self, *, wide: bool) -> None:
         if wide:
