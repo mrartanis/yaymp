@@ -2,6 +2,18 @@
 
 ## Implemented
 
+- System media: MPRIS publishes only changed properties and never includes
+  Position in PropertiesChanged. Seek revisions survive deferred snapshot
+  coalescing and trigger Seeked. Position and seek methods use signed 64-bit
+  microseconds; track IDs use valid, collision-free object path components.
+- macOS Now Playing: reuse artwork across position/status updates and publish
+  metadata only on changes, seeks or a playback-clock discrepancy above 1.5 s.
+  Cache write revisions make newly downloaded covers visible without polling
+  the filesystem. Windows SMTC updates metadata, playback state and timeline
+  independently; repeated empty snapshots clear system metadata only once.
+- Transport icons: compare QIcon cache keys before calling setIcon, avoiding
+  unnecessary geometry invalidation and ancestor repaints while retaining
+  updates for status, color and icon size changes.
 - Queue fake-waveform: replace 300 ms discrete frames and integer heights with
   elapsed-time animation, a 42 ms precise timer (approximately 24 FPS), six bars
   and antialiased fractional geometry. The overlay paints an opaque background
@@ -29,6 +41,15 @@
   accent, and discard it when the cover is cleared.
 
 ## Verification
+
+Regression tests cover quiet position polls, paused/empty snapshots, short
+seeks, late artwork, Windows timeline updates and transport paint events.
+macOS/Windows native calls are tested with substitutes on Linux. A private
+D-Bus session verified Position(x), Seek(x), SetPosition(ox), thirty quiet polls
+and one Seeked(x) for a seek. PySide6 still infers the variant type of
+mpris:length: int32 for small values, int64 for large ones. Strict int64 typing
+of that metadata entry remains a compatibility limitation; no overflow was
+observed and no new D-Bus dependency was introduced for this field.
 
 Offscreen Qt tests cover event-loop responsiveness while playback and cover work
 are deliberately blocked, volume coalescing, worker-thread persistence, stale

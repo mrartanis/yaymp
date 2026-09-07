@@ -3,6 +3,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+from PySide6.QtCore import QObject
+from PySide6.QtTest import QSignalSpy
 from PySide6.QtWidgets import QWidget
 from tests.unit.test_system_media import StubLogger, StubPlaybackController
 
@@ -13,6 +15,7 @@ from app.presentation.qt.system_media import (
     LinuxMprisIntegration,
     MacOSSystemMediaIntegration,
     WindowsSystemMediaIntegration,
+    _MprisPlayerAdaptor,
 )
 
 
@@ -100,12 +103,17 @@ def test_mpris_emits_seeked_once_even_for_small_seek(qtbot, tmp_path):
     )
     connection = RecordingConnection()
     integration._connection = connection
+    integration._root_object = QObject()
+    integration._player_adaptor = _MprisPlayerAdaptor(integration)
+    seeked = QSignalSpy(integration._player_adaptor.Seeked)
     integration.update_snapshot(snapshot())
     connection.messages.clear()
     sought = replace(snapshot(100), seek_revision=1)
     integration.update_snapshot(sought)
     integration.update_snapshot(sought)
-    assert [m.member() for m in connection.messages] == ["Seeked"]
+    assert connection.messages == []
+    assert seeked.count() == 1
+    assert seeked.at(0) == [100_000]
 
 
 def mac_integration(tmp_path):

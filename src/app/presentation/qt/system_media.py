@@ -6,7 +6,6 @@ from datetime import timedelta
 from pathlib import Path
 from time import monotonic
 from typing import Any
-from urllib.parse import quote
 
 from PySide6.QtCore import ClassInfo, Property, QObject, Signal, Slot
 from PySide6.QtWidgets import QWidget
@@ -22,11 +21,13 @@ try:
         QDBusAbstractAdaptor,
         QDBusConnection,
         QDBusMessage,
+        QDBusObjectPath,
     )
 except ImportError:  # pragma: no cover
     QDBusAbstractAdaptor = None
     QDBusConnection = None
     QDBusMessage = None
+    QDBusObjectPath = None
 
 
 class SystemMediaIntegration:
@@ -692,12 +693,6 @@ class LinuxMprisIntegration(SystemMediaIntegration):
         if seeked and previous_track_id == current_item.track.id:
             if self._player_adaptor is not None:
                 self._player_adaptor.Seeked.emit(self._state.position_us)
-            elif self._connection is not None:
-                message = QDBusMessage.createSignal(
-                    self._OBJECT_PATH, "org.mpris.MediaPlayer2.Player", "Seeked"
-                )
-                message.setArguments([self._state.position_us])
-                self._connection.send(message)
 
     def shutdown(self) -> None:
         if self._connection is None:
@@ -764,9 +759,9 @@ class LinuxMprisIntegration(SystemMediaIntegration):
         return artwork_url
 
     def _track_object_path(self, track_id: str):
-        encoded_id = quote(track_id, safe="")
-        from PySide6.QtDBus import QDBusObjectPath
-
+        # Object path components only allow ASCII letters, digits and underscores.
+        # UTF-8 hex is reversible and cannot collide with punctuation in another ID.
+        encoded_id = "t" + track_id.encode("utf-8").hex()
         return QDBusObjectPath(f"/app/yaymp/track/{encoded_id}")
 
     def raise_window(self) -> None:
@@ -858,18 +853,20 @@ class _MprisPlayerAdaptor(QDBusAbstractAdaptor):
     def Play(self) -> None:
         self._integration._controller.play()
 
-    @Slot(int)
+    @Slot("qlonglong")
     def Seek(self, offset_us: int) -> None:
         position_ms = max(0, (self._integration._state.position_us + offset_us) // 1000)
         self._integration._controller.seek(int(position_ms))
 
-    @Slot(str, int)
-    def SetPosition(self, track_id: str, position_us: int) -> None:
-        if track_id and self.Metadata.get("mpris:trackid") and track_id != str(
-            self.Metadata["mpris:trackid"].path()
-        ):
+    @Slot(QDBusObjectPath, "qlonglong")
+    def SetPosition(self, track_id: QDBusObjectPath, position_us: int) -> None:
+        current_path = self.Metadata.get("mpris:trackid")
+        if current_path is None or track_id.path() != current_path.path():
             return
-        self._integration._controller.seek(max(0, position_us // 1000))
+        length = self.Metadata.get("mpris:length")
+        if position_us < 0 or (length is not None and position_us > length):
+            return
+        self._integration._controller.seek(position_us // 1000)
 
     @Slot(str)
     def OpenUri(self, uri: str) -> None:
@@ -899,7 +896,7 @@ class _MprisPlayerAdaptor(QDBusAbstractAdaptor):
     def Volume(self) -> float:
         return self._integration._state.volume
 
-    @Property(int)
+    @Property("qlonglong")
     def Position(self) -> int:
         return self._integration._state.position_us
 
