@@ -855,6 +855,15 @@ def test_playback_service_persists_seek_position() -> None:
     assert state_repo.saved_queue.position_ms == 45_000
 
 
+def test_seek_revision_survives_polling() -> None:
+    service = PlaybackService(playback_engine=FakePlaybackEngine(), logger=TestLogger())
+    service.replace_queue(build_tracks(), start_index=0, source_type="album", source_id="album-1")
+    before = service.snapshot()
+    sought = service.seek(100)
+    assert sought.seek_revision == before.seek_revision + 1
+    assert service.refresh().seek_revision == sought.seek_revision
+
+
 def test_playback_service_restores_saved_queue_without_autoplay() -> None:
     state_repo = InMemoryPlaybackStateRepo(
         SavedPlaybackQueue(

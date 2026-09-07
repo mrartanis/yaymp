@@ -11,6 +11,10 @@ _ARTWORK_SIZE = "600x600"
 class FileArtworkCache:
     def __init__(self, *, cache_dir: Path) -> None:
         self._cache_dir = cache_dir
+        self._revisions: dict[Path, int] = {}
+
+    def revision_for_url(self, artwork_url: str) -> int:
+        return self._revisions.get(self.cache_path_for_url(artwork_url), 0)
 
     def normalize_url(self, artwork_ref: str) -> str | None:
         value = artwork_ref.strip()
@@ -53,3 +57,4 @@ class FileArtworkCache:
             path.write_bytes(data)
         except OSError as exc:
             raise StorageError("Failed to save artwork cache file") from exc
+        self._revisions[path] = self._revisions.get(path, 0) + 1

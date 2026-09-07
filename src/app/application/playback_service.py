@@ -40,6 +40,8 @@ class PlaybackSnapshot:
     queue: tuple[QueueItem, ...]
     state: PlaybackState
     current_item: QueueItem | None
+    # Survives UI snapshot coalescing, including seeks shorter than a poll interval.
+    seek_revision: int = 0
 
 
 @dataclass(slots=True)
@@ -100,6 +102,7 @@ class PlaybackService:
         randomizer: random.Random | None = None,
     ) -> None:
         self._playback_engine = playback_engine
+        self._seek_revision = 0
         self._logger = logger
         self._music_service = music_service
         self._library_cache_repo = library_cache_repo
@@ -455,6 +458,7 @@ class PlaybackService:
 
     def seek(self, position_ms: int) -> PlaybackSnapshot:
         self._playback_engine.seek(position_ms)
+        self._seek_revision += 1
         if self._telemetry_session is not None:
             bounded_position_ms = max(0, position_ms)
             self._telemetry_session.last_known_position_ms = bounded_position_ms
@@ -874,6 +878,7 @@ class PlaybackService:
             queue=tuple(self._queue),
             state=state,
             current_item=self.current_item(),
+            seek_revision=self._seek_revision,
         )
 
     def _should_auto_advance(self, engine_state: PlaybackState) -> bool:

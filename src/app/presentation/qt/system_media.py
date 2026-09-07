@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from PySide6.QtCore import ClassInfo, Property, QObject, Slot
+from PySide6.QtCore import ClassInfo, Property, QObject, Signal, Slot
 from PySide6.QtWidgets import QWidget
 
 from app.application.playback_service import PlaybackSnapshot
@@ -41,6 +41,15 @@ class SystemMediaIntegration:
 
 class NoopSystemMediaIntegration(SystemMediaIntegration):
     pass
+
+
+def _metadata_key(snapshot: PlaybackSnapshot, cache: FileArtworkCache) -> tuple:
+    if snapshot.current_item is None:
+        return ()
+    track = snapshot.current_item.track
+    url = cache.normalize_url(track.artwork_ref) if track.artwork_ref else None
+    return (track.id, display_track_title(track), track.artists, track.album_title,
+            track.duration_ms, url, cache.revision_for_url(url) if url else 0)
 
 
 def build_system_media_integration(
@@ -564,6 +573,9 @@ class LinuxMprisIntegration(SystemMediaIntegration):
         self._registered = False
         self._root_adaptor: _MprisRootAdaptor | None = None
         self._player_adaptor: _MprisPlayerAdaptor | None = None
+        self._metadata_key: tuple | None = None
+        self._published_properties: dict[str, Any] = {}
+        self._seek_revision = 0
 
     def initialize(self) -> None:
         if QDBusConnection is None:
@@ -579,6 +591,7 @@ class LinuxMprisIntegration(SystemMediaIntegration):
             )
             return
         self._connection = connection
+        self._published_properties = {}
         self._root_object = QObject()
         self._root_adaptor = _MprisRootAdaptor(self)
         self._player_adaptor = _MprisPlayerAdaptor(self)
@@ -595,13 +608,24 @@ class LinuxMprisIntegration(SystemMediaIntegration):
 
     def update_snapshot(self, snapshot: PlaybackSnapshot) -> None:
         current_item = snapshot.current_item
+        previous_track_id = self._state.current_track_id
+        seeked = snapshot.seek_revision != self._seek_revision
+        self._seek_revision = snapshot.seek_revision
+        metadata_key = _metadata_key(snapshot, self._artwork_cache)
+        metadata = self._state.metadata
+        if metadata_key != self._metadata_key:
+            metadata = (
+                self._metadata_for_snapshot(snapshot, current_item.track)
+                if current_item is not None else {}
+            )
+            self._metadata_key = metadata_key
         if current_item is None:
             self._state = _MprisState(metadata={})
             self._emit_properties_changed()
             return
         self._state = _MprisState(
             playback_status=_mpris_playback_status(snapshot.state.status),
-            metadata=self._metadata_for_snapshot(snapshot, current_item.track),
+            metadata=metadata,
             position_us=snapshot.state.position_ms * 1000,
             volume=max(0.0, min(1.0, snapshot.state.volume / 100.0)),
             shuffle=snapshot.state.shuffle_enabled,
@@ -609,15 +633,38 @@ class LinuxMprisIntegration(SystemMediaIntegration):
             current_track_id=current_item.track.id,
         )
         self._emit_properties_changed()
+        if seeked and previous_track_id == current_item.track.id:
+            if self._player_adaptor is not None:
+                self._player_adaptor.Seeked.emit(self._state.position_us)
+            elif self._connection is not None:
+                message = QDBusMessage.createSignal(
+                    self._OBJECT_PATH, "org.mpris.MediaPlayer2.Player", "Seeked"
+                )
+                message.setArguments([self._state.position_us])
+                self._connection.send(message)
 
     def shutdown(self) -> None:
         if self._connection is None:
             return
         self._connection.unregisterObject(self._OBJECT_PATH)
         self._connection.unregisterService(self._BUS_NAME)
+        self._connection = None
+        self._published_properties = {}
 
     def _emit_properties_changed(self) -> None:
         if self._connection is None:
+            return
+        properties = {
+            "PlaybackStatus": self._state.playback_status,
+            "Metadata": self._state.metadata or {},
+            "Volume": self._state.volume,
+            "Shuffle": self._state.shuffle,
+            "LoopStatus": self._state.loop_status,
+        }
+        changed = {key: value for key, value in properties.items()
+                   if key not in self._published_properties
+                   or self._published_properties[key] != value}
+        if not changed:
             return
         message = QDBusMessage.createSignal(
             self._OBJECT_PATH,
@@ -627,18 +674,12 @@ class LinuxMprisIntegration(SystemMediaIntegration):
         message.setArguments(
             [
                 "org.mpris.MediaPlayer2.Player",
-                {
-                    "PlaybackStatus": self._state.playback_status,
-                    "Metadata": self._state.metadata or {},
-                    "Position": self._state.position_us,
-                    "Volume": self._state.volume,
-                    "Shuffle": self._state.shuffle,
-                    "LoopStatus": self._state.loop_status,
-                },
+                changed,
                 [],
             ]
         )
-        self._connection.send(message)
+        if self._connection.send(message):
+            self._published_properties = properties
 
     def _metadata_for_snapshot(self, snapshot: PlaybackSnapshot, track) -> dict[str, Any]:
         metadata: dict[str, Any] = {
@@ -727,6 +768,8 @@ class _MprisRootAdaptor(QDBusAbstractAdaptor):
 
 @ClassInfo({"D-Bus Interface": "org.mpris.MediaPlayer2.Player"})
 class _MprisPlayerAdaptor(QDBusAbstractAdaptor):
+    Seeked = Signal("qlonglong")
+
     def __init__(self, integration: LinuxMprisIntegration) -> None:
         assert integration._root_object is not None
         super().__init__(integration._root_object)
