@@ -171,6 +171,12 @@ class FakeMusicService:
     def get_audio_quality(self) -> AudioQuality:
         return getattr(self, "quality", AudioQuality.HQ)
 
+    def set_language(self, language: str) -> None:
+        self.language = language
+
+    def get_language(self) -> str:
+        return getattr(self, "language", "en")
+
     def get_user_playlists(self):
         return ()
 

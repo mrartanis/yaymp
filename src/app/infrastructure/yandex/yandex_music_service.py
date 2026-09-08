@@ -65,6 +65,7 @@ class YandexMusicService(MusicService):
         self._client = client
         self._logger = logger
         self._audio_quality = AudioQuality.HQ
+        self._language = "ru"
         self._ai_content_reduction_enabled = False
 
     def get_auth_session(self) -> AuthSession | None:
@@ -383,6 +384,22 @@ class YandexMusicService(MusicService):
     def get_audio_quality(self) -> AudioQuality:
         return self._audio_quality
 
+    def set_language(self, language: str) -> None:
+        self._language = "ru" if str(language).lower().startswith("ru") else "en"
+        client = self._client
+        if client is None:
+            return
+        client.language = self._language
+        request = getattr(client, "request", None)
+        if request is not None:
+            request.headers = {
+                **getattr(request, "headers", {}),
+                "Accept-Language": self._language,
+            }
+
+    def get_language(self) -> str:
+        return self._language
+
     def set_ai_content_reduction_enabled(self, enabled: bool) -> None:
         self._ai_content_reduction_enabled = bool(enabled)
 
@@ -443,6 +460,7 @@ class YandexMusicService(MusicService):
         return TrackCredits(
             items=tuple(credits),
             raw_json=json.dumps(payload, ensure_ascii=False, sort_keys=True),
+            language=self._language,
         )
 
     def get_user_playlists(self) -> Sequence[Playlist]:
@@ -1074,7 +1092,7 @@ class YandexMusicService(MusicService):
             raise AuthError("yandex-music package is not installed") from exc
 
         try:
-            self._client = Client(self._session.token).init()
+            self._client = Client(self._session.token, language=self._language).init()
         except Exception as exc:
             raise AuthError("Failed to initialize Yandex Music client") from exc
         return self._client

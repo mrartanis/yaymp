@@ -229,6 +229,7 @@ class PlaybackService:
                 credits=track.credits,
                 credits_raw_json=track.credits_raw_json,
                 credits_cached_at=track.credits_cached_at,
+                credits_language=track.credits_language,
                 ai_usage=track.ai_usage,
             )
             if updated_track != item.track:
@@ -1215,7 +1216,10 @@ class PlaybackService:
             return track
         if not track.waveform_bins and cached_track.waveform_bins:
             track = replace(track, waveform_bins=cached_track.waveform_bins)
-        if track_credits_are_fresh(cached_track):
+        if track_credits_are_fresh(
+            cached_track,
+            language=self._music_service.get_language(),
+        ):
             track = merge_cached_track_credits(track, cached_track)
         return track
 

@@ -32,6 +32,8 @@ def test_main_window_can_be_constructed(qtbot, qapp, tmp_path, monkeypatch) -> N
     assert context.container.services.music_service.get_ai_content_reduction_enabled() is False
     assert context.main_window._ai_content_reduction_buttons[False].isChecked()
     assert context.main_window.isVisible()
+    context.main_window._set_language_preference("en")
+    assert context.container.services.music_service.get_language() == "en"
     context.main_window._set_theme_preference("light")
     context.main_window._music_metadata_controller._apply_saved_account_setting(True)
 

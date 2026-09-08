@@ -52,13 +52,21 @@ def merge_cached_track_credits(track: Track, cached_track: Track | None) -> Trac
         credits=cached_track.credits,
         credits_raw_json=cached_track.credits_raw_json,
         credits_cached_at=cached_track.credits_cached_at,
+        credits_language=cached_track.credits_language,
         ai_usage=cached_track.ai_usage,
     )
 
 
-def track_credits_are_fresh(track: Track, *, ttl: timedelta = timedelta(days=7)) -> bool:
+def track_credits_are_fresh(
+    track: Track,
+    *,
+    language: str | None = None,
+    ttl: timedelta = timedelta(days=7),
+) -> bool:
     cached_at = track.credits_cached_at
     if cached_at is None:
+        return False
+    if language is not None and track.credits_language != language:
         return False
     if cached_at.tzinfo is None:
         cached_at = cached_at.replace(tzinfo=UTC)

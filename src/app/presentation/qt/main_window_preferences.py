@@ -291,6 +291,12 @@ class MainWindowPreferencesMixin:
 
     def _set_language_preference(self, language: str) -> None:
         self._container.services.settings_service.save_language_preference(language)
+        self._container.services.music_service.set_language(
+            self._ui_text_catalog.resolved_language()
+        )
+        self._credits_playback_track_id = None
+        if self._track_info_dialog is not None:
+            self._track_info_dialog.close()
         self._render_language_preference(language)
         self._refresh_localized_texts()
         self._status_label.setText(

@@ -80,7 +80,10 @@ class MainWindowPlaybackMixin:
             self._credits_playback_track_id = current_track.id
             if (
                 self._container.services.music_service.get_auth_session() is not None
-                and not track_credits_are_fresh(current_track)
+                and not track_credits_are_fresh(
+                    current_track,
+                    language=self._container.services.music_service.get_language(),
+                )
             ):
                 self._music_metadata_controller.request_track_credits(
                     current_track,

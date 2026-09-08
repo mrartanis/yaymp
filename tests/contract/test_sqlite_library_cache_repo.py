@@ -35,6 +35,7 @@ def test_sqlite_library_cache_repo_round_trips_track_metadata_and_artwork(tmp_pa
         credits=(TrackCredit(title="Использование ИИ", value="Возможно"),),
         credits_raw_json='{"credits":[],"future":true}',
         credits_cached_at=datetime.now(tz=UTC),
+        credits_language="ru",
         ai_usage=TrackAiUsage.POSSIBLE,
     )
 
@@ -54,6 +55,7 @@ def test_sqlite_library_cache_repo_preserves_credits_on_plain_metadata_refresh(t
         credits=(TrackCredit(title="AI use", value="Possible"),),
         credits_raw_json='{"credits":[],"future":true}',
         credits_cached_at=datetime.now(tz=UTC),
+        credits_language="en",
         ai_usage=TrackAiUsage.POSSIBLE,
     )
     repo.save_track_metadata(track)
@@ -68,6 +70,7 @@ def test_sqlite_library_cache_repo_preserves_credits_on_plain_metadata_refresh(t
     assert cached.credits == track.credits
     assert cached.credits_raw_json == track.credits_raw_json
     assert cached.credits_cached_at == track.credits_cached_at
+    assert cached.credits_language == "en"
     assert cached.ai_usage is TrackAiUsage.POSSIBLE
 
 

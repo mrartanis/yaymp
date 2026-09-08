@@ -93,6 +93,9 @@ class MainWindow(
         self._ui_text_catalog = UiTextCatalog(
             settings_service=container.services.settings_service
         )
+        container.services.music_service.set_language(
+            self._ui_text_catalog.resolved_language()
+        )
         self._controller = PlaybackController(
             playback_service=container.services.playback_service,
             settings_service=container.services.settings_service,

@@ -651,7 +651,8 @@ class LibraryService:
     def load_track_credits(self, track: Track) -> Track:
         cached = self.cached_track(track.id)
         enriched = merge_cached_track_credits(track, cached)
-        if track_credits_are_fresh(enriched):
+        language = self._music_service.get_language()
+        if track_credits_are_fresh(enriched, language=language):
             return enriched
 
         details = self._music_service.get_track_credits(track.id)
@@ -661,6 +662,7 @@ class LibraryService:
             credits=credits,
             credits_raw_json=details.raw_json,
             credits_cached_at=datetime.now(tz=UTC),
+            credits_language=details.language or language,
             ai_usage=classify_track_ai_usage(credits),
         )
         try:

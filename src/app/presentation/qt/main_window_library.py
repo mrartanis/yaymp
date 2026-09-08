@@ -528,7 +528,10 @@ class MainWindowLibraryMixin:
         )
         self._track_info_dialog = dialog
         dialog.finished.connect(self._clear_track_info_dialog)
-        if not track_credits_are_fresh(track):
+        if not track_credits_are_fresh(
+            track,
+            language=self._container.services.music_service.get_language(),
+        ):
             dialog.set_loading()
             self._music_metadata_controller.request_track_credits(
                 track,

@@ -111,6 +111,7 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
                 credits_cached_at=self._optional_datetime(
                     raw_track.get("credits_cached_at")
                 ),
+                credits_language=self._optional_str(raw_track.get("credits_language")),
                 ai_usage=self._optional_ai_usage(raw_track.get("ai_usage")),
             )
         except (KeyError, TypeError, ValueError) as exc:
@@ -132,10 +133,12 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
         )
         ai_usage = track.ai_usage.value if track.ai_usage is not None else None
         credits_raw_json = track.credits_raw_json
+        credits_language = track.credits_language
         if track.credits_cached_at is None and isinstance(existing, dict):
             serialized_credits = existing.get("credits", serialized_credits)
             credits_raw_json = existing.get("credits_raw_json")
             credits_cached_at = existing.get("credits_cached_at")
+            credits_language = existing.get("credits_language")
             ai_usage = existing.get("ai_usage")
         tracks[track.id] = {
             "id": track.id,
@@ -162,6 +165,7 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
             "credits": serialized_credits,
             "credits_raw_json": credits_raw_json,
             "credits_cached_at": credits_cached_at,
+            "credits_language": credits_language,
             "ai_usage": ai_usage,
             "cached_at": self._now_iso(),
         }
@@ -576,6 +580,7 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
                 if track.credits_cached_at is not None
                 else None
             ),
+            "credits_language": track.credits_language,
             "ai_usage": track.ai_usage.value if track.ai_usage is not None else None,
         }
 
@@ -614,6 +619,7 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
                 credits_cached_at=self._optional_datetime(
                     raw_track.get("credits_cached_at")
                 ),
+                credits_language=self._optional_str(raw_track.get("credits_language")),
                 ai_usage=self._optional_ai_usage(raw_track.get("ai_usage")),
             )
         except (KeyError, TypeError, ValueError) as exc:

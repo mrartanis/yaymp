@@ -21,6 +21,7 @@ class TrackCredit:
 class TrackCredits:
     items: tuple[TrackCredit, ...]
     raw_json: str
+    language: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +46,7 @@ class Track:
     credits: tuple[TrackCredit, ...] = ()
     credits_raw_json: str | None = None
     credits_cached_at: datetime | None = None
+    credits_language: str | None = None
     ai_usage: TrackAiUsage | None = None
 
 

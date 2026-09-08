@@ -954,7 +954,24 @@ def test_yandex_music_service_maps_track_credits() -> None:
             '"value": "Возможно, трек создан с использованием ИИ"}], '
             '"futureTopLevelField": {"nested": true}}'
         ),
+        language="ru",
     )
+
+
+def test_yandex_music_service_applies_language_to_raw_requests() -> None:
+    client = FakeYandexClient()
+    service = YandexMusicService(
+        session=AuthSession(user_id="user-1", token="token"),
+        client=client,
+    )
+
+    service.set_language("en")
+    details = service.get_track_credits("track-1")
+
+    assert service.get_language() == "en"
+    assert client.language == "en"
+    assert client.request.headers["Accept-Language"] == "en"
+    assert details.language == "en"
 
 
 def test_yandex_music_service_uses_radio_session_flow() -> None:
