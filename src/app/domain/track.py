@@ -2,6 +2,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from enum import StrEnum
+
+
+class TrackAiUsage(StrEnum):
+    FULL = "full"
+    PARTIAL = "partial"
+    POSSIBLE = "possible"
+
+
+@dataclass(frozen=True, slots=True)
+class TrackCredit:
+    title: str
+    value: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,6 +36,9 @@ class Track:
     available: bool = True
     is_liked: bool = False
     is_disliked: bool = False
+    credits: tuple[TrackCredit, ...] = ()
+    credits_cached_at: datetime | None = None
+    ai_usage: TrackAiUsage | None = None
 
 
 @dataclass(frozen=True, slots=True)

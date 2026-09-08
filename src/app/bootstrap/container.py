@@ -84,6 +84,9 @@ def build_container(config: AppConfig, logger: logging.Logger) -> AppContainer:
             auth_service.clear_session()
             music_service = YandexMusicService(logger=logger)
     music_service.set_audio_quality(settings_service.load_audio_quality())
+    music_service.set_ai_content_reduction_enabled(
+        settings_service.load_ai_content_reduction_enabled()
+    )
 
     library_cache_repo = _build_library_cache_repo(config, logger)
     playback_state_repo = _build_playback_state_repo(config, logger)

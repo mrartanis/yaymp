@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 
-from app.domain import Artist, LibraryCacheRepo, Track
+from app.domain import Artist, LibraryCacheRepo, Track, TrackAiUsage, TrackCredit
 from app.domain.errors import StorageError
 
 
@@ -41,6 +42,45 @@ def merge_cached_track_preferences(
     if liked == track.is_liked and disliked == track.is_disliked:
         return track
     return replace(track, is_liked=liked, is_disliked=disliked)
+
+
+def merge_cached_track_credits(track: Track, cached_track: Track | None) -> Track:
+    if cached_track is None or cached_track.credits_cached_at is None:
+        return track
+    return replace(
+        track,
+        credits=cached_track.credits,
+        credits_cached_at=cached_track.credits_cached_at,
+        ai_usage=cached_track.ai_usage,
+    )
+
+
+def track_credits_are_fresh(track: Track, *, ttl: timedelta = timedelta(days=7)) -> bool:
+    cached_at = track.credits_cached_at
+    if cached_at is None:
+        return False
+    if cached_at.tzinfo is None:
+        cached_at = cached_at.replace(tzinfo=UTC)
+    return datetime.now(tz=UTC) - cached_at <= ttl
+
+
+def classify_track_ai_usage(credits: tuple[TrackCredit, ...]) -> TrackAiUsage | None:
+    for credit in credits:
+        title = credit.title.strip().casefold()
+        if title not in {"использование ии", "ai use"}:
+            continue
+        value = credit.value.strip().casefold()
+        if "частично" in value or "partial" in value:
+            return TrackAiUsage.PARTIAL
+        if "возможно" in value or "possibly" in value or "may have" in value:
+            return TrackAiUsage.POSSIBLE
+        if "полностью" in value or "fully" in value or "entirely" in value:
+            return TrackAiUsage.FULL
+        if ("создан" in value and "ии" in value) or (
+            "created" in value and "ai" in value
+        ):
+            return TrackAiUsage.FULL
+    return None
 
 
 def merge_cached_track_preference_states(

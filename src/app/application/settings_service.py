@@ -17,6 +17,7 @@ class SettingsService:
     _MY_WAVE_HISTORY_KEY = "my_wave_history"
     _WAVEFORM_PROGRESS_KEY = "waveform_progress"
     _BROWSER_VIEW_MODE_KEY = "browser_view_mode"
+    _AI_CONTENT_REDUCTION_KEY = "ai_content_reduction_enabled"
 
     def __init__(self, *, settings_repo: SettingsRepo, logger: Logger) -> None:
         self._settings_repo = settings_repo
@@ -132,6 +133,15 @@ class SettingsService:
 
     def save_waveform_progress_enabled(self, enabled: bool) -> None:
         self._save_value(self._WAVEFORM_PROGRESS_KEY, bool(enabled))
+
+    def load_ai_content_reduction_enabled(self, *, default: bool = False) -> bool:
+        value = self._load_value(self._AI_CONTENT_REDUCTION_KEY)
+        if not isinstance(value, bool):
+            return default
+        return value
+
+    def save_ai_content_reduction_enabled(self, enabled: bool) -> None:
+        self._save_value(self._AI_CONTENT_REDUCTION_KEY, bool(enabled))
 
     def load_browser_view_mode(self, *, default: str = "cards") -> str:
         value = self._load_value(self._BROWSER_VIEW_MODE_KEY)

@@ -45,9 +45,11 @@ from app.presentation.qt.main_window_queue_view import (
     QueueRowDelegate,
 )
 from app.presentation.qt.main_window_windowing import MainWindowWindowingMixin
+from app.presentation.qt.music_metadata_controller import MusicMetadataController
 from app.presentation.qt.playback_controller import PlaybackController
 from app.presentation.qt.playlist_save_controller import PlaylistSaveController
 from app.presentation.qt.system_media import build_system_media_integration
+from app.presentation.qt.track_info_dialog import TrackInfoDialog
 
 
 class MainWindow(
@@ -107,6 +109,14 @@ class MainWindow(
             translate=self._t,
             task_runner=self._library_task_runner,
         )
+        self._music_metadata_controller = MusicMetadataController(
+            music_service=container.services.music_service,
+            library_service=container.services.library_service,
+            settings_service=container.services.settings_service,
+            task_runner=self._library_task_runner,
+            logger=container.logger,
+            parent=self,
+        )
         self._playlist_save_controller = PlaylistSaveController(
             service=container.services.playlist_save_service,
             task_runner=self._library_task_runner,
@@ -134,6 +144,8 @@ class MainWindow(
         self._thumb_scaled_pixmap_cache: OrderedDict[object, QPixmap] = OrderedDict()
         self._auth_dialog: AuthDialog | None = None
         self._playlist_save_dialog = None
+        self._track_info_dialog: TrackInfoDialog | None = None
+        self._credits_playback_track_id: str | None = None
         self._auth_flow_checked = False
         self._browser_tab_ids: tuple[str, ...] = ()
         self._updating_browser_tabs = False
@@ -144,6 +156,8 @@ class MainWindow(
         self._browser_dialog: QDialog | None = None
         self._settings_popup: QFrame | None = None
         self._theme_buttons: dict[str, QPushButton] = {}
+        self._ai_content_reduction_buttons: dict[bool, QPushButton] = {}
+        self._ai_content_reduction_save_pending = False
         self._volume_popup: QFrame | None = None
         self._sidebar_popup: QFrame | None = None
         self._sidebar_panel: QFrame | None = None
@@ -214,6 +228,7 @@ class MainWindow(
         self._hide_browser_panel()
         self._render_auth_state()
         self._playback_poll_timer.start()
+        self._start_ai_content_reduction_sync()
 
     def _build_ui(self) -> None:
         root = QWidget(self)
@@ -482,6 +497,24 @@ class MainWindow(
         self._library_controller.artist_undisliked.connect(self._render_artist_undisliked)
         self._library_controller.playlist_liked.connect(self._render_playlist_liked)
         self._library_controller.playlist_unliked.connect(self._render_playlist_unliked)
+        self._music_metadata_controller.track_credits_ready.connect(
+            self._handle_track_credits_ready
+        )
+        self._music_metadata_controller.track_credits_failed.connect(
+            self._handle_track_credits_failed
+        )
+        self._music_metadata_controller.ai_setting_synced.connect(
+            self._handle_ai_content_reduction_synced
+        )
+        self._music_metadata_controller.ai_setting_saved.connect(
+            self._handle_ai_content_reduction_saved
+        )
+        self._music_metadata_controller.ai_setting_sync_failed.connect(
+            self._handle_ai_content_reduction_sync_failed
+        )
+        self._music_metadata_controller.ai_setting_save_failed.connect(
+            self._handle_ai_content_reduction_save_failed
+        )
         self._sidebar_toggle_button.clicked.connect(self._toggle_sidebar)
         self._previous_button.clicked.connect(self._controller.previous)
         self._play_pause_button.clicked.connect(self._toggle_play_pause)

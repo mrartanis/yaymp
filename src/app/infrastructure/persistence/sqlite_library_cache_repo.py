@@ -18,6 +18,8 @@ from app.domain import (
     LikedTrackSnapshot,
     Playlist,
     Track,
+    TrackAiUsage,
+    TrackCredit,
 )
 from app.domain.errors import StorageError
 
@@ -47,14 +49,8 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
             with self._connect() as connection:
                 connection.execute("delete from recent_searches")
                 connection.executemany(
-                    (
-                        "insert into recent_searches(query, position, updated_at) "
-                        "values (?, ?, ?)"
-                    ),
-                    [
-                        (query, position, self._now_iso())
-                        for position, query in enumerate(searches)
-                    ],
+                    ("insert into recent_searches(query, position, updated_at) values (?, ?, ?)"),
+                    [(query, position, self._now_iso()) for position, query in enumerate(searches)],
                 )
         except sqlite3.Error as exc:
             raise StorageError("Failed to save recent searches") from exc
@@ -63,10 +59,7 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
         try:
             with self._connect() as connection:
                 row = connection.execute(
-                    (
-                        "select data_json, cached_at from catalog_search_cache "
-                        "where query = ?"
-                    ),
+                    ("select data_json, cached_at from catalog_search_cache where query = ?"),
                     (self._normalize_search_query(query),),
                 ).fetchone()
         except sqlite3.Error as exc:
@@ -156,6 +149,9 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                 available=bool(row["available"]),
                 is_liked=bool(row["is_liked"]),
                 is_disliked=bool(row["is_disliked"]),
+                credits=self._decode_credits_json(row["credits_json"]),
+                credits_cached_at=self._optional_datetime(row["credits_cached_at"]),
+                ai_usage=self._optional_ai_usage(row["ai_usage"]),
             )
         except (TypeError, ValueError, json.JSONDecodeError) as exc:
             raise StorageError("Cached track metadata is invalid") from exc
@@ -191,10 +187,7 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                     (liked_tracks.user_id,),
                 )
                 connection.executemany(
-                    (
-                        "insert into liked_tracks(user_id, track_id, updated_at) "
-                        "values (?, ?, ?)"
-                    ),
+                    ("insert into liked_tracks(user_id, track_id, updated_at) values (?, ?, ?)"),
                     [
                         (liked_tracks.user_id, track_id, now)
                         for track_id in sorted(liked_tracks.track_ids)
@@ -244,10 +237,7 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                     (disliked_tracks.user_id,),
                 )
                 connection.executemany(
-                    (
-                        "insert into disliked_tracks(user_id, track_id, updated_at) "
-                        "values (?, ?, ?)"
-                    ),
+                    ("insert into disliked_tracks(user_id, track_id, updated_at) values (?, ?, ?)"),
                     [
                         (disliked_tracks.user_id, track_id, now)
                         for track_id in sorted(disliked_tracks.track_ids)
@@ -534,6 +524,9 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                         available integer not null,
                         is_liked integer not null,
                         is_disliked integer not null default 0,
+                        credits_json text not null default '[]',
+                        credits_cached_at text,
+                        ai_usage text,
                         cached_at text not null
                     );
 
@@ -640,6 +633,24 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                     column="is_disliked",
                     definition="integer not null default 0",
                 )
+                self._ensure_column(
+                    connection,
+                    table="tracks",
+                    column="credits_json",
+                    definition="text not null default '[]'",
+                )
+                self._ensure_column(
+                    connection,
+                    table="tracks",
+                    column="credits_cached_at",
+                    definition="text",
+                )
+                self._ensure_column(
+                    connection,
+                    table="tracks",
+                    column="ai_usage",
+                    definition="text",
+                )
         except (OSError, sqlite3.Error) as exc:
             raise StorageError("Failed to initialize library cache database") from exc
 
@@ -687,8 +698,7 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
         definition: str,
     ) -> None:
         columns = {
-            str(row["name"])
-            for row in connection.execute(f"pragma table_info({table})").fetchall()
+            str(row["name"]) for row in connection.execute(f"pragma table_info({table})").fetchall()
         }
         if column not in columns:
             connection.execute(f"alter table {table} add column {column} {definition}")
@@ -704,8 +714,9 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                 "id, title, version, artists_json, artist_ids_json, album_id, album_title, "
                 "album_year, duration_ms, "
                 "stream_ref, stream_ref_cached_at, artwork_ref, accent_color, waveform_bins_json, "
-                "available, is_liked, is_disliked, cached_at"
-                ") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "available, is_liked, is_disliked, credits_json, credits_cached_at, ai_usage, "
+                "cached_at"
+                ") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 "on conflict(id) do update set "
                 "title = excluded.title, "
                 "version = excluded.version, "
@@ -723,6 +734,12 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                 "available = excluded.available, "
                 "is_liked = excluded.is_liked, "
                 "is_disliked = excluded.is_disliked, "
+                "credits_json = case when excluded.credits_cached_at is null "
+                "then tracks.credits_json else excluded.credits_json end, "
+                "credits_cached_at = coalesce("
+                "excluded.credits_cached_at, tracks.credits_cached_at), "
+                "ai_usage = case when excluded.credits_cached_at is null "
+                "then tracks.ai_usage else excluded.ai_usage end, "
                 "cached_at = excluded.cached_at"
             ),
             (
@@ -747,6 +764,13 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                 int(track.available),
                 int(track.is_liked),
                 int(track.is_disliked),
+                self._encode_credits_json(track.credits),
+                (
+                    track.credits_cached_at.isoformat()
+                    if track.credits_cached_at is not None
+                    else None
+                ),
+                track.ai_usage.value if track.ai_usage is not None else None,
                 self._now_iso(),
             ),
         )
@@ -826,9 +850,7 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                 int(raw_album["track_count"]) if raw_album.get("track_count") is not None else None
             ),
             artwork_ref=(
-                str(raw_album["artwork_ref"])
-                if raw_album.get("artwork_ref") is not None
-                else None
+                str(raw_album["artwork_ref"]) if raw_album.get("artwork_ref") is not None else None
             ),
         )
 
@@ -880,9 +902,7 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
             id=str(raw_playlist["id"]),
             title=str(raw_playlist["title"]),
             owner_id=(
-                str(raw_playlist["owner_id"])
-                if raw_playlist.get("owner_id") is not None
-                else None
+                str(raw_playlist["owner_id"]) if raw_playlist.get("owner_id") is not None else None
             ),
             owner_name=(
                 str(raw_playlist["owner_name"])
@@ -907,14 +927,10 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
             is_generated=bool(raw_playlist.get("is_generated", False)),
             is_liked=bool(raw_playlist.get("is_liked", False)),
             revision=(
-                int(raw_playlist["revision"])
-                if raw_playlist.get("revision") is not None
-                else None
+                int(raw_playlist["revision"]) if raw_playlist.get("revision") is not None else None
             ),
             snapshot=(
-                int(raw_playlist["snapshot"])
-                if raw_playlist.get("snapshot") is not None
-                else None
+                int(raw_playlist["snapshot"]) if raw_playlist.get("snapshot") is not None else None
             ),
             visibility=(
                 str(raw_playlist["visibility"])
@@ -922,9 +938,7 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                 else None
             ),
             modified=(
-                str(raw_playlist["modified"])
-                if raw_playlist.get("modified") is not None
-                else None
+                str(raw_playlist["modified"]) if raw_playlist.get("modified") is not None else None
             ),
         )
 
@@ -1001,6 +1015,12 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
             "waveform_bins": [float(value) for value in track.waveform_bins],
             "available": track.available,
             "is_liked": track.is_liked,
+            "is_disliked": track.is_disliked,
+            "credits": self._encode_credits(track.credits),
+            "credits_cached_at": (
+                track.credits_cached_at.isoformat() if track.credits_cached_at is not None else None
+            ),
+            "ai_usage": track.ai_usage.value if track.ai_usage is not None else None,
         }
 
     def _decode_track(self, raw_track: object) -> Track:
@@ -1012,17 +1032,13 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                 title=str(raw_track["title"]),
                 artists=tuple(str(artist) for artist in raw_track.get("artists", ())),
                 version=self._optional_str(raw_track.get("version")),
-                artist_ids=tuple(
-                    str(artist_id) for artist_id in raw_track.get("artist_ids", ())
-                ),
+                artist_ids=tuple(str(artist_id) for artist_id in raw_track.get("artist_ids", ())),
                 album_id=self._optional_str(raw_track.get("album_id")),
                 album_title=self._optional_str(raw_track.get("album_title")),
                 album_year=self._optional_int(raw_track.get("album_year")),
                 duration_ms=self._optional_int(raw_track.get("duration_ms")),
                 stream_ref=self._optional_str(raw_track.get("stream_ref")),
-                stream_ref_cached_at=self._optional_datetime(
-                    raw_track.get("stream_ref_cached_at")
-                ),
+                stream_ref_cached_at=self._optional_datetime(raw_track.get("stream_ref_cached_at")),
                 artwork_ref=self._optional_str(raw_track.get("artwork_ref")),
                 accent_color=self._optional_str(raw_track.get("accent_color")),
                 waveform_bins=tuple(
@@ -1032,6 +1048,10 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                 ),
                 available=bool(raw_track.get("available", True)),
                 is_liked=bool(raw_track.get("is_liked", False)),
+                is_disliked=bool(raw_track.get("is_disliked", False)),
+                credits=self._decode_credits(raw_track.get("credits", ())),
+                credits_cached_at=self._optional_datetime(raw_track.get("credits_cached_at")),
+                ai_usage=self._optional_ai_usage(raw_track.get("ai_usage")),
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise StorageError("Cached track metadata is invalid") from exc
@@ -1055,6 +1075,30 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=UTC)
         return parsed
+
+    def _encode_credits(self, credits: tuple[TrackCredit, ...]) -> list[dict[str, str]]:
+        return [{"title": credit.title, "value": credit.value} for credit in credits]
+
+    def _encode_credits_json(self, credits: tuple[TrackCredit, ...]) -> str:
+        return json.dumps(self._encode_credits(credits), ensure_ascii=True)
+
+    def _decode_credits_json(self, value: object) -> tuple[TrackCredit, ...]:
+        return self._decode_credits(json.loads(str(value or "[]")))
+
+    def _decode_credits(self, value: object) -> tuple[TrackCredit, ...]:
+        if not isinstance(value, list | tuple):
+            raise TypeError("track credits must be a list")
+        credits: list[TrackCredit] = []
+        for item in value:
+            if not isinstance(item, dict):
+                raise TypeError("track credit must be a mapping")
+            credits.append(TrackCredit(title=str(item["title"]), value=str(item["value"])))
+        return tuple(credits)
+
+    def _optional_ai_usage(self, value: object) -> TrackAiUsage | None:
+        if value is None:
+            return None
+        return TrackAiUsage(str(value))
 
     def _normalize_search_query(self, query: str) -> str:
         return query.strip().casefold()

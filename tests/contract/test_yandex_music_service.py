@@ -18,6 +18,7 @@ from app.domain import (
     Station,
     StationTrackBatch,
     Track,
+    TrackCredit,
     TrackUnavailableError,
 )
 from app.domain.playlist import Playlist
@@ -260,11 +261,32 @@ class FakeYandexClient:
         self.station_feedback_calls: list[dict[str, object]] = []
         self.radio_session_tracks_queue: list[str] = []
         self.radio_session_new_calls: list[dict[str, object]] = []
+        self.radio_session_new_headers: list[dict[str, str]] = []
+        self.radio_session_tracks_headers: list[dict[str, str]] = []
+        self.ai_content_reduction_enabled = False
+        self.account_setting_writes: list[dict[str, object]] = []
+        self.credits = type(
+            "CreditsStub",
+            (),
+            {
+                "credits": [
+                    type(
+                        "CreditStub",
+                        (),
+                        {
+                            "title": "Использование ИИ",
+                            "value": "Возможно, трек создан с использованием ИИ",
+                        },
+                    )()
+                ]
+            },
+        )()
         self.request = self.FakeRequest(self)
 
     class FakeRequest:
         def __init__(self, client: "FakeYandexClient") -> None:
             self._client = client
+            self.headers: dict[str, str] = {}
 
         def _track_payload(self) -> dict[str, object]:
             return {
@@ -288,8 +310,18 @@ class FakeYandexClient:
 
         def post(self, url: str, data=None, json=None, **kwargs):
             del kwargs
+            if url.endswith("/account/settings"):
+                payload = data or {}
+                self._client.account_setting_writes.append(payload)
+                self._client.ai_content_reduction_enabled = (
+                    payload.get("aiContentReductionEnabled") == "true"
+                )
+                return {
+                    "aiContentReductionEnabled": self._client.ai_content_reduction_enabled
+                }
             if url.endswith("/rotor/session/new"):
                 self._client.radio_session_new_calls.append(json or data or {})
+                self._client.radio_session_new_headers.append(dict(self.headers))
                 return {
                     "radioSessionId": "session-1",
                     "batchId": "batch-1",
@@ -299,6 +331,7 @@ class FakeYandexClient:
                     ],
                 }
             if url.endswith("/rotor/session/session-1/tracks"):
+                self._client.radio_session_tracks_headers.append(dict(self.headers))
                 payload = json if isinstance(json, dict) else data
                 if isinstance(payload, dict):
                     queue = payload.get("queue") or []
@@ -335,6 +368,10 @@ class FakeYandexClient:
 
         def get(self, url: str, params=None, **kwargs):
             del kwargs
+            if url.endswith("/account/settings"):
+                return {
+                    "aiContentReductionEnabled": self._client.ai_content_reduction_enabled
+                }
             if url.endswith("/dislikes/tracks"):
                 if (params or {}).get("if_modified_since_revision") == 4:
                     return {"result": None}
@@ -363,6 +400,10 @@ class FakeYandexClient:
         if track_ids == ["missing"]:
             return []
         return [self.track]
+
+    def tracks_credits(self, track_id):
+        assert track_id == "track-1"
+        return self.credits
 
     def search(self, query: str, *, type_: str | None = None):
         del query, type_
@@ -864,6 +905,57 @@ def test_yandex_music_service_reports_playback_telemetry() -> None:
     ]
 
 
+def test_yandex_music_service_adds_ai_content_reduction_header_to_new_session() -> None:
+    client = FakeYandexClient()
+    service = YandexMusicService(
+        session=AuthSession(user_id="user-1", token="token"),
+        client=client,
+    )
+
+    assert service.get_ai_content_reduction_enabled() is False
+    service.set_ai_content_reduction_enabled(True)
+    service.start_radio_session("user:onyourwave")
+    session = service.start_radio_session("user:onyourwave")
+    service.get_radio_session_tracks(session)
+
+    assert service.get_ai_content_reduction_enabled() is True
+    assert client.radio_session_new_headers == [
+        {"X-Yandex-Music-AI-Content-Rate": "reduced"},
+        {"X-Yandex-Music-AI-Content-Rate": "reduced"},
+    ]
+    assert client.radio_session_tracks_headers == [
+        {"X-Yandex-Music-AI-Content-Rate": "reduced"}
+    ]
+    assert client.request.headers == {}
+
+
+def test_yandex_music_service_syncs_account_ai_content_reduction_setting() -> None:
+    client = FakeYandexClient()
+    service = YandexMusicService(
+        session=AuthSession(user_id="user-1", token="token"),
+        client=client,
+    )
+
+    assert service.load_account_ai_content_reduction_enabled() is False
+    assert service.save_account_ai_content_reduction_enabled(True) is True
+    assert service.load_account_ai_content_reduction_enabled() is True
+    assert client.account_setting_writes == [{"aiContentReductionEnabled": "true"}]
+
+
+def test_yandex_music_service_maps_track_credits() -> None:
+    service = YandexMusicService(
+        session=AuthSession(user_id="user-1", token="token"),
+        client=FakeYandexClient(),
+    )
+
+    assert service.get_track_credits("track-1") == (
+        TrackCredit(
+            title="Использование ИИ",
+            value="Возможно, трек создан с использованием ИИ",
+        ),
+    )
+
+
 def test_yandex_music_service_uses_radio_session_flow() -> None:
     client = FakeYandexClient()
     service = YandexMusicService(
@@ -914,6 +1006,7 @@ def test_yandex_music_service_uses_radio_session_flow() -> None:
     assert client.radio_session_new_calls == [
         {"seeds": ["user:onyourwave"], "includeTracksInResponse": True}
     ]
+    assert client.radio_session_new_headers == [{}]
     assert client.radio_session_tracks_queue == ["track-1"]
     assert client.station_feedback_calls == [
         {

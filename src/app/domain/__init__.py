@@ -42,7 +42,14 @@ from app.domain.protocols import (
     SettingsRepo,
 )
 from app.domain.station import RadioFeedbackType, RadioSession, Station, StationTrackBatch
-from app.domain.track import DislikedTrackIds, LikedTrackIds, LikedTrackSnapshot, Track
+from app.domain.track import (
+    DislikedTrackIds,
+    LikedTrackIds,
+    LikedTrackSnapshot,
+    Track,
+    TrackAiUsage,
+    TrackCredit,
+)
 
 __all__ = [
     "AuthError",
@@ -86,6 +93,8 @@ __all__ = [
     "StorageError",
     "StreamResolveError",
     "Track",
+    "TrackAiUsage",
+    "TrackCredit",
     "TrackUnavailableError",
     "WaveformState",
 ]

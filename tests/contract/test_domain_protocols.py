@@ -152,6 +152,23 @@ class FakeMusicService:
     def get_audio_quality(self) -> AudioQuality:
         return getattr(self, "quality", AudioQuality.HQ)
 
+    def set_ai_content_reduction_enabled(self, enabled: bool) -> None:
+        self.ai_content_reduction_enabled = enabled
+
+    def get_ai_content_reduction_enabled(self) -> bool:
+        return getattr(self, "ai_content_reduction_enabled", False)
+
+    def load_account_ai_content_reduction_enabled(self) -> bool:
+        return self.get_ai_content_reduction_enabled()
+
+    def save_account_ai_content_reduction_enabled(self, enabled: bool) -> bool:
+        self.set_ai_content_reduction_enabled(enabled)
+        return enabled
+
+    def get_track_credits(self, track_id: str):
+        del track_id
+        return ()
+
     def get_user_playlists(self) -> Sequence[Playlist]:
         return [Playlist(id="playlist-1", title="Playlist")]
 

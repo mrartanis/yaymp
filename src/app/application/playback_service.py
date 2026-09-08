@@ -12,8 +12,10 @@ from time import monotonic
 from uuid import uuid4
 
 from app.application.track_metadata import (
+    merge_cached_track_credits,
     merge_cached_track_preference_states,
     merge_cached_track_preferences,
+    track_credits_are_fresh,
 )
 from app.domain import (
     LibraryCacheRepo,
@@ -215,6 +217,24 @@ class PlaybackService:
         self._rebuild_play_order(anchor_index=self._active_index)
         self._logger.info("Appended %s tracks to queue", len(tracks))
         self._persist_playback_queue(position_ms=self._current_position_ms())
+        return self.snapshot()
+
+    def update_track_credits(self, track: Track) -> PlaybackSnapshot:
+        changed = False
+        for index, item in enumerate(self._queue):
+            if item.track.id != track.id:
+                continue
+            updated_track = replace(
+                item.track,
+                credits=track.credits,
+                credits_cached_at=track.credits_cached_at,
+                ai_usage=track.ai_usage,
+            )
+            if updated_track != item.track:
+                self._queue[index] = replace(item, track=updated_track)
+                changed = True
+        if changed:
+            self._persist_playback_queue(position_ms=self._current_position_ms())
         return self.snapshot()
 
     def insert_queue_next(
@@ -706,33 +726,13 @@ class PlaybackService:
         stream_ref: str,
         stream_ref_cached_at: datetime | None,
     ) -> QueueItem:
-        return QueueItem(
-            track=Track(
-                id=item.track.id,
-                title=item.track.title,
-                artists=item.track.artists,
-                version=item.track.version,
-                artist_ids=item.track.artist_ids,
-                album_id=item.track.album_id,
-                album_title=item.track.album_title,
-                album_year=item.track.album_year,
-                duration_ms=item.track.duration_ms,
+        return replace(
+            item,
+            track=replace(
+                item.track,
                 stream_ref=stream_ref,
                 stream_ref_cached_at=stream_ref_cached_at,
-                artwork_ref=item.track.artwork_ref,
-                accent_color=item.track.accent_color,
-                waveform_bins=item.track.waveform_bins,
-                available=item.track.available,
-                is_liked=item.track.is_liked,
-                is_disliked=item.track.is_disliked,
             ),
-            source_type=item.source_type,
-            source_id=item.source_id,
-            source_index=item.source_index,
-            station_batch_id=item.station_batch_id,
-            radio_session_id=item.radio_session_id,
-            radio_origin=item.radio_origin,
-            radio_queue_anchor_track_id=item.radio_queue_anchor_track_id,
         )
 
     def _has_fresh_stream_ref(self, track: Track) -> bool:
@@ -1190,7 +1190,7 @@ class PlaybackService:
         radio_origin: str | None = None,
         radio_queue_anchor_track_id: str | None = None,
     ) -> QueueItem:
-        track = self._hydrate_cached_waveform(track)
+        track = self._hydrate_cached_track_metadata(track)
         return QueueItem(
             track=track,
             source_type=source_type,
@@ -1202,35 +1202,21 @@ class PlaybackService:
             radio_queue_anchor_track_id=radio_queue_anchor_track_id,
         )
 
-    def _hydrate_cached_waveform(self, track: Track) -> Track:
-        if track.waveform_bins or self._library_cache_repo is None:
+    def _hydrate_cached_track_metadata(self, track: Track) -> Track:
+        if self._library_cache_repo is None:
             return track
         try:
             cached_track = self._library_cache_repo.load_track_metadata(track.id)
         except StorageError as exc:
             self._logger.warning("Waveform cache load failed for %s: %s", track.id, exc)
             return track
-        if cached_track is None or not cached_track.waveform_bins:
+        if cached_track is None:
             return track
-        return Track(
-            id=track.id,
-            title=track.title,
-            artists=track.artists,
-            version=track.version,
-            artist_ids=track.artist_ids,
-            album_id=track.album_id,
-            album_title=track.album_title,
-            album_year=track.album_year,
-            duration_ms=track.duration_ms,
-            stream_ref=track.stream_ref,
-            stream_ref_cached_at=track.stream_ref_cached_at,
-            artwork_ref=track.artwork_ref,
-            accent_color=track.accent_color,
-            waveform_bins=cached_track.waveform_bins,
-            available=track.available,
-            is_liked=track.is_liked,
-            is_disliked=track.is_disliked,
-        )
+        if not track.waveform_bins and cached_track.waveform_bins:
+            track = replace(track, waveform_bins=cached_track.waveform_bins)
+        if track_credits_are_fresh(cached_track):
+            track = merge_cached_track_credits(track, cached_track)
+        return track
 
     def _advance_to_next_track(
         self,

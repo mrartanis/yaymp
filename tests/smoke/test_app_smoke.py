@@ -1,10 +1,12 @@
 from dataclasses import replace
+from datetime import UTC, datetime
 
 from PySide6.QtCore import QEvent, QObject
+from PySide6.QtWidgets import QMenu
 
 from app.application.playback_service import PlaybackSnapshot
 from app.bootstrap.startup import build_startup_context
-from app.domain import PlaybackState, PlaybackStatus, QueueItem, Track
+from app.domain import PlaybackState, PlaybackStatus, QueueItem, Track, TrackAiUsage
 from app.presentation.qt.dialog_chrome import WindowTitleBar
 
 
@@ -24,10 +26,19 @@ def test_main_window_can_be_constructed(qtbot, qapp, tmp_path, monkeypatch) -> N
     assert isinstance(context.main_window._title_bar, WindowTitleBar)
     assert context.container.config.settings_file.name == "settings.json"
     assert context.container.services.settings_service.load_volume() == 100
+    assert (
+        context.container.services.settings_service.load_ai_content_reduction_enabled() is False
+    )
+    assert context.container.services.music_service.get_ai_content_reduction_enabled() is False
+    assert context.main_window._ai_content_reduction_buttons[False].isChecked()
     assert context.main_window.isVisible()
     context.main_window._set_theme_preference("light")
+    context.main_window._music_metadata_controller._apply_saved_account_setting(True)
 
     assert context.container.services.settings_service.load_theme_preference() == "light"
+    assert context.container.services.settings_service.load_ai_content_reduction_enabled() is True
+    assert context.container.services.music_service.get_ai_content_reduction_enabled() is True
+    assert context.main_window._ai_content_reduction_buttons[True].isChecked()
     assert "#f5f7fb" in context.main_window.styleSheet()
 
     window = context.main_window
@@ -52,6 +63,24 @@ def test_main_window_can_be_constructed(qtbot, qapp, tmp_path, monkeypatch) -> N
     window._render_snapshot(replace(snapshot, queue=(updated_item,), current_item=updated_item))
     assert window._track_title_label.text() == "Updated title"
     assert window._queue_model.queue_item_at(0).track.is_liked
+
+    ai_track = replace(
+        track,
+        version="Remastered",
+        ai_usage=TrackAiUsage.POSSIBLE,
+        credits_cached_at=datetime.now(tz=UTC),
+    )
+    ai_item = replace(item, track=ai_track)
+    window._render_snapshot(replace(snapshot, queue=(ai_item,), current_item=ai_item))
+    assert window._track_version_label.text() == "Remastered · AI"
+
+    menu = QMenu(window)
+    assert window._populate_track_menu(menu, track)
+    assert window._t("action.track_info") in {action.text() for action in menu.actions()}
+    window._show_track_info(ai_track)
+    assert window._track_info_dialog is not None
+    assert window._track_info_dialog.windowTitle() == window._t("track_info.title")
+    window._track_info_dialog.close()
 
 
 def test_position_poll_does_not_repaint_transport(qtbot, qapp, tmp_path, monkeypatch):

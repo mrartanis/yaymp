@@ -105,6 +105,9 @@ class PlaybackController(QObject):
         if not self._volume_in_flight and not self._shutdown_started:
             self._dispatch_pending_volume()
 
+    def update_track_credits(self, track: Track) -> None:
+        self._dispatch(lambda: self._playback_service.update_track_credits(track))
+
     def _dispatch_pending_volume(self) -> None:
         volume = self._pending_volume
         if volume is None:

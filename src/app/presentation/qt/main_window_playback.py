@@ -4,6 +4,7 @@ from dataclasses import replace
 
 from PySide6.QtCore import Qt
 
+from app.application.track_metadata import track_credits_are_fresh
 from app.domain import Album, Artist, PlaybackStatus, Track
 from app.presentation.qt.preference_markers import preference_marker_icon_name
 from app.presentation.qt.track_display import display_track_title
@@ -19,7 +20,8 @@ class MainWindowPlaybackMixin:
 
         current_track = (
             self._track_with_preference_override(current_item.track)
-            if current_item is not None else None
+            if current_item is not None
+            else None
         )
         metadata_key = (
             current_track,
@@ -38,14 +40,20 @@ class MainWindowPlaybackMixin:
                 )
                 self._track_title_label.setText(current_track.title)
                 self._track_title_label.setToolTip(track_title)
-                self._track_version_label.setText(current_track.version or "")
-                self._track_version_label.setToolTip(current_track.version or "")
-                self._track_version_label.setVisible(bool(current_track.version))
+                version_parts = [
+                    part
+                    for part in (current_track.version, "AI" if current_track.ai_usage else None)
+                    if part
+                ]
+                version_text = " · ".join(version_parts)
+                self._track_version_label.setText(version_text)
+                self._track_version_label.setToolTip(
+                    self._ai_usage_text(current_track) or current_track.version or ""
+                )
+                self._track_version_label.setVisible(bool(version_text))
                 self._track_meta_label.setText(artists or self._t("label.unknown_artist"))
                 self._track_meta_label.setToolTip(artists)
-                self._track_album_label.setText(
-                    album_text
-                )
+                self._track_album_label.setText(album_text)
                 self._track_album_label.setToolTip(album_text)
                 self._update_track_navigation_affordances(current_track)
                 self._fit_track_text_labels()
@@ -65,6 +73,19 @@ class MainWindowPlaybackMixin:
                 self._artwork_render_timer.stop()
                 self._clear_artwork()
                 self._set_accent_color("#526ee8")
+
+        if current_track is None:
+            self._credits_playback_track_id = None
+        elif self._credits_playback_track_id != current_track.id:
+            self._credits_playback_track_id = current_track.id
+            if (
+                self._container.services.music_service.get_auth_session() is not None
+                and not track_credits_are_fresh(current_track)
+            ):
+                self._music_metadata_controller.request_track_credits(
+                    current_track,
+                    context=f"playback:{current_track.id}",
+                )
 
         self._render_play_pause_button(state.status)
         self._render_my_wave_button_state(current_item, state.status, state.position_ms)
@@ -103,6 +124,11 @@ class MainWindowPlaybackMixin:
         self._render_auth_state()
         self._update_save_queue_button_state()
         self._defer_system_media_update(snapshot)
+
+    def _ai_usage_text(self, track: Track) -> str:
+        if track.ai_usage is None:
+            return ""
+        return self._t(f"track_info.ai_use.{track.ai_usage.value}")
 
     def _defer_artwork_render(self, track: Track) -> None:
         self._pending_artwork_track = track
@@ -143,14 +169,10 @@ class MainWindowPlaybackMixin:
         can_open_artist = bool(track and track.artist_ids and track.artists)
         can_open_album = bool(track and track.album_id)
         self._track_meta_label.setCursor(
-            Qt.CursorShape.PointingHandCursor
-            if can_open_artist
-            else Qt.CursorShape.ArrowCursor
+            Qt.CursorShape.PointingHandCursor if can_open_artist else Qt.CursorShape.ArrowCursor
         )
         self._track_album_label.setCursor(
-            Qt.CursorShape.PointingHandCursor
-            if can_open_album
-            else Qt.CursorShape.ArrowCursor
+            Qt.CursorShape.PointingHandCursor if can_open_album else Qt.CursorShape.ArrowCursor
         )
 
     def _open_current_track_primary_artist(self) -> bool:
@@ -187,11 +209,7 @@ class MainWindowPlaybackMixin:
             preference_marker_icon_name("liked", theme_mode=self._resolved_theme_mode())
             if is_liked
             else "heart_outline.svg",
-            color=(
-                self._accent_color
-                if is_liked
-                else self._theme_icon_color()
-            )
+            color=(self._accent_color if is_liked else self._theme_icon_color()),
         )
         tooltip = self._t("track.tooltip.unlike") if is_liked else self._t("track.tooltip.like")
         self._like_track_button.setToolTip(tooltip)
@@ -200,19 +218,11 @@ class MainWindowPlaybackMixin:
     def _render_current_track_dislike_button(self, is_disliked: bool) -> None:
         self._set_button_icon(
             self._dislike_track_button,
-            "heart_slash.svg"
-            if is_disliked
-            else "heart_slash_outline.svg",
-            color=(
-                self._theme_muted_icon_color()
-                if is_disliked
-                else self._theme_icon_color()
-            ),
+            "heart_slash.svg" if is_disliked else "heart_slash_outline.svg",
+            color=(self._theme_muted_icon_color() if is_disliked else self._theme_icon_color()),
         )
         tooltip = (
-            self._t("track.tooltip.undislike")
-            if is_disliked
-            else self._t("track.tooltip.dislike")
+            self._t("track.tooltip.undislike") if is_disliked else self._t("track.tooltip.dislike")
         )
         self._dislike_track_button.setToolTip(tooltip)
         self._dislike_track_button.setAccessibleName(tooltip)

@@ -46,6 +46,7 @@ class MainWindowWindowingMixin:
         self._system_media.shutdown()
         self._controller.shutdown()
         self._playlist_save_controller.shutdown()
+        self._music_metadata_controller.shutdown()
         self._library_warmup_controller.shutdown()
         self._library_controller.shutdown()
         self._library_warmup_task_runner.shutdown()

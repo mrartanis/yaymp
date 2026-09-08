@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import UTC, datetime
 
 from app.application.track_metadata import (
+    classify_track_ai_usage,
     merge_cached_artist_preference_states,
+    merge_cached_track_credits,
     merge_cached_track_preference_states,
+    track_credits_are_fresh,
 )
 from app.domain import (
     Album,
@@ -69,9 +73,7 @@ class LibraryService:
 
         tracks = tuple(self._music_service.get_liked_tracks(limit=limit))
         self._cache_tracks(tracks)
-        snapshot_revision = (
-            liked_tracks.revision if liked_tracks is not None else current_revision
-        )
+        snapshot_revision = liked_tracks.revision if liked_tracks is not None else current_revision
         self._safe_save_liked_track_snapshot(
             LikedTrackSnapshot(
                 user_id=user_id,
@@ -92,7 +94,7 @@ class LibraryService:
         if limit <= 0:
             return ()
         tracks = self.load_liked_tracks(limit=offset + limit)
-        return tracks[offset: offset + limit]
+        return tracks[offset : offset + limit]
 
     def load_all_liked_tracks(self) -> tuple[Track, ...]:
         user_id = self._current_user_id()
@@ -148,9 +150,7 @@ class LibraryService:
             return
         cached_likes = self._safe_load_liked_track_ids(user_id)
         revision = 0 if force or cached_likes is None else cached_likes.revision
-        liked_tracks = self._music_service.get_liked_track_ids(
-            if_modified_since_revision=revision
-        )
+        liked_tracks = self._music_service.get_liked_track_ids(if_modified_since_revision=revision)
         if liked_tracks is None:
             self._logger.info("Liked track index is up to date at revision %s", revision)
             return
@@ -647,6 +647,25 @@ class LibraryService:
         except StorageError as exc:
             self._logger.warning("Track cache load failed for %s: %s", track_id, exc)
             return None
+
+    def load_track_credits(self, track: Track) -> Track:
+        cached = self.cached_track(track.id)
+        enriched = merge_cached_track_credits(track, cached)
+        if track_credits_are_fresh(enriched):
+            return enriched
+
+        credits = tuple(self._music_service.get_track_credits(track.id))
+        enriched = replace(
+            track,
+            credits=credits,
+            credits_cached_at=datetime.now(tz=UTC),
+            ai_usage=classify_track_ai_usage(credits),
+        )
+        try:
+            self._library_cache_repo.save_track_metadata(enriched)
+        except StorageError as exc:
+            self._logger.warning("Track credits cache save failed for %s: %s", track.id, exc)
+        return enriched
 
     def _cache_tracks(self, tracks: tuple[Track, ...]) -> None:
         for track in tracks:

@@ -20,7 +20,13 @@ from app.domain.station import (
     Station,
     StationTrackBatch,
 )
-from app.domain.track import DislikedTrackIds, LikedTrackIds, LikedTrackSnapshot, Track
+from app.domain.track import (
+    DislikedTrackIds,
+    LikedTrackIds,
+    LikedTrackSnapshot,
+    Track,
+    TrackCredit,
+)
 
 
 @runtime_checkable
@@ -93,6 +99,16 @@ class MusicService(Protocol):
     def set_audio_quality(self, quality: AudioQuality) -> None: ...
 
     def get_audio_quality(self) -> AudioQuality: ...
+
+    def set_ai_content_reduction_enabled(self, enabled: bool) -> None: ...
+
+    def get_ai_content_reduction_enabled(self) -> bool: ...
+
+    def load_account_ai_content_reduction_enabled(self) -> bool: ...
+
+    def save_account_ai_content_reduction_enabled(self, enabled: bool) -> bool: ...
+
+    def get_track_credits(self, track_id: str) -> Sequence[TrackCredit]: ...
 
     def get_user_playlists(self) -> Sequence[Playlist]: ...
 

@@ -166,6 +166,31 @@ class MainWindowPreferencesMixin:
                 waveform_row.addWidget(button)
             layout.addLayout(waveform_row)
 
+        self._settings_ai_content_reduction_label = QLabel(
+            self._t("settings.section.ai_content_reduction")
+        )
+        self._settings_ai_content_reduction_label.setObjectName("settings-section")
+        layout.addWidget(self._settings_ai_content_reduction_label)
+        ai_content_reduction_row = QHBoxLayout()
+        ai_content_reduction_row.setContentsMargins(0, 0, 0, 0)
+        ai_content_reduction_row.setSpacing(6)
+        for enabled, title in (
+            (False, self._t("settings.option.ai_content_reduction.disabled")),
+            (True, self._t("settings.option.ai_content_reduction.enabled")),
+        ):
+            button = QPushButton(title)
+            button.setObjectName("quality-option")
+            button.setCheckable(True)
+            button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+            button.clicked.connect(
+                lambda checked=False, selected=enabled: self._set_ai_content_reduction_enabled(
+                    selected
+                )
+            )
+            self._ai_content_reduction_buttons[enabled] = button
+            ai_content_reduction_row.addWidget(button)
+        layout.addLayout(ai_content_reduction_row)
+
         self._logout_button = QPushButton(self._t("action.logout"))
         self._logout_button.setObjectName("settings-action")
         self._logout_button.clicked.connect(self._logout)
@@ -292,6 +317,55 @@ class MainWindowPreferencesMixin:
             self._t("settings.waveform_progress", value=self._t(option_key))
         )
 
+    def _set_ai_content_reduction_enabled(self, enabled: bool) -> None:
+        self._render_ai_content_reduction_enabled(enabled)
+        self._ai_content_reduction_save_pending = True
+        self._set_ai_content_reduction_buttons_enabled(False)
+        self._music_metadata_controller.save_account_setting(enabled)
+
+    def _handle_ai_content_reduction_synced(self, enabled: bool) -> None:
+        self._render_ai_content_reduction_enabled(enabled)
+        self._set_ai_content_reduction_buttons_enabled(True)
+
+    def _handle_ai_content_reduction_saved(self, enabled: bool) -> None:
+        self._ai_content_reduction_save_pending = False
+        self._render_ai_content_reduction_enabled(enabled)
+        self._set_ai_content_reduction_buttons_enabled(True)
+        option_key = (
+            "settings.option.ai_content_reduction.enabled"
+            if enabled
+            else "settings.option.ai_content_reduction.disabled"
+        )
+        self._status_label.setText(
+            self._t("settings.ai_content_reduction", value=self._t(option_key))
+        )
+
+    def _handle_ai_content_reduction_sync_failed(self, message: str) -> None:
+        del message
+        self._set_ai_content_reduction_buttons_enabled(True)
+
+    def _start_ai_content_reduction_sync(self) -> None:
+        if self._container.services.music_service.get_auth_session() is None:
+            return
+        self._set_ai_content_reduction_buttons_enabled(False)
+        self._music_metadata_controller.sync_account_setting()
+
+    def _handle_ai_content_reduction_save_failed(
+        self,
+        message: str,
+        previous: bool,
+    ) -> None:
+        self._ai_content_reduction_save_pending = False
+        self._render_ai_content_reduction_enabled(previous)
+        self._set_ai_content_reduction_buttons_enabled(True)
+        self._status_label.setText(
+            self._t("settings.ai_content_reduction.error", message=message)
+        )
+
+    def _set_ai_content_reduction_buttons_enabled(self, enabled: bool) -> None:
+        for button in self._ai_content_reduction_buttons.values():
+            button.setEnabled(enabled)
+
     def _render_theme_preference(self, theme: str) -> None:
         for candidate, button in self._theme_buttons.items():
             button.setChecked(candidate == theme)
@@ -306,6 +380,10 @@ class MainWindowPreferencesMixin:
 
     def _render_waveform_progress_enabled(self, enabled: bool) -> None:
         for candidate, button in getattr(self, "_waveform_progress_buttons", {}).items():
+            button.setChecked(candidate == enabled)
+
+    def _render_ai_content_reduction_enabled(self, enabled: bool) -> None:
+        for candidate, button in self._ai_content_reduction_buttons.items():
             button.setChecked(candidate == enabled)
 
     def _logout(self) -> None:
@@ -332,6 +410,9 @@ class MainWindowPreferencesMixin:
             self._container.services.settings_service.load_waveform_progress_enabled()
             and self._WAVEFORM_SUPPORTED
         )
+        self._render_ai_content_reduction_enabled(
+            self._container.services.settings_service.load_ai_content_reduction_enabled()
+        )
         self._set_browser_view_mode(
             self._container.services.settings_service.load_browser_view_mode(),
             persist=False,
@@ -352,6 +433,7 @@ class MainWindowPreferencesMixin:
             getattr(self, "_corner_style_buttons", {}).values(),
             getattr(self, "_language_buttons", {}).values(),
             getattr(self, "_waveform_progress_buttons", {}).values(),
+            getattr(self, "_ai_content_reduction_buttons", {}).values(),
         )
         buttons = [button for group in button_groups for button in group]
         if not buttons:
@@ -400,6 +482,7 @@ class MainWindowPreferencesMixin:
         self._status_label.setText(self._t("status.authenticated_as", username=username))
         self._render_auth_state()
         self._maybe_start_library_warmup()
+        self._start_ai_content_reduction_sync()
 
     def _clear_auth_dialog(self) -> None:
         if (
@@ -525,6 +608,10 @@ class MainWindowPreferencesMixin:
             self._settings_waveform_progress_label.setText(
                 self._t("settings.section.waveform_progress")
             )
+        if hasattr(self, "_settings_ai_content_reduction_label"):
+            self._settings_ai_content_reduction_label.setText(
+                self._t("settings.section.ai_content_reduction")
+            )
         if hasattr(self, "_logout_button"):
             self._logout_button.setText(self._t("action.logout"))
         for theme_id, button in getattr(self, "_theme_buttons", {}).items():
@@ -538,6 +625,13 @@ class MainWindowPreferencesMixin:
                 "settings.option.waveform_progress.enabled"
                 if enabled
                 else "settings.option.waveform_progress.disabled"
+            )
+            button.setText(self._t(key))
+        for enabled, button in getattr(self, "_ai_content_reduction_buttons", {}).items():
+            key = (
+                "settings.option.ai_content_reduction.enabled"
+                if enabled
+                else "settings.option.ai_content_reduction.disabled"
             )
             button.setText(self._t(key))
         self._normalize_settings_option_button_widths()

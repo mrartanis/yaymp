@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from copy import copy
 from datetime import datetime
 from typing import Any
 
@@ -20,6 +21,7 @@ from app.domain import (
     Station,
     StationTrackBatch,
     Track,
+    TrackCredit,
 )
 from app.domain.errors import AuthError, NetworkError, StreamResolveError, TrackUnavailableError
 
@@ -42,6 +44,9 @@ else:
 
 
 class YandexMusicService(MusicService):
+    _AI_CONTENT_RATE_HEADER = "X-Yandex-Music-AI-Content-Rate"
+    _AI_CONTENT_REDUCED_VALUE = "reduced"
+
     def __init__(
         self,
         *,
@@ -58,6 +63,7 @@ class YandexMusicService(MusicService):
         self._client = client
         self._logger = logger
         self._audio_quality = AudioQuality.HQ
+        self._ai_content_reduction_enabled = False
 
     def get_auth_session(self) -> AuthSession | None:
         return self._session
@@ -375,6 +381,62 @@ class YandexMusicService(MusicService):
     def get_audio_quality(self) -> AudioQuality:
         return self._audio_quality
 
+    def set_ai_content_reduction_enabled(self, enabled: bool) -> None:
+        self._ai_content_reduction_enabled = bool(enabled)
+
+    def get_ai_content_reduction_enabled(self) -> bool:
+        return self._ai_content_reduction_enabled
+
+    def load_account_ai_content_reduction_enabled(self) -> bool:
+        client = self._require_client()
+        try:
+            payload = client.request.get(f"{client.base_url}/account/settings")
+        except Exception as exc:
+            raise self._map_client_error(
+                exc,
+                "Failed to load account AI content reduction setting",
+            ) from exc
+        if not isinstance(payload, dict) or not isinstance(
+            payload.get("aiContentReductionEnabled"), bool
+        ):
+            raise NetworkError("Yandex Music returned no AI content reduction setting")
+        return payload["aiContentReductionEnabled"]
+
+    def save_account_ai_content_reduction_enabled(self, enabled: bool) -> bool:
+        client = self._require_client()
+        try:
+            payload = client.request.post(
+                f"{client.base_url}/account/settings",
+                {"aiContentReductionEnabled": str(bool(enabled)).lower()},
+            )
+        except Exception as exc:
+            raise self._map_client_error(
+                exc,
+                "Failed to save account AI content reduction setting",
+            ) from exc
+        if not isinstance(payload, dict) or not isinstance(
+            payload.get("aiContentReductionEnabled"), bool
+        ):
+            raise NetworkError("Yandex Music did not confirm AI content reduction setting")
+        return payload["aiContentReductionEnabled"]
+
+    def get_track_credits(self, track_id: str) -> Sequence[TrackCredit]:
+        client = self._require_client()
+        try:
+            result = client.tracks_credits(track_id)
+        except Exception as exc:
+            raise self._map_client_error(
+                exc,
+                f"Failed to load credits for track {track_id}",
+            ) from exc
+        credits: list[TrackCredit] = []
+        for credit in getattr(result, "credits", None) or ():
+            title = getattr(credit, "title", None)
+            value = getattr(credit, "value", None)
+            if isinstance(title, str) and title.strip() and isinstance(value, str):
+                credits.append(TrackCredit(title=title.strip(), value=value.strip()))
+        return tuple(credits)
+
     def get_user_playlists(self) -> Sequence[Playlist]:
         client = self._require_client()
         try:
@@ -540,7 +602,8 @@ class YandexMusicService(MusicService):
     ) -> RadioSession:
         client = self._require_client()
         try:
-            payload = client.request.post(
+            request = self._radio_request(client)
+            payload = request.post(
                 f"{client.base_url}/rotor/session/new",
                 json={
                     "seeds": [station_id],
@@ -568,7 +631,7 @@ class YandexMusicService(MusicService):
         if not session.queue_anchor_track_id:
             raise NetworkError(f"Radio session {session.session_id} has no queue anchor")
         try:
-            payload = client.request.post(
+            payload = self._radio_request(client).post(
                 f"{client.base_url}/rotor/session/{session.session_id}/tracks",
                 json={"queue": [session.queue_anchor_track_id]},
             )
@@ -587,6 +650,17 @@ class YandexMusicService(MusicService):
             queue_anchor_track_id=next_anchor_track_id,
             tracks=tracks,
         )
+
+    def _radio_request(self, client: Any) -> Any:
+        request = client.request
+        if not self._ai_content_reduction_enabled:
+            return request
+        request = copy(request)
+        request.headers = {
+            **getattr(client.request, "headers", {}),
+            self._AI_CONTENT_RATE_HEADER: self._AI_CONTENT_REDUCED_VALUE,
+        }
+        return request
 
     def report_play_audio(
         self,

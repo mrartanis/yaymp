@@ -15,6 +15,8 @@ from app.domain import (
     LikedTrackSnapshot,
     Playlist,
     Track,
+    TrackAiUsage,
+    TrackCredit,
 )
 from app.domain.errors import StorageError
 
@@ -104,6 +106,11 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
                 available=bool(raw_track.get("available", True)),
                 is_liked=bool(raw_track.get("is_liked", False)),
                 is_disliked=bool(raw_track.get("is_disliked", False)),
+                credits=self._deserialize_credits(raw_track.get("credits", ())),
+                credits_cached_at=self._optional_datetime(
+                    raw_track.get("credits_cached_at")
+                ),
+                ai_usage=self._optional_ai_usage(raw_track.get("ai_usage")),
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise StorageError("Library cache track entry is invalid") from exc
@@ -113,6 +120,20 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
         tracks = payload.setdefault("tracks", {})
         if not isinstance(tracks, dict):
             raise StorageError("Library cache track metadata is invalid")
+        existing = tracks.get(track.id)
+        serialized_credits = [
+            {"title": credit.title, "value": credit.value} for credit in track.credits
+        ]
+        credits_cached_at = (
+            track.credits_cached_at.isoformat()
+            if track.credits_cached_at is not None
+            else None
+        )
+        ai_usage = track.ai_usage.value if track.ai_usage is not None else None
+        if track.credits_cached_at is None and isinstance(existing, dict):
+            serialized_credits = existing.get("credits", serialized_credits)
+            credits_cached_at = existing.get("credits_cached_at")
+            ai_usage = existing.get("ai_usage")
         tracks[track.id] = {
             "id": track.id,
             "title": track.title,
@@ -135,6 +156,9 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
             "available": track.available,
             "is_liked": track.is_liked,
             "is_disliked": track.is_disliked,
+            "credits": serialized_credits,
+            "credits_cached_at": credits_cached_at,
+            "ai_usage": ai_usage,
             "cached_at": self._now_iso(),
         }
         self._save_payload(payload)
@@ -539,6 +563,15 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
             "available": track.available,
             "is_liked": track.is_liked,
             "is_disliked": track.is_disliked,
+            "credits": [
+                {"title": credit.title, "value": credit.value} for credit in track.credits
+            ],
+            "credits_cached_at": (
+                track.credits_cached_at.isoformat()
+                if track.credits_cached_at is not None
+                else None
+            ),
+            "ai_usage": track.ai_usage.value if track.ai_usage is not None else None,
         }
 
     def _deserialize_track(self, raw_track: object) -> Track:
@@ -571,9 +604,34 @@ class FileLibraryCacheRepo(LibraryCacheRepo):
                 available=bool(raw_track.get("available", True)),
                 is_liked=bool(raw_track.get("is_liked", False)),
                 is_disliked=bool(raw_track.get("is_disliked", False)),
+                credits=self._deserialize_credits(raw_track.get("credits", ())),
+                credits_cached_at=self._optional_datetime(
+                    raw_track.get("credits_cached_at")
+                ),
+                ai_usage=self._optional_ai_usage(raw_track.get("ai_usage")),
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise StorageError("Library cache track entry is invalid") from exc
+
+    def _deserialize_credits(self, raw_credits: object) -> tuple[TrackCredit, ...]:
+        if not isinstance(raw_credits, list | tuple):
+            raise TypeError("track credits must be a list")
+        credits: list[TrackCredit] = []
+        for raw_credit in raw_credits:
+            if not isinstance(raw_credit, dict):
+                raise TypeError("track credit must be a mapping")
+            credits.append(
+                TrackCredit(
+                    title=str(raw_credit["title"]),
+                    value=str(raw_credit["value"]),
+                )
+            )
+        return tuple(credits)
+
+    def _optional_ai_usage(self, value: object) -> TrackAiUsage | None:
+        if value is None:
+            return None
+        return TrackAiUsage(str(value))
 
     def _serialize_album(self, album: Album) -> dict[str, object]:
         return {

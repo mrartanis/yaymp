@@ -12,6 +12,7 @@ from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QApplication, QFileDialog, QListView, QMenu
 
 from app.application.error_presenter import user_facing_error_message
+from app.application.track_metadata import track_credits_are_fresh
 from app.domain import (
     Album,
     Artist,
@@ -28,6 +29,7 @@ from app.domain.playback import QueueItem
 from app.presentation.qt.library_controller import BrowserItem
 from app.presentation.qt.playlist_save_dialog import SavePlaylistDialog
 from app.presentation.qt.track_display import display_track_title
+from app.presentation.qt.track_info_dialog import TrackInfoDialog
 
 
 class MainWindowLibraryMixin:
@@ -505,7 +507,53 @@ class MainWindowLibraryMixin:
                 )
             )
             menu.addAction(go_to_album)
+        menu.addSeparator()
+        track_info = QAction(self._t("action.track_info"), self)
+        track_info.triggered.connect(
+            lambda checked=False, selected_track=track: self._show_track_info(
+                selected_track
+            )
+        )
+        menu.addAction(track_info)
         return not menu.isEmpty()
+
+    def _show_track_info(self, track: Track) -> None:
+        if self._track_info_dialog is not None:
+            self._track_info_dialog.close()
+        dialog = TrackInfoDialog(
+            track=track,
+            translate=self._t,
+            format_ms=self._format_ms,
+            parent=self,
+        )
+        self._track_info_dialog = dialog
+        dialog.finished.connect(self._clear_track_info_dialog)
+        if not track_credits_are_fresh(track):
+            dialog.set_loading()
+            self._music_metadata_controller.request_track_credits(
+                track,
+                context=f"dialog:{track.id}",
+            )
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _clear_track_info_dialog(self) -> None:
+        self._track_info_dialog = None
+
+    def _handle_track_credits_ready(self, context: str, track: Track) -> None:
+        self._replace_content_track(track)
+        self._controller.update_track_credits(track)
+        dialog = self._track_info_dialog
+        if context == f"dialog:{track.id}" and dialog is not None:
+            dialog.set_track(track)
+
+    def _handle_track_credits_failed(self, context: str, message: str) -> None:
+        if not context.startswith("dialog:"):
+            return
+        dialog = self._track_info_dialog
+        if dialog is not None:
+            dialog.set_error(message)
 
     def _populate_queue_item_menu(
         self,
