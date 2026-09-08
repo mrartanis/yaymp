@@ -19,6 +19,7 @@ from app.domain import (
     StationTrackBatch,
     Track,
     TrackCredit,
+    TrackCredits,
     TrackUnavailableError,
 )
 from app.domain.playlist import Playlist
@@ -265,22 +266,16 @@ class FakeYandexClient:
         self.radio_session_tracks_headers: list[dict[str, str]] = []
         self.ai_content_reduction_enabled = False
         self.account_setting_writes: list[dict[str, object]] = []
-        self.credits = type(
-            "CreditsStub",
-            (),
-            {
-                "credits": [
-                    type(
-                        "CreditStub",
-                        (),
-                        {
-                            "title": "Использование ИИ",
-                            "value": "Возможно, трек создан с использованием ИИ",
-                        },
-                    )()
-                ]
-            },
-        )()
+        self.credits_payload = {
+            "credits": [
+                {
+                    "title": "Использование ИИ",
+                    "value": "Возможно, трек создан с использованием ИИ",
+                    "futureCreditField": "preserved",
+                }
+            ],
+            "futureTopLevelField": {"nested": True},
+        }
         self.request = self.FakeRequest(self)
 
     class FakeRequest:
@@ -372,6 +367,8 @@ class FakeYandexClient:
                 return {
                     "aiContentReductionEnabled": self._client.ai_content_reduction_enabled
                 }
+            if url.endswith("/tracks/track-1/credits"):
+                return self._client.credits_payload
             if url.endswith("/dislikes/tracks"):
                 if (params or {}).get("if_modified_since_revision") == 4:
                     return {"result": None}
@@ -400,10 +397,6 @@ class FakeYandexClient:
         if track_ids == ["missing"]:
             return []
         return [self.track]
-
-    def tracks_credits(self, track_id):
-        assert track_id == "track-1"
-        return self.credits
 
     def search(self, query: str, *, type_: str | None = None):
         del query, type_
@@ -948,10 +941,18 @@ def test_yandex_music_service_maps_track_credits() -> None:
         client=FakeYandexClient(),
     )
 
-    assert service.get_track_credits("track-1") == (
-        TrackCredit(
-            title="Использование ИИ",
-            value="Возможно, трек создан с использованием ИИ",
+    assert service.get_track_credits("track-1") == TrackCredits(
+        items=(
+            TrackCredit(
+                title="Использование ИИ",
+                value="Возможно, трек создан с использованием ИИ",
+            ),
+        ),
+        raw_json=(
+            '{"credits": [{"futureCreditField": "preserved", '
+            '"title": "Использование ИИ", '
+            '"value": "Возможно, трек создан с использованием ИИ"}], '
+            '"futureTopLevelField": {"nested": true}}'
         ),
     )
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from copy import copy
 from datetime import datetime
@@ -22,6 +23,7 @@ from app.domain import (
     StationTrackBatch,
     Track,
     TrackCredit,
+    TrackCredits,
 )
 from app.domain.errors import AuthError, NetworkError, StreamResolveError, TrackUnavailableError
 
@@ -388,9 +390,8 @@ class YandexMusicService(MusicService):
         return self._ai_content_reduction_enabled
 
     def load_account_ai_content_reduction_enabled(self) -> bool:
-        client = self._require_client()
         try:
-            payload = client.request.get(f"{client.base_url}/account/settings")
+            payload = self._request_raw("get", "account/settings")
         except Exception as exc:
             raise self._map_client_error(
                 exc,
@@ -403,11 +404,11 @@ class YandexMusicService(MusicService):
         return payload["aiContentReductionEnabled"]
 
     def save_account_ai_content_reduction_enabled(self, enabled: bool) -> bool:
-        client = self._require_client()
         try:
-            payload = client.request.post(
-                f"{client.base_url}/account/settings",
-                {"aiContentReductionEnabled": str(bool(enabled)).lower()},
+            payload = self._request_raw(
+                "post",
+                "account/settings",
+                data={"aiContentReductionEnabled": str(bool(enabled)).lower()},
             )
         except Exception as exc:
             raise self._map_client_error(
@@ -420,22 +421,29 @@ class YandexMusicService(MusicService):
             raise NetworkError("Yandex Music did not confirm AI content reduction setting")
         return payload["aiContentReductionEnabled"]
 
-    def get_track_credits(self, track_id: str) -> Sequence[TrackCredit]:
-        client = self._require_client()
+    def get_track_credits(self, track_id: str) -> TrackCredits:
         try:
-            result = client.tracks_credits(track_id)
+            payload = self._request_raw("get", f"tracks/{track_id}/credits")
         except Exception as exc:
             raise self._map_client_error(
                 exc,
                 f"Failed to load credits for track {track_id}",
             ) from exc
+        if not isinstance(payload, dict):
+            raise NetworkError(f"Yandex Music returned invalid credits for track {track_id}")
         credits: list[TrackCredit] = []
-        for credit in getattr(result, "credits", None) or ():
-            title = getattr(credit, "title", None)
-            value = getattr(credit, "value", None)
+        raw_credits = payload.get("credits")
+        for credit in raw_credits if isinstance(raw_credits, list) else ():
+            if not isinstance(credit, dict):
+                continue
+            title = credit.get("title")
+            value = credit.get("value")
             if isinstance(title, str) and title.strip() and isinstance(value, str):
                 credits.append(TrackCredit(title=title.strip(), value=value.strip()))
-        return tuple(credits)
+        return TrackCredits(
+            items=tuple(credits),
+            raw_json=json.dumps(payload, ensure_ascii=False, sort_keys=True),
+        )
 
     def get_user_playlists(self) -> Sequence[Playlist]:
         client = self._require_client()
@@ -603,8 +611,10 @@ class YandexMusicService(MusicService):
         client = self._require_client()
         try:
             request = self._radio_request(client)
-            payload = request.post(
-                f"{client.base_url}/rotor/session/new",
+            payload = self._request_raw(
+                "post",
+                "rotor/session/new",
+                request=request,
                 json={
                     "seeds": [station_id],
                     "includeTracksInResponse": True,
@@ -631,8 +641,10 @@ class YandexMusicService(MusicService):
         if not session.queue_anchor_track_id:
             raise NetworkError(f"Radio session {session.session_id} has no queue anchor")
         try:
-            payload = self._radio_request(client).post(
-                f"{client.base_url}/rotor/session/{session.session_id}/tracks",
+            payload = self._request_raw(
+                "post",
+                f"rotor/session/{session.session_id}/tracks",
+                request=self._radio_request(client),
                 json={"queue": [session.queue_anchor_track_id]},
             )
         except Exception as exc:
@@ -661,6 +673,20 @@ class YandexMusicService(MusicService):
             self._AI_CONTENT_RATE_HEADER: self._AI_CONTENT_REDUCED_VALUE,
         }
         return request
+
+    def _request_raw(
+        self,
+        method: str,
+        path: str,
+        *,
+        request: Any | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Use the SDK transport for endpoints or fields missing from its models."""
+        client = self._require_client()
+        transport = request or client.request
+        operation = getattr(transport, method)
+        return operation(f"{client.base_url}/{path.lstrip('/')}", **kwargs)
 
     def report_play_audio(
         self,
@@ -703,11 +729,11 @@ class YandexMusicService(MusicService):
         *,
         client_now: str,
     ) -> None:
-        client = self._require_client()
         payload = {"plays": [self._serialize_play_event(event) for event in events]}
         try:
-            client.request.post(
-                f"{client.base_url}/plays?client-now={client_now}",
+            self._request_raw(
+                "post",
+                f"plays?client-now={client_now}",
                 json=payload,
             )
         except Exception as exc:
@@ -805,7 +831,6 @@ class YandexMusicService(MusicService):
         track_id: str | None = None,
         total_played_seconds: float | None = None,
     ) -> None:
-        client = self._require_client()
         event: dict[str, object] = {
             "type": feedback_type.value,
             "timestamp": self._radio_timestamp(),
@@ -815,8 +840,9 @@ class YandexMusicService(MusicService):
         if total_played_seconds is not None:
             event["totalPlayedSeconds"] = total_played_seconds
         try:
-            client.request.post(
-                f"{client.base_url}/rotor/session/{session.session_id}/feedback",
+            self._request_raw(
+                "post",
+                f"rotor/session/{session.session_id}/feedback",
                 json={
                     "event": event,
                     "batchId": session.batch_id,

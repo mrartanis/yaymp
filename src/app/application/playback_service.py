@@ -227,6 +227,7 @@ class PlaybackService:
             updated_track = replace(
                 item.track,
                 credits=track.credits,
+                credits_raw_json=track.credits_raw_json,
                 credits_cached_at=track.credits_cached_at,
                 ai_usage=track.ai_usage,
             )

@@ -41,6 +41,7 @@ def test_file_library_cache_repo_round_trips_track_metadata_and_artwork(tmp_path
         waveform_bins=(0.1, 0.3, 0.6),
         is_liked=True,
         credits=(TrackCredit(title="Использование ИИ", value="Возможно"),),
+        credits_raw_json='{"credits":[],"future":true}',
         credits_cached_at=datetime.now(tz=UTC),
         ai_usage=TrackAiUsage.POSSIBLE,
     )
@@ -59,6 +60,7 @@ def test_file_library_cache_repo_preserves_credits_on_plain_metadata_refresh(tmp
         title="Signal",
         artists=("Artist",),
         credits=(TrackCredit(title="AI use", value="Possible"),),
+        credits_raw_json='{"credits":[],"future":true}',
         credits_cached_at=datetime.now(tz=UTC),
         ai_usage=TrackAiUsage.POSSIBLE,
     )
@@ -72,6 +74,7 @@ def test_file_library_cache_repo_preserves_credits_on_plain_metadata_refresh(tmp
     assert cached is not None
     assert cached.title == "Updated"
     assert cached.credits == track.credits
+    assert cached.credits_raw_json == track.credits_raw_json
     assert cached.credits_cached_at == track.credits_cached_at
     assert cached.ai_usage is TrackAiUsage.POSSIBLE
 

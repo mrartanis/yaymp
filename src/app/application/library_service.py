@@ -654,10 +654,12 @@ class LibraryService:
         if track_credits_are_fresh(enriched):
             return enriched
 
-        credits = tuple(self._music_service.get_track_credits(track.id))
+        details = self._music_service.get_track_credits(track.id)
+        credits = details.items
         enriched = replace(
             track,
             credits=credits,
+            credits_raw_json=details.raw_json,
             credits_cached_at=datetime.now(tz=UTC),
             ai_usage=classify_track_ai_usage(credits),
         )

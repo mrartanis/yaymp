@@ -150,6 +150,7 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                 is_liked=bool(row["is_liked"]),
                 is_disliked=bool(row["is_disliked"]),
                 credits=self._decode_credits_json(row["credits_json"]),
+                credits_raw_json=row["credits_raw_json"],
                 credits_cached_at=self._optional_datetime(row["credits_cached_at"]),
                 ai_usage=self._optional_ai_usage(row["ai_usage"]),
             )
@@ -525,6 +526,7 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                         is_liked integer not null,
                         is_disliked integer not null default 0,
                         credits_json text not null default '[]',
+                        credits_raw_json text,
                         credits_cached_at text,
                         ai_usage text,
                         cached_at text not null
@@ -648,6 +650,12 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                 self._ensure_column(
                     connection,
                     table="tracks",
+                    column="credits_raw_json",
+                    definition="text",
+                )
+                self._ensure_column(
+                    connection,
+                    table="tracks",
                     column="ai_usage",
                     definition="text",
                 )
@@ -714,9 +722,9 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                 "id, title, version, artists_json, artist_ids_json, album_id, album_title, "
                 "album_year, duration_ms, "
                 "stream_ref, stream_ref_cached_at, artwork_ref, accent_color, waveform_bins_json, "
-                "available, is_liked, is_disliked, credits_json, credits_cached_at, ai_usage, "
-                "cached_at"
-                ") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "available, is_liked, is_disliked, credits_json, credits_raw_json, "
+                "credits_cached_at, ai_usage, cached_at"
+                ") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 "on conflict(id) do update set "
                 "title = excluded.title, "
                 "version = excluded.version, "
@@ -736,6 +744,8 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                 "is_disliked = excluded.is_disliked, "
                 "credits_json = case when excluded.credits_cached_at is null "
                 "then tracks.credits_json else excluded.credits_json end, "
+                "credits_raw_json = case when excluded.credits_cached_at is null "
+                "then tracks.credits_raw_json else excluded.credits_raw_json end, "
                 "credits_cached_at = coalesce("
                 "excluded.credits_cached_at, tracks.credits_cached_at), "
                 "ai_usage = case when excluded.credits_cached_at is null "
@@ -765,6 +775,7 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                 int(track.is_liked),
                 int(track.is_disliked),
                 self._encode_credits_json(track.credits),
+                track.credits_raw_json,
                 (
                     track.credits_cached_at.isoformat()
                     if track.credits_cached_at is not None
@@ -1017,6 +1028,7 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
             "is_liked": track.is_liked,
             "is_disliked": track.is_disliked,
             "credits": self._encode_credits(track.credits),
+            "credits_raw_json": track.credits_raw_json,
             "credits_cached_at": (
                 track.credits_cached_at.isoformat() if track.credits_cached_at is not None else None
             ),
@@ -1050,6 +1062,7 @@ class SQLiteLibraryCacheRepo(LibraryCacheRepo):
                 is_liked=bool(raw_track.get("is_liked", False)),
                 is_disliked=bool(raw_track.get("is_disliked", False)),
                 credits=self._decode_credits(raw_track.get("credits", ())),
+                credits_raw_json=self._optional_str(raw_track.get("credits_raw_json")),
                 credits_cached_at=self._optional_datetime(raw_track.get("credits_cached_at")),
                 ai_usage=self._optional_ai_usage(raw_track.get("ai_usage")),
             )

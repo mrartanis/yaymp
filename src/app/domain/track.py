@@ -18,6 +18,12 @@ class TrackCredit:
 
 
 @dataclass(frozen=True, slots=True)
+class TrackCredits:
+    items: tuple[TrackCredit, ...]
+    raw_json: str
+
+
+@dataclass(frozen=True, slots=True)
 class Track:
     id: str
     title: str
@@ -37,6 +43,7 @@ class Track:
     is_liked: bool = False
     is_disliked: bool = False
     credits: tuple[TrackCredit, ...] = ()
+    credits_raw_json: str | None = None
     credits_cached_at: datetime | None = None
     ai_usage: TrackAiUsage | None = None
 

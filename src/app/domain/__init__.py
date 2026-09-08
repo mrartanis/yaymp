@@ -49,6 +49,7 @@ from app.domain.track import (
     Track,
     TrackAiUsage,
     TrackCredit,
+    TrackCredits,
 )
 
 __all__ = [
@@ -95,6 +96,7 @@ __all__ = [
     "Track",
     "TrackAiUsage",
     "TrackCredit",
+    "TrackCredits",
     "TrackUnavailableError",
     "WaveformState",
 ]

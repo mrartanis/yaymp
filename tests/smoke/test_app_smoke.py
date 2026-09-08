@@ -68,6 +68,10 @@ def test_main_window_can_be_constructed(qtbot, qapp, tmp_path, monkeypatch) -> N
         track,
         version="Remastered",
         ai_usage=TrackAiUsage.POSSIBLE,
+        credits_raw_json=(
+            '{"credits": [{"title": "AI use", "value": "Possible"}], '
+            '"futureField": {"value": 1}}'
+        ),
         credits_cached_at=datetime.now(tz=UTC),
     )
     ai_item = replace(item, track=ai_track)
@@ -80,6 +84,9 @@ def test_main_window_can_be_constructed(qtbot, qapp, tmp_path, monkeypatch) -> N
     window._show_track_info(ai_track)
     assert window._track_info_dialog is not None
     assert window._track_info_dialog.windowTitle() == window._t("track_info.title")
+    assert window._track_info_dialog._additional_raw_fields(ai_track.credits_raw_json) == (
+        ("futureField.value", "1"),
+    )
     window._track_info_dialog.close()
 
 

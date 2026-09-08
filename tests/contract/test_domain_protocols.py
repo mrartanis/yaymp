@@ -33,6 +33,7 @@ from app.domain import (
     Station,
     StationTrackBatch,
     Track,
+    TrackCredits,
 )
 
 
@@ -167,7 +168,7 @@ class FakeMusicService:
 
     def get_track_credits(self, track_id: str):
         del track_id
-        return ()
+        return TrackCredits(items=(), raw_json="{}")
 
     def get_user_playlists(self) -> Sequence[Playlist]:
         return [Playlist(id="playlist-1", title="Playlist")]

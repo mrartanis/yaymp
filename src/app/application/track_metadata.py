@@ -50,6 +50,7 @@ def merge_cached_track_credits(track: Track, cached_track: Track | None) -> Trac
     return replace(
         track,
         credits=cached_track.credits,
+        credits_raw_json=cached_track.credits_raw_json,
         credits_cached_at=cached_track.credits_cached_at,
         ai_usage=cached_track.ai_usage,
     )

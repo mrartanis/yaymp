@@ -25,7 +25,7 @@ from app.domain.track import (
     LikedTrackIds,
     LikedTrackSnapshot,
     Track,
-    TrackCredit,
+    TrackCredits,
 )
 
 
@@ -108,7 +108,7 @@ class MusicService(Protocol):
 
     def save_account_ai_content_reduction_enabled(self, enabled: bool) -> bool: ...
 
-    def get_track_credits(self, track_id: str) -> Sequence[TrackCredit]: ...
+    def get_track_credits(self, track_id: str) -> TrackCredits: ...
 
     def get_user_playlists(self) -> Sequence[Playlist]: ...
 
