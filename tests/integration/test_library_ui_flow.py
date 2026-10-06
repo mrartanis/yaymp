@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QBuffer, QByteArray, QIODevice, Qt
+from PySide6.QtGui import QColor, QImage
 
 from app.bootstrap.config import load_config
 from app.bootstrap.startup import StartupContext, build_startup_context
@@ -16,6 +18,7 @@ from app.domain import (
 )
 from app.infrastructure.persistence import FileAuthRepo
 from app.presentation.qt.library_controller import BrowserItem
+from tests.fakes.http_origin import HttpOrigin
 from tests.fakes.music_service import FakeMusicService
 
 
@@ -125,6 +128,17 @@ def _music_with_search_result() -> tuple[FakeMusicService, Track]:
         albums=(album,),
     )
     return music, track
+
+
+def _png_bytes(color: str) -> bytes:
+    image = QImage(96, 96, QImage.Format.Format_ARGB32)
+    image.fill(QColor(color))
+    payload = QByteArray()
+    buffer = QBuffer(payload)
+    assert buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+    assert image.save(buffer, "PNG")
+    buffer.close()
+    return bytes(payload)
 
 
 def test_search_play_and_like_updates_api_queue_and_persistent_cache(
@@ -272,3 +286,51 @@ def test_queue_can_be_saved_as_playlist_through_dialog(
         assert "Saved from queue" in context.main_window._status_label.text()
     finally:
         context.main_window.close()
+
+
+def test_playback_artwork_is_downloaded_and_reused_offline_after_restart(
+    qapp,
+    qtbot,
+    tmp_path,
+    monkeypatch,
+) -> None:
+    with HttpOrigin(_png_bytes("#336699"), content_type="image/png") as origin:
+        online, original_track = _music_with_search_result()
+        track = replace(original_track, artwork_ref=origin.url)
+        online.tracks[track.id] = track
+        online.catalog_searches["orbital"] = CatalogSearchResults(tracks=(track,))
+        first = _build_app(
+            root=tmp_path,
+            music=online,
+            qapp=qapp,
+            qtbot=qtbot,
+            monkeypatch=monkeypatch,
+        )
+        try:
+            _search_and_play(first, query="orbital", track_id=track.id, qtbot=qtbot)
+            artwork_cache = first.container.services.artwork_cache
+            cache_path = artwork_cache.cache_path_for_url(origin.url)
+            qtbot.waitUntil(cache_path.exists)
+            qtbot.waitUntil(lambda: not first.main_window._artwork_label.pixmap().isNull())
+            assert origin.requests
+        finally:
+            first.main_window.close()
+
+    offline = FakeMusicService(session=online.session)
+    offline.offline = True
+    second = _build_app(
+        root=tmp_path,
+        music=offline,
+        qapp=qapp,
+        qtbot=qtbot,
+        monkeypatch=monkeypatch,
+    )
+    try:
+        qtbot.waitUntil(lambda: not second.main_window._artwork_label.pixmap().isNull())
+        restored = second.container.services.playback_service.snapshot().current_item
+        assert restored is not None and restored.track.id == track.id
+        assert second.main_window._artwork_label.pixmap().toImage().pixelColor(1, 1).name() == (
+            "#336699"
+        )
+    finally:
+        second.main_window.close()
