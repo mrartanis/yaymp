@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QApplication
 
 from app.bootstrap.config import AppConfig, load_config
 from app.bootstrap.container import AppContainer, build_container
+from app.domain import MusicService
 from app.presentation.qt.app import create_qt_application
 from app.presentation.qt.main_window import MainWindow
 
@@ -51,6 +52,7 @@ def build_startup_context(
     argv: Sequence[str] | None = None,
     *,
     existing_qt_app: QApplication | None = None,
+    music_service: MusicService | None = None,
 ) -> StartupContext:
     config = load_config()
     logger = initialize_logging(config)
@@ -62,7 +64,7 @@ def build_startup_context(
     logger.info("Resolved auth session file: %s", config.auth_session_file)
     logger.info("Resolved settings file: %s", config.settings_file)
 
-    container = build_container(config, logger)
+    container = build_container(config, logger, music_service=music_service)
     qt_app = existing_qt_app or create_qt_application(argv or sys.argv, config)
     main_window = MainWindow(container=container)
     logger.info("Main window constructed")

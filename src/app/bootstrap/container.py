@@ -59,30 +59,36 @@ class AppContainer:
     services: AppServices
 
 
-def build_container(config: AppConfig, logger: logging.Logger) -> AppContainer:
+def build_container(
+    config: AppConfig,
+    logger: logging.Logger,
+    *,
+    music_service: MusicService | None = None,
+) -> AppContainer:
     logger.debug("Building application container")
     settings_repo = _build_settings_repo(config, logger)
     settings_service = SettingsService(settings_repo=settings_repo, logger=logger)
     auth_service, restored_session = _build_auth_service(config, logger)
     bootstrap_token = os.getenv("YAYMP_YANDEX_TOKEN")
-    music_service = YandexMusicService(
-        session=restored_session,
-        token=bootstrap_token,
-        logger=logger,
-    )
-    if restored_session is not None or bootstrap_token:
-        token = restored_session.token if restored_session is not None else bootstrap_token
-        assert token is not None
-        try:
-            auth_service.authenticate_with_token(
-                token,
-                music_service=music_service,
-                expires_in=None,
-            )
-        except AuthError as exc:
-            logger.warning("Failed to restore Yandex session: %s", exc)
-            auth_service.clear_session()
-            music_service = YandexMusicService(logger=logger)
+    if music_service is None:
+        music_service = YandexMusicService(
+            session=restored_session,
+            token=bootstrap_token,
+            logger=logger,
+        )
+        if restored_session is not None or bootstrap_token:
+            token = restored_session.token if restored_session is not None else bootstrap_token
+            assert token is not None
+            try:
+                auth_service.authenticate_with_token(
+                    token,
+                    music_service=music_service,
+                    expires_in=None,
+                )
+            except AuthError as exc:
+                logger.warning("Failed to restore Yandex session: %s", exc)
+                auth_service.clear_session()
+                music_service = YandexMusicService(logger=logger)
     music_service.set_audio_quality(settings_service.load_audio_quality())
     music_service.set_ai_content_reduction_enabled(
         settings_service.load_ai_content_reduction_enabled()
