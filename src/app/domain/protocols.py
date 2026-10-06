@@ -161,6 +161,7 @@ class MusicService(Protocol):
         self,
         session: RadioSession,
         *,
+        queue: Sequence[str],
         limit: int = 25,
     ) -> RadioSession: ...
 

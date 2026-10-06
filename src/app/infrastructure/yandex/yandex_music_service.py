@@ -628,19 +628,12 @@ class YandexMusicService(MusicService):
     ) -> RadioSession:
         client = self._require_client()
         try:
-            request = self._radio_request(client)
-            payload = self._request_raw(
-                "post",
-                "rotor/session/new",
-                request=request,
-                json={
-                    "seeds": [station_id],
-                    "includeTracksInResponse": True,
-                },
+            result = self._radio_client(client).rotor_session_new(
+                [station_id], include_tracks_in_response=True
             )
             return self._map_radio_session(
                 station_id=station_id,
-                payload=payload,
+                result=result,
                 limit=limit,
             )
         except Exception as exc:
@@ -653,57 +646,51 @@ class YandexMusicService(MusicService):
         self,
         session: RadioSession,
         *,
+        queue: Sequence[str],
         limit: int = 25,
     ) -> RadioSession:
         client = self._require_client()
-        if not session.queue_anchor_track_id:
-            raise NetworkError(f"Radio session {session.session_id} has no queue anchor")
         try:
-            payload = self._request_raw(
-                "post",
-                f"rotor/session/{session.session_id}/tracks",
-                request=self._radio_request(client),
-                json={"queue": [session.queue_anchor_track_id]},
+            result = self._radio_client(client).rotor_session_tracks(
+                session.session_id, queue=list(queue)
             )
         except Exception as exc:
             raise self._map_client_error(
                 exc,
                 f"Failed to load radio session tracks for {session.station_id}",
             ) from exc
-        tracks = self._map_radio_sequence_tracks(payload, limit=limit)
-        next_anchor_track_id = tracks[0].id if tracks else session.queue_anchor_track_id
+        if result is None or result.unknown_session:
+            raise NetworkError(f"Radio session {session.session_id} is unavailable")
+        tracks = self._map_radio_sequence_tracks(result.sequence, limit=limit)
         return RadioSession(
             station_id=session.station_id,
             session_id=session.session_id,
-            batch_id=str(payload.get("batchId") or session.batch_id or "") or session.batch_id,
+            batch_id=result.batch_id or session.batch_id,
             feedback_from=session.feedback_from,
-            queue_anchor_track_id=next_anchor_track_id,
             tracks=tracks,
         )
 
-    def _radio_request(self, client: Any) -> Any:
-        request = client.request
+    def _radio_client(self, client: Any) -> Any:
         if not self._ai_content_reduction_enabled:
-            return request
-        request = copy(request)
+            return client
+        radio_client = copy(client)
+        request = copy(client.request)
         request.headers = {
             **getattr(client.request, "headers", {}),
             self._AI_CONTENT_RATE_HEADER: self._AI_CONTENT_REDUCED_VALUE,
         }
-        return request
+        radio_client._request = request
+        return radio_client
 
     def _request_raw(
         self,
         method: str,
         path: str,
-        *,
-        request: Any | None = None,
         **kwargs: Any,
     ) -> Any:
         """Use the SDK transport for endpoints or fields missing from its models."""
         client = self._require_client()
-        transport = request or client.request
-        operation = getattr(transport, method)
+        operation = getattr(client.request, method)
         return operation(f"{client.base_url}/{path.lstrip('/')}", **kwargs)
 
     def report_play_audio(
@@ -849,29 +836,31 @@ class YandexMusicService(MusicService):
         track_id: str | None = None,
         total_played_seconds: float | None = None,
     ) -> None:
-        event: dict[str, object] = {
-            "type": feedback_type.value,
-            "timestamp": self._radio_timestamp(),
-        }
-        if track_id is not None:
-            event["trackId"] = track_id
-        if total_played_seconds is not None:
-            event["totalPlayedSeconds"] = total_played_seconds
+        client = self._require_client()
         try:
-            self._request_raw(
-                "post",
-                f"rotor/session/{session.session_id}/feedback",
-                json={
-                    "event": event,
-                    "batchId": session.batch_id,
-                    "from": session.feedback_from,
-                },
-            )
+            if feedback_type is RadioFeedbackType.RADIO_STARTED:
+                sent = client.rotor_session_feedback_radio_started(
+                    session.session_id, batch_id=session.batch_id, from_=session.feedback_from
+                )
+            elif feedback_type is RadioFeedbackType.TRACK_STARTED:
+                sent = client.rotor_session_feedback_track_started(
+                    session.session_id, track_id, batch_id=session.batch_id
+                )
+            elif feedback_type is RadioFeedbackType.TRACK_FINISHED:
+                sent = client.rotor_session_feedback_track_finished(
+                    session.session_id, track_id, total_played_seconds, batch_id=session.batch_id
+                )
+            else:
+                sent = client.rotor_session_feedback_skip(
+                    session.session_id, track_id, total_played_seconds, batch_id=session.batch_id
+                )
         except Exception as exc:
             raise self._map_client_error(
                 exc,
                 f"Failed to report {feedback_type.value} for {track_id or session.station_id}",
             ) from exc
+        if not sent:
+            raise NetworkError(f"Failed to report {feedback_type.value} for {session.station_id}")
 
     def _serialize_play_event(self, event: PlayEventReport) -> dict[str, object]:
         payload: dict[str, object] = {
@@ -1306,46 +1295,35 @@ class YandexMusicService(MusicService):
         self,
         *,
         station_id: str,
-        payload: Any,
+        result: Any,
         limit: int,
     ) -> RadioSession:
-        if not isinstance(payload, dict):
+        if result is None:
             raise NetworkError("Radio session response is invalid")
-        session_id = payload.get("radioSessionId")
+        session_id = result.radio_session_id
         if not isinstance(session_id, str) or not session_id:
             raise NetworkError("Radio session response has no radioSessionId")
         feedback_from = self._radio_feedback_from(
             station_id=station_id,
-            description_seed=payload.get("descriptionSeed"),
+            description_seed=result.description_seed,
         )
-        tracks = self._map_radio_sequence_tracks(payload, limit=limit)
-        queue_anchor_track_id = tracks[0].id if tracks else None
-        batch_id = payload.get("batchId")
+        tracks = self._map_radio_sequence_tracks(result.sequence, limit=limit)
         return RadioSession(
             station_id=station_id,
             session_id=session_id,
-            batch_id=str(batch_id) if batch_id is not None else None,
+            batch_id=result.batch_id,
             feedback_from=feedback_from,
-            queue_anchor_track_id=queue_anchor_track_id,
             tracks=tracks,
         )
 
     def _map_radio_sequence_tracks(
         self,
-        payload: Any,
+        sequence: Any,
         *,
         limit: int,
     ) -> tuple[Track, ...]:
-        if not isinstance(payload, dict):
-            return ()
-        client = self._require_client()
-        try:
-            from yandex_music.rotor.sequence import Sequence as RotorSequence
-        except ImportError as exc:  # pragma: no cover - runtime dependency
-            raise NetworkError("Radio sequence model is unavailable") from exc
-
         tracks: list[Track] = []
-        for item in RotorSequence.de_list(payload.get("sequence"), client):
+        for item in sequence or ():
             raw_track = getattr(item, "track", None)
             if raw_track is not None:
                 tracks.append(self._map_track(raw_track))
@@ -1359,15 +1337,12 @@ class YandexMusicService(MusicService):
         station_id: str,
         description_seed: Any,
     ) -> str:
-        if isinstance(description_seed, dict):
-            seed_type = description_seed.get("type")
-            seed_tag = description_seed.get("tag")
+        if description_seed is not None:
+            seed_type = getattr(description_seed, "type", None)
+            seed_tag = getattr(description_seed, "tag", None)
             if isinstance(seed_type, str) and seed_type and isinstance(seed_tag, str) and seed_tag:
                 return f"radio-mobile-{seed_type}-{seed_tag}-default"
         return f"radio-mobile-{station_id.replace(':', '-')}-default"
-
-    def _radio_timestamp(self) -> str:
-        return datetime.now().astimezone().isoformat(timespec="microseconds")
 
     def _call_track_mutation(self, operation: Any, track_id: str) -> None:
         try:

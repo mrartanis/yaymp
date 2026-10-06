@@ -84,6 +84,7 @@ class PlaybackService:
     _SCROBBLE_PLAYLIST_LIKES_KIND = "3"
     _STATION_QUEUE_REFILL_THRESHOLD = 3
     _STATION_QUEUE_BATCH_SIZE = 10
+    _STATION_HISTORY_LIMIT = 100
     _STATION_QUEUE_REFILL_MAX_ATTEMPTS = 3
     _STREAM_PREFETCH_AHEAD = 2
     _STATION_QUEUE_RETAIN_BEFORE_ACTIVE = 10
@@ -307,7 +308,6 @@ class PlaybackService:
                 station_batch_id=item.station_batch_id,
                 radio_session_id=item.radio_session_id,
                 radio_origin=item.radio_origin,
-                radio_queue_anchor_track_id=item.radio_queue_anchor_track_id,
             )
             for item in saved_queue.queue
         ]
@@ -446,7 +446,6 @@ class PlaybackService:
                     station_batch_id=radio_session.batch_id,
                     radio_session_id=radio_session.session_id,
                     radio_origin=radio_session.feedback_from,
-                    radio_queue_anchor_track_id=radio_session.queue_anchor_track_id,
                 )
                 for index, track in enumerate(tracks)
             ),
@@ -919,6 +918,7 @@ class PlaybackService:
                 break
             radio_session = self._music_service.get_radio_session_tracks(
                 radio_session,
+                queue=self._radio_session_queue(radio_session.session_id),
                 limit=self._STATION_QUEUE_BATCH_SIZE,
             )
             fetched_tracks = merge_cached_track_preference_states(
@@ -942,7 +942,6 @@ class PlaybackService:
                         station_batch_id=radio_session.batch_id,
                         radio_session_id=radio_session.session_id,
                         radio_origin=radio_session.feedback_from,
-                        radio_queue_anchor_track_id=radio_session.queue_anchor_track_id,
                     )
                 )
                 existing_ids.add(track.id)
@@ -1190,7 +1189,6 @@ class PlaybackService:
         station_batch_id: str | None = None,
         radio_session_id: str | None = None,
         radio_origin: str | None = None,
-        radio_queue_anchor_track_id: str | None = None,
     ) -> QueueItem:
         track = self._hydrate_cached_track_metadata(track)
         return QueueItem(
@@ -1201,7 +1199,6 @@ class PlaybackService:
             station_batch_id=station_batch_id,
             radio_session_id=radio_session_id,
             radio_origin=radio_origin,
-            radio_queue_anchor_track_id=radio_queue_anchor_track_id,
         )
 
     def _hydrate_cached_track_metadata(self, track: Track) -> Track:
@@ -1644,9 +1641,15 @@ class PlaybackService:
             session_id=item.radio_session_id,
             batch_id=item.station_batch_id,
             feedback_from=item.radio_origin,
-            queue_anchor_track_id=item.radio_queue_anchor_track_id,
             tracks=(item.track,),
         )
+
+    def _radio_session_queue(self, session_id: str) -> tuple[str, ...]:
+        return tuple(
+            self._radio_feedback_track_id(item.track)
+            for item in self._queue
+            if item.radio_session_id == session_id
+        )[-self._STATION_HISTORY_LIMIT :]
 
     def _radio_session_for_queue_tail(self) -> RadioSession | None:
         for item in reversed(self._queue):

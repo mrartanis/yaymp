@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from yandex_music import Client
 from yandex_music.exceptions import NotFoundError, UnauthorizedError
 
 from app.domain import (
@@ -260,7 +261,7 @@ class FakeYandexClient:
         self.play_audio_calls: list[dict[str, object]] = []
         self.plays_calls: list[dict[str, object]] = []
         self.station_feedback_calls: list[dict[str, object]] = []
-        self.radio_session_tracks_queue: list[str] = []
+        self.radio_session_tracks_queue: list[list[str]] = []
         self.radio_session_new_calls: list[dict[str, object]] = []
         self.radio_session_new_headers: list[dict[str, str]] = []
         self.radio_session_tracks_headers: list[dict[str, str]] = []
@@ -277,6 +278,7 @@ class FakeYandexClient:
             "futureTopLevelField": {"nested": True},
         }
         self.request = self.FakeRequest(self)
+        self._request = self.request
 
     class FakeRequest:
         def __init__(self, client: "FakeYandexClient") -> None:
@@ -330,8 +332,7 @@ class FakeYandexClient:
                 payload = json if isinstance(json, dict) else data
                 if isinstance(payload, dict):
                     queue = payload.get("queue") or []
-                    if queue:
-                        self._client.radio_session_tracks_queue.append(str(queue[0]))
+                    self._client.radio_session_tracks_queue.append(list(queue))
                 return {
                     "batchId": "batch-2",
                     "sequence": [
@@ -595,6 +596,14 @@ class FakeYandexClient:
     def rotor_station_feedback_skip(self, **kwargs):
         self.station_feedback_calls.append({"type": "skip", **kwargs})
         return True
+
+    rotor_session_new = Client.rotor_session_new
+    rotor_session_tracks = Client.rotor_session_tracks
+    rotor_session_feedback = Client.rotor_session_feedback
+    rotor_session_feedback_radio_started = Client.rotor_session_feedback_radio_started
+    rotor_session_feedback_track_started = Client.rotor_session_feedback_track_started
+    rotor_session_feedback_track_finished = Client.rotor_session_feedback_track_finished
+    rotor_session_feedback_skip = Client.rotor_session_feedback_skip
 
     def tracks_download_info(self, track_id: str, get_direct_links: bool = True):
         del track_id, get_direct_links
@@ -909,7 +918,7 @@ def test_yandex_music_service_adds_ai_content_reduction_header_to_new_session() 
     service.set_ai_content_reduction_enabled(True)
     service.start_radio_session("user:onyourwave")
     session = service.start_radio_session("user:onyourwave")
-    service.get_radio_session_tracks(session)
+    service.get_radio_session_tracks(session, queue=("track-1",))
 
     assert service.get_ai_content_reduction_enabled() is True
     assert client.radio_session_new_headers == [
@@ -982,7 +991,7 @@ def test_yandex_music_service_uses_radio_session_flow() -> None:
     )
 
     session = service.start_radio_session("user:onyourwave")
-    continued = service.get_radio_session_tracks(session)
+    continued = service.get_radio_session_tracks(session, queue=("track-1", "track-2"))
     service.report_radio_session_feedback(session, RadioFeedbackType.RADIO_STARTED)
     service.report_radio_session_feedback(
         session,
@@ -1001,7 +1010,6 @@ def test_yandex_music_service_uses_radio_session_flow() -> None:
         session_id="session-1",
         batch_id="batch-1",
         feedback_from="radio-mobile-user-onyourwave-default",
-        queue_anchor_track_id="track-1",
         tracks=(
             Track(
                 id="track-1",
@@ -1025,39 +1033,15 @@ def test_yandex_music_service_uses_radio_session_flow() -> None:
         {"seeds": ["user:onyourwave"], "includeTracksInResponse": True}
     ]
     assert client.radio_session_new_headers == [{}]
-    assert client.radio_session_tracks_queue == ["track-1"]
-    assert client.station_feedback_calls == [
-        {
-            "type": "session-feedback",
-            "event": {
-                "type": "radioStarted",
-                "timestamp": client.station_feedback_calls[0]["event"]["timestamp"],
-            },
-            "batchId": "batch-1",
-            "from": "radio-mobile-user-onyourwave-default",
-        },
-        {
-            "type": "session-feedback",
-            "event": {
-                "type": "trackStarted",
-                "timestamp": client.station_feedback_calls[1]["event"]["timestamp"],
-                "trackId": "track-1",
-            },
-            "batchId": "batch-1",
-            "from": "radio-mobile-user-onyourwave-default",
-        },
-        {
-            "type": "session-feedback",
-            "event": {
-                "type": "trackFinished",
-                "timestamp": client.station_feedback_calls[2]["event"]["timestamp"],
-                "trackId": "track-1",
-                "totalPlayedSeconds": 180.0,
-            },
-            "batchId": "batch-1",
-            "from": "radio-mobile-user-onyourwave-default",
-        },
+    assert client.radio_session_tracks_queue == [["track-1", "track-2"]]
+    assert [call["event"]["type"] for call in client.station_feedback_calls] == [
+        "radioStarted", "trackStarted", "trackFinished"
     ]
+    assert all(call["batchId"] == "batch-1" for call in client.station_feedback_calls)
+    assert client.station_feedback_calls[0]["from"] == session.feedback_from
+    assert client.station_feedback_calls[1]["event"]["trackId"] == "track-1"
+    assert client.station_feedback_calls[2]["event"]["totalPlayedSeconds"] == 180.0
+    assert all(call["event"]["timestamp"] for call in client.station_feedback_calls)
 
 
 def test_yandex_music_service_selects_stream_by_audio_quality() -> None:

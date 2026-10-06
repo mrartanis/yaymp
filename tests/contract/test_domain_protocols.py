@@ -238,7 +238,6 @@ class FakeMusicService:
             session_id=f"{station_id}-session",
             batch_id=batch.batch_id,
             feedback_from=f"radio-mobile-{station_id.replace(':', '-')}-default",
-            queue_anchor_track_id=batch.tracks[0].id if batch.tracks else None,
             tracks=batch.tracks,
         )
 
@@ -246,22 +245,19 @@ class FakeMusicService:
         self,
         session: RadioSession,
         *,
+        queue: tuple[str, ...],
         limit: int = 25,
     ) -> RadioSession:
         batch = self.get_station_track_batch(
             session.station_id,
             limit=limit,
-            queue_track_id=session.queue_anchor_track_id,
-        )
-        next_anchor_track_id = (
-            batch.tracks[0].id if batch.tracks else session.queue_anchor_track_id
+            queue_track_id=queue[-1] if queue else None,
         )
         return RadioSession(
             station_id=session.station_id,
             session_id=session.session_id,
             batch_id=batch.batch_id,
             feedback_from=session.feedback_from,
-            queue_anchor_track_id=next_anchor_track_id,
             tracks=batch.tracks,
         )
 

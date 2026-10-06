@@ -100,9 +100,9 @@ class SQLitePlaybackStateRepo(PlaybackStateRepo):
                         "artist_ids_json, album_id, album_title, album_year, duration_ms, "
                         "artwork_ref, accent_color, available, is_liked, source_type, "
                         "source_id, source_index, station_batch_id, radio_session_id, "
-                        "radio_origin, radio_queue_anchor_track_id"
+                        "radio_origin"
                         ") values ("
-                        "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?"
+                        "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?"
                         ")"
                     ),
                     [
@@ -254,7 +254,6 @@ class SQLitePlaybackStateRepo(PlaybackStateRepo):
             station_batch_id=payload.get("station_batch_id"),
             radio_session_id=payload.get("radio_session_id"),
             radio_origin=payload.get("radio_origin"),
-            radio_queue_anchor_track_id=payload.get("radio_queue_anchor_track_id"),
         )
 
     def _encode_queue_item_row(self, *, position: int, item: QueueItem) -> tuple[object, ...]:
@@ -280,7 +279,6 @@ class SQLitePlaybackStateRepo(PlaybackStateRepo):
             item.station_batch_id,
             item.radio_session_id,
             item.radio_origin,
-            item.radio_queue_anchor_track_id,
         )
 
     def _decode_queue_item_row(self, row: sqlite3.Row) -> QueueItem:
@@ -313,5 +311,4 @@ class SQLitePlaybackStateRepo(PlaybackStateRepo):
             station_batch_id=row["station_batch_id"],
             radio_session_id=row["radio_session_id"],
             radio_origin=row["radio_origin"],
-            radio_queue_anchor_track_id=row["radio_queue_anchor_track_id"],
         )

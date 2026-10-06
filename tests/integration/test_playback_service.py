@@ -57,6 +57,7 @@ class FakeMusicService:
         self.station_batches: dict[str, list[tuple[Track, ...]]] = {}
         self.station_requests: list[str] = []
         self.station_request_queues: list[str | None] = []
+        self.radio_session_queues: list[tuple[str, ...]] = []
         self.play_audio_reports: list[dict[str, object]] = []
         self.plays_reports: list[dict[str, object]] = []
         self.station_radio_started_reports: list[dict[str, object]] = []
@@ -222,7 +223,6 @@ class FakeMusicService:
             session_id=f"{station_id}-session",
             batch_id=batch.batch_id,
             feedback_from=f"radio-mobile-{station_id.replace(':', '-')}-default",
-            queue_anchor_track_id=batch.tracks[0].id if batch.tracks else None,
             tracks=batch.tracks,
         )
 
@@ -230,22 +230,20 @@ class FakeMusicService:
         self,
         session: RadioSession,
         *,
+        queue: tuple[str, ...],
         limit: int = 25,
     ) -> RadioSession:
         batch = self.get_station_track_batch(
             session.station_id,
             limit=limit,
-            queue_track_id=session.queue_anchor_track_id,
+            queue_track_id=queue[-1] if queue else None,
         )
-        next_anchor_track_id = (
-            batch.tracks[0].id if batch.tracks else session.queue_anchor_track_id
-        )
+        self.radio_session_queues.append(queue)
         return RadioSession(
             station_id=session.station_id,
             session_id=session.session_id,
             batch_id=batch.batch_id,
             feedback_from=session.feedback_from,
-            queue_anchor_track_id=next_anchor_track_id,
             tracks=batch.tracks,
         )
 
@@ -1447,7 +1445,31 @@ def test_station_queue_refills_when_near_end() -> None:
     assert snapshot.current_item.track.id == "w2"
     assert [item.track.id for item in snapshot.queue] == ["w1", "w2", "w3", "w4", "w5"]
     assert music_service.station_requests == ["user:onyourwave", "user:onyourwave"]
-    assert music_service.station_request_queues == [None, "w1"]
+    assert music_service.radio_session_queues == [("w1", "w2", "w3")]
+
+
+def test_radio_session_history_is_bounded_and_uses_album_qualified_ids() -> None:
+    service = PlaybackService(
+        playback_engine=FakePlaybackEngine(),
+        logger=TestLogger(),
+    )
+    service._queue = [
+        QueueItem(
+            track=Track(id=f"w{index}", title="Wave", artists=(), album_id="album-1"),
+            radio_session_id="session-1",
+        )
+        for index in range(105)
+    ]
+    service._queue.append(
+        QueueItem(
+            track=Track(id="other", title="Other", artists=()),
+            radio_session_id="session-2",
+        )
+    )
+
+    assert service._radio_session_queue("session-1") == tuple(
+        f"w{index}:album-1" for index in range(5, 105)
+    )
 
 
 def test_station_skip_reports_feedback_when_user_skips_track() -> None:

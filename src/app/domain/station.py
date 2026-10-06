@@ -34,5 +34,4 @@ class RadioSession:
     session_id: str
     batch_id: str | None
     feedback_from: str
-    queue_anchor_track_id: str | None
     tracks: tuple[Track, ...]

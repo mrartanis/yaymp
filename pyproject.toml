@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "yaymp"
-version = "1.6.0"
+version = "1.6.1"
 description = "Desktop Yandex Music player bootstrap."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -22,7 +22,7 @@ dependencies = [
     "winrt-Windows.Foundation>=3.2.1,<4.0; sys_platform == 'win32'",
     "winrt-Windows.Media>=3.2.1,<4.0; sys_platform == 'win32'",
     "winrt-Windows.Media.Playback>=3.2.1,<4.0; sys_platform == 'win32'",
-    "yandex-music>=3.0,<4.0",
+    "yandex-music>=3.1.0,<4.0",
 ]
 
 [project.optional-dependencies]
