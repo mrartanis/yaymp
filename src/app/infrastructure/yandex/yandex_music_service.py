@@ -58,6 +58,7 @@ class YandexMusicService(MusicService):
         session: AuthSession | None = None,
         token: str | None = None,
         client: Any | None = None,
+        client_factory: Callable[..., Any] | None = None,
         logger: Any | None = None,
     ) -> None:
         effective_session = session
@@ -66,6 +67,7 @@ class YandexMusicService(MusicService):
 
         self._session = effective_session
         self._client = client
+        self._client_factory = client_factory
         self._logger = logger
         self._audio_quality = AudioQuality.HQ
         self._language = "ru"
@@ -84,9 +86,33 @@ class YandexMusicService(MusicService):
         *,
         expires_at: datetime | None = None,
     ) -> AuthSession:
-        self._session = AuthSession(user_id="token-session", token=token, expires_at=expires_at)
+        previous_session = self._session
+        previous_client = self._client
+        same_session = previous_session is not None and previous_session.token == token
+        provisional_session = AuthSession(
+            user_id=previous_session.user_id if same_session else "token-session",
+            token=token,
+            expires_at=(
+                expires_at
+                if expires_at is not None
+                else previous_session.expires_at if same_session else None
+            ),
+            display_name=previous_session.display_name if same_session else None,
+        )
+        self._session = provisional_session
         self._client = None
-        client = self._require_client()
+        try:
+            client = self._require_client()
+        except AuthError:
+            self._session = previous_session
+            self._client = previous_client
+            raise
+        except NetworkError as exc:
+            self._log_sdk_failure(
+                "Yandex account profile is temporarily unavailable; preserving the session",
+                exc,
+            )
+            return provisional_session
 
         try:
             me = client.me
@@ -94,12 +120,16 @@ class YandexMusicService(MusicService):
             user_id = str(getattr(account, "uid", getattr(account, "id", "token-session")))
             display_name = getattr(account, "login", None) or getattr(account, "display_name", None)
         except Exception as exc:
-            raise AuthError("Failed to load Yandex account profile") from exc
+            self._log_sdk_failure(
+                "Yandex account profile is incomplete; preserving the session",
+                exc,
+            )
+            return provisional_session
 
         self._session = AuthSession(
             user_id=user_id,
             token=token,
-            expires_at=expires_at,
+            expires_at=provisional_session.expires_at,
             display_name=display_name,
         )
         return self._session
@@ -1356,20 +1386,29 @@ class YandexMusicService(MusicService):
             raise AuthError("No Yandex Music session is configured")
         if self._client is not None:
             return self._client
-        try:
-            from yandex_music import Client
-        except ImportError as exc:
-            raise AuthError("yandex-music package is not installed") from exc
+        client_factory = self._client_factory
+        if client_factory is None:
+            try:
+                from yandex_music import Client
+            except ImportError as exc:
+                raise AuthError("yandex-music package is not installed") from exc
+            client_factory = Client
 
         try:
-            self._client = Client(
+            client = client_factory(
                 self._session.token,
                 language=self._language,
                 strict=False,
                 on_schema_mismatch=self._handle_schema_mismatch,
             ).init()
         except Exception as exc:
-            raise AuthError("Failed to initialize Yandex Music client") from exc
+            self._log_sdk_failure("Failed to initialize Yandex Music client", exc)
+            mapped_error = self._map_client_error(
+                exc,
+                "Failed to initialize Yandex Music client",
+            )
+            raise mapped_error from exc
+        self._client = client
         return self._client
 
     def _handle_schema_mismatch(self, mismatch: Any) -> None:

@@ -1002,6 +1002,8 @@ class PlaybackService:
     def _schedule_stream_prefetch(self, track: Track) -> None:
         if self._music_service is None:
             return
+        if self._music_service.get_auth_session() is None:
+            return
         if self._has_fresh_stream_ref(track):
             return
         music_service = self._music_service

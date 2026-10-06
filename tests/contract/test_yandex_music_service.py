@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 
 import pytest
 from yandex_music import Client
@@ -740,6 +741,63 @@ def test_yandex_music_service_requires_session_before_use() -> None:
 
     with pytest.raises(AuthError):
         service.get_track("track-1")
+
+
+def test_yandex_music_service_preserves_new_session_when_profile_is_temporarily_unavailable(
+) -> None:
+    class ClientWithUnavailableProfile:
+        def init(self):
+            raise RuntimeError("temporary account status failure")
+
+    service = YandexMusicService(
+        client_factory=lambda *args, **kwargs: ClientWithUnavailableProfile()
+    )
+
+    session = service.build_auth_session("new-token")
+
+    assert session == AuthSession(user_id="token-session", token="new-token")
+    assert service.get_auth_session() == session
+
+
+def test_yandex_music_service_preserves_restored_profile_metadata_during_network_failure(
+) -> None:
+    class ClientWithUnavailableProfile:
+        def init(self):
+            raise RuntimeError("temporary account status failure")
+
+    expires_at = datetime(2026, 10, 7, tzinfo=UTC)
+    restored = AuthSession(
+        user_id="user-1",
+        token="saved-token",
+        expires_at=expires_at,
+        display_name="Listener",
+    )
+    service = YandexMusicService(
+        session=restored,
+        client_factory=lambda *args, **kwargs: ClientWithUnavailableProfile(),
+    )
+
+    session = service.build_auth_session("saved-token")
+
+    assert session == restored
+    assert service.get_auth_session() == restored
+
+
+def test_yandex_music_service_rolls_back_session_after_explicit_unauthorized_response() -> None:
+    class UnauthorizedClient:
+        def init(self):
+            raise UnauthorizedError("invalid token")
+
+    restored = AuthSession(user_id="user-1", token="saved-token")
+    service = YandexMusicService(
+        session=restored,
+        client_factory=lambda *args, **kwargs: UnauthorizedClient(),
+    )
+
+    with pytest.raises(AuthError):
+        service.build_auth_session("invalid-token")
+
+    assert service.get_auth_session() == restored
 
 
 def test_yandex_music_service_maps_track_and_playlist_data() -> None:
