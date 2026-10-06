@@ -29,6 +29,7 @@ from app.domain import (
     WaveSettings,
 )
 from app.domain.errors import AuthError, NetworkError, StreamResolveError, TrackUnavailableError
+from app.infrastructure.yandex.compat import apply_optional_user_login_backport
 
 try:
     from yandex_music.exceptions import (
@@ -1240,6 +1241,7 @@ class YandexMusicService(MusicService):
             raise AuthError("yandex-music package is not installed") from exc
 
         try:
+            apply_optional_user_login_backport()
             self._client = Client(self._session.token, language=self._language).init()
         except Exception as exc:
             raise AuthError("Failed to initialize Yandex Music client") from exc
