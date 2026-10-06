@@ -650,8 +650,9 @@ class YandexMusicService(MusicService):
         limit: int = 25,
     ) -> RadioSession:
         client = self._require_client()
+        radio_client = self._radio_client(client)
         try:
-            result = self._radio_client(client).rotor_session_tracks(
+            result = radio_client.rotor_session_tracks(
                 session.session_id, queue=list(queue)
             )
         except Exception as exc:
@@ -659,8 +660,15 @@ class YandexMusicService(MusicService):
                 exc,
                 f"Failed to load radio session tracks for {session.station_id}",
             ) from exc
-        if result is None or result.unknown_session:
+        if result is None:
             raise NetworkError(f"Radio session {session.session_id} is unavailable")
+        if result.unknown_session:
+            return self._recover_radio_session(
+                radio_client,
+                session=session,
+                queue=queue,
+                limit=limit,
+            )
         tracks = self._map_radio_sequence_tracks(result.sequence, limit=limit)
         return RadioSession(
             station_id=session.station_id,
@@ -668,6 +676,42 @@ class YandexMusicService(MusicService):
             batch_id=result.batch_id or session.batch_id,
             feedback_from=session.feedback_from,
             tracks=tracks,
+        )
+
+    def _recover_radio_session(
+        self,
+        radio_client: Any,
+        *,
+        session: RadioSession,
+        queue: Sequence[str],
+        limit: int,
+    ) -> RadioSession:
+        try:
+            result = radio_client.rotor_session_clone(
+                session.session_id,
+                queue=list(queue),
+                include_tracks_in_response=True,
+            )
+        except Exception:
+            result = None
+
+        if result is None:
+            try:
+                result = radio_client.rotor_session_new(
+                    [session.station_id],
+                    queue=list(queue),
+                    include_tracks_in_response=True,
+                )
+            except Exception as exc:
+                raise self._map_client_error(
+                    exc,
+                    f"Failed to recover radio session for {session.station_id}",
+                ) from exc
+
+        return self._map_radio_session(
+            station_id=session.station_id,
+            result=result,
+            limit=limit,
         )
 
     def _radio_client(self, client: Any) -> Any:

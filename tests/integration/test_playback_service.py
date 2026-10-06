@@ -1456,6 +1456,8 @@ def test_radio_session_history_is_bounded_and_uses_album_qualified_ids() -> None
     service._queue = [
         QueueItem(
             track=Track(id=f"w{index}", title="Wave", artists=(), album_id="album-1"),
+            source_type="station",
+            source_id="user:onyourwave",
             radio_session_id="session-1",
         )
         for index in range(105)
@@ -1463,11 +1465,13 @@ def test_radio_session_history_is_bounded_and_uses_album_qualified_ids() -> None
     service._queue.append(
         QueueItem(
             track=Track(id="other", title="Other", artists=()),
+            source_type="station",
+            source_id="genre:rock",
             radio_session_id="session-2",
         )
     )
 
-    assert service._radio_session_queue("session-1") == tuple(
+    assert service._radio_station_queue("user:onyourwave") == tuple(
         f"w{index}:album-1" for index in range(5, 105)
     )
 

@@ -918,7 +918,7 @@ class PlaybackService:
                 break
             radio_session = self._music_service.get_radio_session_tracks(
                 radio_session,
-                queue=self._radio_session_queue(radio_session.session_id),
+                queue=self._radio_station_queue(radio_session.station_id),
                 limit=self._STATION_QUEUE_BATCH_SIZE,
             )
             fetched_tracks = merge_cached_track_preference_states(
@@ -1644,11 +1644,11 @@ class PlaybackService:
             tracks=(item.track,),
         )
 
-    def _radio_session_queue(self, session_id: str) -> tuple[str, ...]:
+    def _radio_station_queue(self, station_id: str) -> tuple[str, ...]:
         return tuple(
             self._radio_feedback_track_id(item.track)
             for item in self._queue
-            if item.radio_session_id == session_id
+            if item.source_type == "station" and item.source_id == station_id
         )[-self._STATION_HISTORY_LIMIT :]
 
     def _radio_session_for_queue_tail(self) -> RadioSession | None:

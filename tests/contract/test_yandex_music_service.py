@@ -265,6 +265,9 @@ class FakeYandexClient:
         self.radio_session_new_calls: list[dict[str, object]] = []
         self.radio_session_new_headers: list[dict[str, str]] = []
         self.radio_session_tracks_headers: list[dict[str, str]] = []
+        self.radio_session_clone_calls: list[dict[str, object]] = []
+        self.radio_session_tracks_unknown = False
+        self.radio_session_clone_unavailable = False
         self.ai_content_reduction_enabled = False
         self.account_setting_writes: list[dict[str, object]] = []
         self.credits_payload = {
@@ -317,11 +320,13 @@ class FakeYandexClient:
                     "aiContentReductionEnabled": self._client.ai_content_reduction_enabled
                 }
             if url.endswith("/rotor/session/new"):
-                self._client.radio_session_new_calls.append(json or data or {})
+                payload = json or data or {}
+                self._client.radio_session_new_calls.append(payload)
                 self._client.radio_session_new_headers.append(dict(self.headers))
+                restarted = bool(payload.get("queue"))
                 return {
-                    "radioSessionId": "session-1",
-                    "batchId": "batch-1",
+                    "radioSessionId": "session-3" if restarted else "session-1",
+                    "batchId": "batch-restarted" if restarted else "batch-1",
                     "descriptionSeed": {"type": "user", "tag": "onyourwave"},
                     "sequence": [
                         {"type": "track", "liked": False, "track": self._track_payload()}
@@ -333,8 +338,23 @@ class FakeYandexClient:
                 if isinstance(payload, dict):
                     queue = payload.get("queue") or []
                     self._client.radio_session_tracks_queue.append(list(queue))
+                if self._client.radio_session_tracks_unknown:
+                    return {"unknownSession": True, "sequence": []}
                 return {
                     "batchId": "batch-2",
+                    "sequence": [
+                        {"type": "track", "liked": False, "track": self._track_payload()}
+                    ],
+                }
+            if url.endswith("/rotor/session/session-1/clone"):
+                payload = json if isinstance(json, dict) else data
+                self._client.radio_session_clone_calls.append(payload or {})
+                if self._client.radio_session_clone_unavailable:
+                    return None
+                return {
+                    "radioSessionId": "session-2",
+                    "batchId": "batch-recovered",
+                    "descriptionSeed": {"type": "user", "tag": "onyourwave"},
                     "sequence": [
                         {"type": "track", "liked": False, "track": self._track_payload()}
                     ],
@@ -598,6 +618,7 @@ class FakeYandexClient:
         return True
 
     rotor_session_new = Client.rotor_session_new
+    rotor_session_clone = Client.rotor_session_clone
     rotor_session_tracks = Client.rotor_session_tracks
     rotor_session_feedback = Client.rotor_session_feedback
     rotor_session_feedback_radio_started = Client.rotor_session_feedback_radio_started
@@ -1042,6 +1063,51 @@ def test_yandex_music_service_uses_radio_session_flow() -> None:
     assert client.station_feedback_calls[1]["event"]["trackId"] == "track-1"
     assert client.station_feedback_calls[2]["event"]["totalPlayedSeconds"] == 180.0
     assert all(call["event"]["timestamp"] for call in client.station_feedback_calls)
+
+
+def test_yandex_music_service_clones_unknown_radio_session_with_history() -> None:
+    client = FakeYandexClient()
+    client.radio_session_tracks_unknown = True
+    service = YandexMusicService(
+        session=AuthSession(user_id="user-1", token="token"),
+        client=client,
+    )
+    session = service.start_radio_session("user:onyourwave")
+
+    recovered = service.get_radio_session_tracks(
+        session,
+        queue=("track-1:album-1", "track-2:album-2"),
+    )
+
+    assert recovered.session_id == "session-2"
+    assert recovered.batch_id == "batch-recovered"
+    assert client.radio_session_clone_calls == [
+        {
+            "queue": ["track-1:album-1", "track-2:album-2"],
+            "includeTracksInResponse": True,
+        }
+    ]
+
+
+def test_yandex_music_service_starts_fresh_session_when_clone_is_unavailable() -> None:
+    client = FakeYandexClient()
+    client.radio_session_tracks_unknown = True
+    client.radio_session_clone_unavailable = True
+    service = YandexMusicService(
+        session=AuthSession(user_id="user-1", token="token"),
+        client=client,
+    )
+    session = service.start_radio_session("user:onyourwave")
+
+    recovered = service.get_radio_session_tracks(session, queue=("track-1:album-1",))
+
+    assert recovered.session_id == "session-3"
+    assert recovered.batch_id == "batch-restarted"
+    assert client.radio_session_new_calls[-1] == {
+        "seeds": ["user:onyourwave"],
+        "queue": ["track-1:album-1"],
+        "includeTracksInResponse": True,
+    }
 
 
 def test_yandex_music_service_selects_stream_by_audio_quality() -> None:
