@@ -58,6 +58,7 @@ class FakeMusicService:
         self.station_requests: list[str] = []
         self.station_request_queues: list[str | None] = []
         self.radio_session_queues: list[tuple[str, ...]] = []
+        self.radio_session_seed_requests: list[tuple[str, ...]] = []
         self.play_audio_reports: list[dict[str, object]] = []
         self.plays_reports: list[dict[str, object]] = []
         self.station_radio_started_reports: list[dict[str, object]] = []
@@ -218,6 +219,7 @@ class FakeMusicService:
         seeds: tuple[str, ...] = (),
         limit: int = 25,
     ) -> RadioSession:
+        self.radio_session_seed_requests.append(seeds or (station_id,))
         batch = self.get_station_track_batch(station_id, limit=limit)
         return RadioSession(
             station_id=station_id,
@@ -1449,6 +1451,38 @@ def test_station_queue_refills_when_near_end() -> None:
     assert [item.track.id for item in snapshot.queue] == ["w1", "w2", "w3", "w4", "w5"]
     assert music_service.station_requests == ["user:onyourwave", "user:onyourwave"]
     assert music_service.radio_session_queues == [("w1", "w2", "w3")]
+
+
+def test_configured_wave_seeds_reach_session_refill_and_persisted_queue() -> None:
+    seeds = ("activity:work", "settingDiversity:discover")
+    music_service = FakeMusicService(stream_ref="resolved://wave")
+    music_service.station_batches["user:onyourwave"] = [
+        (
+            Track(id="w1", title="Wave 1", artists=("Artist",), duration_ms=1_000),
+            Track(id="w2", title="Wave 2", artists=("Artist",), duration_ms=1_000),
+            Track(id="w3", title="Wave 3", artists=("Artist",), duration_ms=1_000),
+        ),
+        (
+            Track(id="w4", title="Wave 4", artists=("Artist",), duration_ms=1_000),
+            Track(id="w5", title="Wave 5", artists=("Artist",), duration_ms=1_000),
+        ),
+    ]
+    state_repo = InMemoryPlaybackStateRepo()
+    service = PlaybackService(
+        playback_engine=FakePlaybackEngine(),
+        logger=TestLogger(),
+        music_service=music_service,
+        playback_state_repo=state_repo,
+    )
+
+    service.play_station("user:onyourwave", seeds=seeds)
+    snapshot = service.next()
+
+    assert music_service.radio_session_seed_requests == [seeds]
+    assert music_service.radio_session_queues == [("w1", "w2", "w3")]
+    assert {item.radio_seeds for item in snapshot.queue} == {seeds}
+    assert state_repo.saved_queue is not None
+    assert {item.radio_seeds for item in state_repo.saved_queue.queue} == {seeds}
 
 
 def test_radio_session_history_is_bounded_and_uses_album_qualified_ids() -> None:

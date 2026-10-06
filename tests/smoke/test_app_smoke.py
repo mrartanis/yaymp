@@ -1,12 +1,21 @@
 from dataclasses import replace
 from datetime import UTC, datetime
 
-from PySide6.QtCore import QEvent, QObject
+from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtWidgets import QMenu
 
 from app.application.playback_service import PlaybackSnapshot
 from app.bootstrap.startup import build_startup_context
-from app.domain import PlaybackState, PlaybackStatus, QueueItem, Track, TrackAiUsage
+from app.domain import (
+    PlaybackState,
+    PlaybackStatus,
+    QueueItem,
+    Track,
+    TrackAiUsage,
+    WaveOption,
+    WaveSetting,
+    WaveSettings,
+)
 from app.presentation.qt.dialog_chrome import WindowTitleBar
 
 
@@ -142,3 +151,60 @@ def test_position_poll_does_not_repaint_transport(qtbot, qapp, tmp_path, monkeyp
     monkeypatch.setattr(window, "_accent_text_color", lambda: "#123456")
     window._render_play_pause_button(PlaybackStatus.PLAYING)
     assert window._play_pause_button.icon().cacheKey() != before
+
+
+def test_my_wave_configuration_reaches_playback_controller(
+    qtbot,
+    qapp,
+    tmp_path,
+    monkeypatch,
+) -> None:
+    for name in ("CONFIG", "DATA", "CACHE", "LOG"):
+        monkeypatch.setenv(f"YAYMP_{name}_DIR", str(tmp_path / name.lower()))
+    monkeypatch.setenv("YAYMP_PLAYBACK_BACKEND", "fake")
+    context = build_startup_context(argv=["yaymp-test"], existing_qt_app=qapp)
+    window = context.main_window
+    qtbot.addWidget(window)
+    window._playback_poll_timer.stop()
+    window._set_language_preference("en")
+
+    settings = WaveSettings(
+        stations=(
+            WaveOption("user:onyourwave", "My Wave", unspecified=True),
+            WaveOption("activity:work", "Work"),
+        ),
+        settings=(
+            WaveSetting(
+                id="diversity",
+                title="Diversity",
+                options=(
+                    WaveOption("settingDiversity:any", "Any", unspecified=True),
+                    WaveOption("settingDiversity:discover", "Discover"),
+                ),
+            ),
+        ),
+        selected_seeds=("user:onyourwave", "settingDiversity:any"),
+    )
+    window._apply_wave_settings(settings)
+    popup = window._wave_settings_popup
+    popup.set_settings(settings)
+    popup._station_combo.setCurrentIndex(
+        popup._station_combo.findData("activity:work")
+    )
+    popup._setting_combos[0].setCurrentIndex(
+        popup._setting_combos[0].findData("settingDiversity:discover")
+    )
+    requested: list[tuple[str, tuple[str, ...]]] = []
+    monkeypatch.setattr(
+        window._controller,
+        "play_station",
+        lambda station_id, *, seeds=(): requested.append((station_id, seeds)),
+    )
+    popup.show()
+
+    qtbot.mouseClick(popup._play_button, Qt.MouseButton.LeftButton)
+
+    expected_seeds = ("activity:work", "settingDiversity:discover")
+    assert requested == [("user:onyourwave", expected_seeds)]
+    assert context.container.services.settings_service.load_my_wave_seeds() == expected_seeds
+    assert window._my_wave_top_button.text() == "My Wave · Work · Discover"
