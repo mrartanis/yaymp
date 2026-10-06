@@ -37,9 +37,18 @@ def test_normalize_and_resolve_language_preference() -> None:
 
 def test_ui_text_catalog_formats_translated_strings() -> None:
     catalog = UiTextCatalog(settings_service=StubSettingsService("ru"))
+    english_catalog = UiTextCatalog(settings_service=StubSettingsService("en"))
 
     assert catalog.text("action.search") == "Поиск"
     assert catalog.text("status.authenticated_as", username="alice") == "Вошли как alice"
+    assert catalog.text("wave.settings.configure") == "Настроить Мою волну"
+    assert catalog.text("wave.settings.button_summary", summary="Работа") == (
+        "Моя волна · Работа"
+    )
+    assert english_catalog.text("wave.settings.configure") == "Configure My Wave"
+    assert english_catalog.text("wave.settings.button_summary", summary="Work") == (
+        "My Wave · Work"
+    )
 
 
 def test_catalog_resolves_system_language_once_and_tracks_preference_changes(monkeypatch):

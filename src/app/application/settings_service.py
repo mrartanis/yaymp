@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from threading import Lock
 
 from app.domain import AudioQuality, Logger, SettingsRepo
@@ -15,6 +16,7 @@ class SettingsService:
     _CORNER_STYLE_KEY = "corner_style"
     _LANGUAGE_KEY = "language"
     _MY_WAVE_HISTORY_KEY = "my_wave_history"
+    _MY_WAVE_SEEDS_KEY = "my_wave_seeds"
     _WAVEFORM_PROGRESS_KEY = "waveform_progress"
     _BROWSER_VIEW_MODE_KEY = "browser_view_mode"
     _AI_CONTENT_REDUCTION_KEY = "ai_content_reduction_enabled"
@@ -124,6 +126,17 @@ class SettingsService:
             if len(value) == 7 and value.startswith("#"):
                 normalized.append(value.lower())
         self._save_value(self._MY_WAVE_HISTORY_KEY, normalized)
+
+    def load_my_wave_seeds(self, *, default: tuple[str, ...] = ()) -> tuple[str, ...]:
+        value = self._load_value(self._MY_WAVE_SEEDS_KEY)
+        if not isinstance(value, list):
+            return default
+        seeds = tuple(entry.strip() for entry in value if isinstance(entry, str) and entry.strip())
+        return seeds or default
+
+    def save_my_wave_seeds(self, seeds: Sequence[str]) -> None:
+        normalized = [seed.strip() for seed in seeds if isinstance(seed, str) and seed.strip()]
+        self._save_value(self._MY_WAVE_SEEDS_KEY, normalized)
 
     def load_waveform_progress_enabled(self, *, default: bool = False) -> bool:
         value = self._load_value(self._WAVEFORM_PROGRESS_KEY)

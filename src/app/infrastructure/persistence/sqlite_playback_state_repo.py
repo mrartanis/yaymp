@@ -100,9 +100,9 @@ class SQLitePlaybackStateRepo(PlaybackStateRepo):
                         "artist_ids_json, album_id, album_title, album_year, duration_ms, "
                         "artwork_ref, accent_color, available, is_liked, source_type, "
                         "source_id, source_index, station_batch_id, radio_session_id, "
-                        "radio_origin"
+                        "radio_origin, radio_seeds_json"
                         ") values ("
-                        "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?"
+                        "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?"
                         ")"
                     ),
                     [
@@ -165,6 +165,7 @@ class SQLitePlaybackStateRepo(PlaybackStateRepo):
                         station_batch_id text,
                         radio_session_id text,
                         radio_origin text,
+                        radio_seeds_json text not null default '[]',
                         radio_queue_anchor_track_id text,
                         primary key (queue_id, position),
                         foreign key(queue_id) references playback_queue(id) on delete cascade
@@ -176,6 +177,12 @@ class SQLitePlaybackStateRepo(PlaybackStateRepo):
                     table="playback_queue",
                     column="position_ms",
                     definition="integer not null default 0",
+                )
+                self._ensure_column(
+                    connection,
+                    table="playback_queue_items",
+                    column="radio_seeds_json",
+                    definition="text not null default '[]'",
                 )
         except (OSError, sqlite3.Error) as exc:
             raise StorageError("Failed to initialize playback state database") from exc
@@ -254,6 +261,7 @@ class SQLitePlaybackStateRepo(PlaybackStateRepo):
             station_batch_id=payload.get("station_batch_id"),
             radio_session_id=payload.get("radio_session_id"),
             radio_origin=payload.get("radio_origin"),
+            radio_seeds=tuple(str(seed) for seed in payload.get("radio_seeds", ())),
         )
 
     def _encode_queue_item_row(self, *, position: int, item: QueueItem) -> tuple[object, ...]:
@@ -279,15 +287,19 @@ class SQLitePlaybackStateRepo(PlaybackStateRepo):
             item.station_batch_id,
             item.radio_session_id,
             item.radio_origin,
+            json.dumps(list(item.radio_seeds), ensure_ascii=True),
         )
 
     def _decode_queue_item_row(self, row: sqlite3.Row) -> QueueItem:
         artists = json.loads(row["artists_json"])
         artist_ids = json.loads(row["artist_ids_json"] or "[]")
+        radio_seeds = json.loads(row["radio_seeds_json"] or "[]")
         if not isinstance(artists, list):
             raise TypeError("artists_json must be a list")
         if not isinstance(artist_ids, list):
             raise TypeError("artist_ids_json must be a list")
+        if not isinstance(radio_seeds, list):
+            raise TypeError("radio_seeds_json must be a list")
         return QueueItem(
             track=Track(
                 id=str(row["track_id"]),
@@ -311,4 +323,5 @@ class SQLitePlaybackStateRepo(PlaybackStateRepo):
             station_batch_id=row["station_batch_id"],
             radio_session_id=row["radio_session_id"],
             radio_origin=row["radio_origin"],
+            radio_seeds=tuple(str(seed) for seed in radio_seeds),
         )

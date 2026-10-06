@@ -19,6 +19,7 @@ from app.domain.station import (
     RadioSession,
     Station,
     StationTrackBatch,
+    WaveSettings,
 )
 from app.domain.track import (
     DislikedTrackIds,
@@ -140,6 +141,10 @@ class MusicService(Protocol):
 
     def get_stations(self) -> Sequence[Station]: ...
 
+    def get_wave_settings(self) -> WaveSettings: ...
+
+    def reset_last_wave(self) -> None: ...
+
     def get_station_tracks(self, station_id: str, *, limit: int = 25) -> Sequence[Track]: ...
 
     def get_station_track_batch(
@@ -154,6 +159,7 @@ class MusicService(Protocol):
         self,
         station_id: str,
         *,
+        seeds: Sequence[str] = (),
         limit: int = 25,
     ) -> RadioSession: ...
 

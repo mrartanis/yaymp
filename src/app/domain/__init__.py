@@ -41,7 +41,15 @@ from app.domain.protocols import (
     PlaybackStateRepo,
     SettingsRepo,
 )
-from app.domain.station import RadioFeedbackType, RadioSession, Station, StationTrackBatch
+from app.domain.station import (
+    RadioFeedbackType,
+    RadioSession,
+    Station,
+    StationTrackBatch,
+    WaveOption,
+    WaveSetting,
+    WaveSettings,
+)
 from app.domain.track import (
     DislikedTrackIds,
     LikedTrackIds,
@@ -99,4 +107,7 @@ __all__ = [
     "TrackCredits",
     "TrackUnavailableError",
     "WaveformState",
+    "WaveOption",
+    "WaveSetting",
+    "WaveSettings",
 ]

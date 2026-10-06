@@ -30,6 +30,7 @@ def test_sqlite_playback_state_repo_round_trips_queue(tmp_path) -> None:
             station_batch_id="batch-1",
             radio_session_id="session-1",
             radio_origin="radio-mobile-user-onyourwave-default",
+            radio_seeds=("activity:work", "settingDiversity:discover"),
         ),
     )
 
@@ -56,6 +57,7 @@ def test_sqlite_playback_state_repo_round_trips_queue(tmp_path) -> None:
                 station_batch_id="batch-1",
                 radio_session_id="session-1",
                 radio_origin="radio-mobile-user-onyourwave-default",
+                radio_seeds=("activity:work", "settingDiversity:discover"),
             ),
         ),
         active_index=0,

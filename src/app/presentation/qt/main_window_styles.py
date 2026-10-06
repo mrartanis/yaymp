@@ -258,7 +258,7 @@ def build_main_window_stylesheet(
                 background: {palette.queue_separator};
                 border: 0;
             }}
-            QFrame#settings-popup, QFrame#volume-popup {{
+            QFrame#settings-popup, QFrame#volume-popup, QFrame#wave-settings-popup {{
                 background: {palette.popup_bg};
                 border: 0;
                 border-radius: {settings_popup_radius}px;
@@ -266,6 +266,18 @@ def build_main_window_stylesheet(
             QFrame#settings-popup {{
                 border: 1px solid {accent};
                 border-radius: {settings_popup_radius}px;
+            }}
+            QFrame#wave-settings-popup {{
+                border: 1px solid {accent};
+                border-radius: {settings_popup_radius}px;
+            }}
+            QLabel#wave-settings-title {{
+                color: {palette.text_title};
+                font-size: 15px;
+                font-weight: 750;
+            }}
+            QLabel#wave-settings-status, QLabel#wave-settings-description {{
+                color: {palette.text_secondary};
             }}
             QFrame#volume-popup {{
                 border: 1px solid {accent};
@@ -332,7 +344,8 @@ def build_main_window_stylesheet(
             }}
             QPushButton#window-control-button,
             QPushButton#window-close-button,
-            QPushButton#settings-toggle-button {{
+            QPushButton#settings-toggle-button,
+            QPushButton#wave-settings-button {{
                 background: transparent;
                 border: 0;
                 border-radius: {button_radius}px;

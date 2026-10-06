@@ -134,6 +134,11 @@ class MainWindowLayoutMixin:
         self._my_wave_top_button = MyWaveButton(self._t("nav.my_wave"))
         self._my_wave_top_button.setObjectName("my-wave-button")
         self._my_wave_top_button.setFixedHeight(28)
+        self._my_wave_settings_button = QPushButton()
+        self._my_wave_settings_button.setObjectName("wave-settings-button")
+        self._my_wave_settings_button.setToolTip(self._t("wave.settings.configure"))
+        self._my_wave_settings_button.setAccessibleName(self._t("wave.settings.configure"))
+        self._my_wave_settings_button.setFixedSize(28, 28)
         self._auth_label = self._panel_label(self._t("label.login_required"), align_right=True)
         self._auth_label.setObjectName("auth-label")
         self._auth_label.setFixedHeight(28)
@@ -158,6 +163,7 @@ class MainWindowLayoutMixin:
         top_row.setContentsMargins(0, 0, 0, 0)
         top_row.addWidget(self._sidebar_toggle_button)
         top_row.addWidget(self._my_wave_top_button)
+        top_row.addWidget(self._my_wave_settings_button)
         top_row.addStretch(1)
         top_row.addWidget(self._auth_label, 0, Qt.AlignmentFlag.AlignVCenter)
         top_row.addWidget(self._settings_button, 0, Qt.AlignmentFlag.AlignVCenter)
@@ -271,6 +277,9 @@ class MainWindowLayoutMixin:
         layout.addWidget(self._player_body_widget, 1)
         self._build_settings_popup()
         self._build_volume_popup()
+        build_wave_settings_popup = getattr(self, "_build_wave_settings_popup", None)
+        if callable(build_wave_settings_popup):
+            build_wave_settings_popup()
         self._track_label_base_sizes = {
             self._track_title_label: 28,
             self._track_version_label: 12,

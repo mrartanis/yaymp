@@ -44,6 +44,7 @@ from app.presentation.qt.main_window_queue_view import (
     QueueListView,
     QueueRowDelegate,
 )
+from app.presentation.qt.main_window_wave import MainWindowWaveMixin
 from app.presentation.qt.main_window_windowing import MainWindowWindowingMixin
 from app.presentation.qt.music_metadata_controller import MusicMetadataController
 from app.presentation.qt.playback_controller import PlaybackController
@@ -61,6 +62,7 @@ class MainWindow(
     MainWindowLibraryMixin,
     MainWindowLayoutMixin,
     MainWindowPreferencesMixin,
+    MainWindowWaveMixin,
     QMainWindow,
 ):
     _RESIZE_MARGIN = 8
@@ -105,6 +107,8 @@ class MainWindow(
         self._artwork_prepare_task_id: int | None = None
         self._library_task_runner.completed.connect(self._handle_artwork_prepared)
         self._library_task_runner.failed.connect(self._handle_artwork_preparation_failed)
+        self._library_task_runner.completed.connect(self._handle_wave_task_completed)
+        self._library_task_runner.failed.connect(self._handle_wave_task_failed)
         self._library_controller = LibraryController(
             search_service=container.services.search_service,
             library_service=container.services.library_service,
@@ -158,6 +162,15 @@ class MainWindow(
         self._browser_auto_open_enabled = False
         self._browser_dialog: QDialog | None = None
         self._settings_popup: QFrame | None = None
+        self._wave_settings_popup = None
+        self._wave_settings = None
+        self._wave_settings_task_id: int | None = None
+        self._wave_reset_task_id: int | None = None
+        self._wave_selected_seeds = (
+            container.services.settings_service.load_my_wave_seeds(
+                default=(self._MY_WAVE_STATION_ID,)
+            )
+        )
         self._theme_buttons: dict[str, QPushButton] = {}
         self._ai_content_reduction_buttons: dict[bool, QPushButton] = {}
         self._ai_content_reduction_save_pending = False
@@ -232,6 +245,7 @@ class MainWindow(
         self._render_auth_state()
         self._playback_poll_timer.start()
         self._start_ai_content_reduction_sync()
+        self._request_wave_settings()
 
     def _build_ui(self) -> None:
         root = QWidget(self)
@@ -566,6 +580,7 @@ class MainWindow(
         self._playlists_nav_button.clicked.connect(self._library_controller.load_playlists)
         self._popup_playlists_nav_button.clicked.connect(self._library_controller.load_playlists)
         self._my_wave_top_button.clicked.connect(self._start_my_wave)
+        self._my_wave_settings_button.clicked.connect(self._show_wave_settings_popup)
         self._settings_button.clicked.connect(self._show_settings_popup)
         self._like_track_button.clicked.connect(self._toggle_current_track_like)
         self._dislike_track_button.clicked.connect(self._toggle_current_track_dislike)
@@ -683,7 +698,10 @@ class MainWindow(
 
     def _start_my_wave(self) -> None:
         self._my_wave_pending = True
-        self._controller.play_station(self._MY_WAVE_STATION_ID)
+        self._controller.play_station(
+            self._MY_WAVE_STATION_ID,
+            seeds=self._wave_selected_seeds,
+        )
 
 
     def _restore_my_wave_history(self) -> None:
@@ -748,7 +766,9 @@ class MainWindow(
         self._next_button.setToolTip(self._t("action.next"))
         self._next_button.setAccessibleName(self._t("action.next"))
         self._sidebar_toggle_button.setToolTip(self._t("action.toggle_navigation"))
-        self._my_wave_top_button.setText(self._t("nav.my_wave"))
+        self._refresh_wave_button_text()
+        self._my_wave_settings_button.setToolTip(self._t("wave.settings.configure"))
+        self._my_wave_settings_button.setAccessibleName(self._t("wave.settings.configure"))
         self._settings_button.setToolTip(self._t("action.settings"))
         self._settings_button.setAccessibleName(self._t("action.settings"))
         self._volume_button.setToolTip(self._t("action.volume"))

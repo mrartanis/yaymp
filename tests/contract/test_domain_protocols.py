@@ -34,6 +34,8 @@ from app.domain import (
     StationTrackBatch,
     Track,
     TrackCredits,
+    WaveOption,
+    WaveSettings,
 )
 
 
@@ -209,6 +211,16 @@ class FakeMusicService:
     def get_stations(self) -> Sequence[Station]:
         return [Station(id="user:onyourwave", title="My Wave")]
 
+    def get_wave_settings(self) -> WaveSettings:
+        return WaveSettings(
+            stations=(WaveOption(seed="user:onyourwave", title="My Wave"),),
+            settings=(),
+            selected_seeds=("user:onyourwave",),
+        )
+
+    def reset_last_wave(self) -> None:
+        pass
+
     def get_station_tracks(self, station_id: str, *, limit: int = 25) -> Sequence[Track]:
         return [Track(id=f"{station_id}-{limit}", title="Wave Track", artists=("Artist",))]
 
@@ -230,6 +242,7 @@ class FakeMusicService:
         self,
         station_id: str,
         *,
+        seeds: Sequence[str] = (),
         limit: int = 25,
     ) -> RadioSession:
         batch = self.get_station_track_batch(station_id, limit=limit)
@@ -239,6 +252,7 @@ class FakeMusicService:
             batch_id=batch.batch_id,
             feedback_from=f"radio-mobile-{station_id.replace(':', '-')}-default",
             tracks=batch.tracks,
+            seeds=tuple(seeds) or (station_id,),
         )
 
     def get_radio_session_tracks(

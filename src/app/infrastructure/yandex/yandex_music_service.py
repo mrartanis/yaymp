@@ -24,6 +24,9 @@ from app.domain import (
     Track,
     TrackCredit,
     TrackCredits,
+    WaveOption,
+    WaveSetting,
+    WaveSettings,
 )
 from app.domain.errors import AuthError, NetworkError, StreamResolveError, TrackUnavailableError
 
@@ -588,6 +591,113 @@ class YandexMusicService(MusicService):
             self._map_station(item) for item in raw_stations if getattr(item, "station", None)
         )
 
+    def get_wave_settings(self) -> WaveSettings:
+        client = self._require_client()
+        try:
+            raw_settings = client.rotor_wave_settings()
+            last_wave = client.rotor_wave_last()
+        except Exception as exc:
+            raise self._map_client_error(exc, "Failed to load My Wave settings") from exc
+        if raw_settings is None:
+            raise NetworkError("Yandex Music returned no My Wave settings")
+
+        default_station = getattr(raw_settings, "default_station", None)
+        default_seed = str(
+            getattr(default_station, "station_id", None) or "user:onyourwave"
+        )
+        default_title = (
+            getattr(default_station, "rup_title", None)
+            or getattr(default_station, "title", None)
+            or ("Моя волна" if self._language == "ru" else "My Wave")
+        )
+        stations = [
+            WaveOption(
+                seed=default_seed,
+                title=str(default_title),
+                description=getattr(default_station, "rup_description", None),
+                unspecified=True,
+            )
+        ]
+        station_seeds = {default_seed}
+        for block in getattr(raw_settings, "blocks", None) or ():
+            for raw_station in getattr(block, "items", None) or ():
+                station_id = getattr(raw_station, "id", None)
+                seed_type = getattr(station_id, "type", None)
+                seed_tag = getattr(station_id, "tag", None)
+                if not seed_type or not seed_tag:
+                    continue
+                seed = f"{seed_type}:{seed_tag}"
+                if seed in station_seeds:
+                    continue
+                stations.append(
+                    WaveOption(
+                        seed=seed,
+                        title=str(getattr(raw_station, "name", None) or seed),
+                    )
+                )
+                station_seeds.add(seed)
+
+        settings: list[WaveSetting] = []
+        restrictions = getattr(raw_settings, "setting_restrictions", None)
+        setting_ids = ["diversity", "language"]
+        if getattr(restrictions, "mood_energy", None) is not None:
+            setting_ids.append("mood_energy")
+        else:
+            setting_ids.extend(("mood", "energy"))
+        for setting_id in setting_ids:
+            restriction = getattr(restrictions, setting_id, None)
+            if restriction is None:
+                continue
+            raw_options = getattr(restriction, "possible_values", None)
+            if raw_options is None:
+                raw_options = tuple(
+                    value
+                    for value in (
+                        getattr(restriction, "min", None),
+                        getattr(restriction, "max", None),
+                    )
+                    if value is not None
+                )
+            options = tuple(
+                WaveOption(
+                    seed=str(raw_option.serialized_seed),
+                    title=str(raw_option.name),
+                    unspecified=bool(getattr(raw_option, "unspecified", False)),
+                )
+                for raw_option in raw_options or ()
+                if getattr(raw_option, "serialized_seed", None)
+                and getattr(raw_option, "name", None)
+            )
+            if not options:
+                continue
+            settings.append(
+                WaveSetting(
+                    id=setting_id,
+                    title=str(getattr(restriction, "name", None) or setting_id),
+                    options=options,
+                    optional=not any(option.unspecified for option in options),
+                )
+            )
+
+        selected_seeds = tuple(str(seed) for seed in getattr(last_wave, "seeds", None) or ())
+        if not selected_seeds:
+            last_station_id = getattr(last_wave, "station_id", None)
+            selected_seeds = (str(last_station_id or default_seed),)
+        return WaveSettings(
+            stations=tuple(stations),
+            settings=tuple(settings),
+            selected_seeds=selected_seeds,
+        )
+
+    def reset_last_wave(self) -> None:
+        client = self._require_client()
+        try:
+            reset = client.rotor_wave_last_reset()
+        except Exception as exc:
+            raise self._map_client_error(exc, "Failed to reset My Wave") from exc
+        if not reset:
+            raise NetworkError("Yandex Music did not reset My Wave")
+
     def get_station_tracks(self, station_id: str, *, limit: int = 25) -> Sequence[Track]:
         return self.get_station_track_batch(station_id, limit=limit).tracks
 
@@ -624,17 +734,20 @@ class YandexMusicService(MusicService):
         self,
         station_id: str,
         *,
+        seeds: Sequence[str] = (),
         limit: int = 25,
     ) -> RadioSession:
         client = self._require_client()
+        radio_seeds = tuple(seeds) or (station_id,)
         try:
             result = self._radio_client(client).rotor_session_new(
-                [station_id], include_tracks_in_response=True
+                list(radio_seeds), include_tracks_in_response=True
             )
             return self._map_radio_session(
                 station_id=station_id,
                 result=result,
                 limit=limit,
+                seeds=radio_seeds,
             )
         except Exception as exc:
             raise self._map_client_error(
@@ -676,6 +789,7 @@ class YandexMusicService(MusicService):
             batch_id=result.batch_id or session.batch_id,
             feedback_from=session.feedback_from,
             tracks=tracks,
+            seeds=session.seeds,
         )
 
     def _recover_radio_session(
@@ -698,7 +812,7 @@ class YandexMusicService(MusicService):
         if result is None:
             try:
                 result = radio_client.rotor_session_new(
-                    [session.station_id],
+                    list(session.seeds or (session.station_id,)),
                     queue=list(queue),
                     include_tracks_in_response=True,
                 )
@@ -712,6 +826,7 @@ class YandexMusicService(MusicService):
             station_id=session.station_id,
             result=result,
             limit=limit,
+            seeds=session.seeds or (session.station_id,),
         )
 
     def _radio_client(self, client: Any) -> Any:
@@ -1341,6 +1456,7 @@ class YandexMusicService(MusicService):
         station_id: str,
         result: Any,
         limit: int,
+        seeds: Sequence[str] = (),
     ) -> RadioSession:
         if result is None:
             raise NetworkError("Radio session response is invalid")
@@ -1358,6 +1474,7 @@ class YandexMusicService(MusicService):
             batch_id=result.batch_id,
             feedback_from=feedback_from,
             tracks=tracks,
+            seeds=tuple(seeds),
         )
 
     def _map_radio_sequence_tracks(

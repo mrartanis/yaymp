@@ -28,6 +28,7 @@ class QueueItem:
     station_batch_id: str | None = None
     radio_session_id: str | None = None
     radio_origin: str | None = None
+    radio_seeds: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

@@ -21,6 +21,29 @@ class StationTrackBatch:
     tracks: tuple[Track, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class WaveOption:
+    seed: str
+    title: str
+    description: str | None = None
+    unspecified: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class WaveSetting:
+    id: str
+    title: str
+    options: tuple[WaveOption, ...]
+    optional: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class WaveSettings:
+    stations: tuple[WaveOption, ...]
+    settings: tuple[WaveSetting, ...]
+    selected_seeds: tuple[str, ...] = ()
+
+
 class RadioFeedbackType(str, Enum):
     RADIO_STARTED = "radioStarted"
     TRACK_STARTED = "trackStarted"
@@ -35,3 +58,4 @@ class RadioSession:
     batch_id: str | None
     feedback_from: str
     tracks: tuple[Track, ...]
+    seeds: tuple[str, ...] = ()

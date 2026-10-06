@@ -294,6 +294,7 @@ class MainWindowPreferencesMixin:
         self._container.services.music_service.set_language(
             self._ui_text_catalog.resolved_language()
         )
+        self._invalidate_wave_settings_for_language()
         self._credits_playback_track_id = None
         if self._track_info_dialog is not None:
             self._track_info_dialog.close()
@@ -489,6 +490,7 @@ class MainWindowPreferencesMixin:
         self._render_auth_state()
         self._maybe_start_library_warmup()
         self._start_ai_content_reduction_sync()
+        self._request_wave_settings(force=True)
 
     def _clear_auth_dialog(self) -> None:
         if (
@@ -535,6 +537,8 @@ class MainWindowPreferencesMixin:
             self._settings_popup.setStyleSheet(self.styleSheet())
         if self._volume_popup is not None:
             self._volume_popup.setStyleSheet(self.styleSheet())
+        if self._wave_settings_popup is not None:
+            self._wave_settings_popup.setStyleSheet(self.styleSheet())
 
     def _stored_theme_preference(self) -> str:
         return self._container.services.settings_service.load_theme_preference()
@@ -578,6 +582,10 @@ class MainWindowPreferencesMixin:
             self._volume_button.setIcon(create_icon("volume.svg", color=icon_color))
         if hasattr(self, "_settings_button"):
             self._settings_button.setIcon(create_icon("settings.svg", color=icon_color))
+        if hasattr(self, "_my_wave_settings_button"):
+            self._my_wave_settings_button.setIcon(
+                create_icon("settings.svg", color=icon_color)
+            )
         if hasattr(self, "_previous_button"):
             self._set_button_icon(self._previous_button, "previous.svg", color=icon_color)
         if hasattr(self, "_next_button"):

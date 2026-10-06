@@ -308,6 +308,7 @@ class PlaybackService:
                 station_batch_id=item.station_batch_id,
                 radio_session_id=item.radio_session_id,
                 radio_origin=item.radio_origin,
+                radio_seeds=item.radio_seeds,
             )
             for item in saved_queue.queue
         ]
@@ -415,12 +416,18 @@ class PlaybackService:
         )
         return self.play_track(track, source_type="track", source_id=track_id)
 
-    def play_station(self, station_id: str) -> PlaybackSnapshot:
+    def play_station(
+        self,
+        station_id: str,
+        *,
+        seeds: Sequence[str] = (),
+    ) -> PlaybackSnapshot:
         if self._music_service is None:
             raise PlaybackBackendError("Music service is not configured")
         started_at = monotonic()
         radio_session = self._music_service.start_radio_session(
             station_id,
+            seeds=seeds,
             limit=self._STATION_QUEUE_BATCH_SIZE,
         )
         self._logger.debug(
@@ -446,6 +453,7 @@ class PlaybackService:
                     station_batch_id=radio_session.batch_id,
                     radio_session_id=radio_session.session_id,
                     radio_origin=radio_session.feedback_from,
+                    radio_seeds=radio_session.seeds,
                 )
                 for index, track in enumerate(tracks)
             ),
@@ -942,6 +950,7 @@ class PlaybackService:
                         station_batch_id=radio_session.batch_id,
                         radio_session_id=radio_session.session_id,
                         radio_origin=radio_session.feedback_from,
+                        radio_seeds=radio_session.seeds,
                     )
                 )
                 existing_ids.add(track.id)
@@ -1189,6 +1198,7 @@ class PlaybackService:
         station_batch_id: str | None = None,
         radio_session_id: str | None = None,
         radio_origin: str | None = None,
+        radio_seeds: Sequence[str] = (),
     ) -> QueueItem:
         track = self._hydrate_cached_track_metadata(track)
         return QueueItem(
@@ -1199,6 +1209,7 @@ class PlaybackService:
             station_batch_id=station_batch_id,
             radio_session_id=radio_session_id,
             radio_origin=radio_origin,
+            radio_seeds=tuple(radio_seeds),
         )
 
     def _hydrate_cached_track_metadata(self, track: Track) -> Track:
@@ -1642,6 +1653,7 @@ class PlaybackService:
             batch_id=item.station_batch_id,
             feedback_from=item.radio_origin,
             tracks=(item.track,),
+            seeds=item.radio_seeds,
         )
 
     def _radio_station_queue(self, station_id: str) -> tuple[str, ...]:

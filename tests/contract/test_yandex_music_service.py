@@ -268,6 +268,7 @@ class FakeYandexClient:
         self.radio_session_clone_calls: list[dict[str, object]] = []
         self.radio_session_tracks_unknown = False
         self.radio_session_clone_unavailable = False
+        self.wave_reset_calls = 0
         self.ai_content_reduction_enabled = False
         self.account_setting_writes: list[dict[str, object]] = []
         self.credits_payload = {
@@ -363,6 +364,9 @@ class FakeYandexClient:
                 payload = {"type": "session-feedback", **((json or data) or {})}
                 self._client.station_feedback_calls.append(payload)
                 return {"status": "ok"}
+            if url.endswith("/rotor/wave/last/reset"):
+                self._client.wave_reset_calls += 1
+                return {"result": "ok"}
             if "/dislikes/tracks/add-multiple" in url:
                 self._client.disliked_track_ids.append(str((data or {}).get("track-ids")))
                 return {"revision": 4}
@@ -384,6 +388,61 @@ class FakeYandexClient:
 
         def get(self, url: str, params=None, **kwargs):
             del kwargs
+            if url.endswith("/rotor/wave/settings"):
+                english = self.headers.get("Accept-Language") == "en"
+                return {
+                    "defaultStation": {
+                        "stationId": "user:onyourwave",
+                        "title": "My Wave" if english else "Моя волна",
+                        "rupTitle": "My Wave" if english else "Моя волна",
+                        "rupDescription": (
+                            "Music for you" if english else "Музыка для вас"
+                        ),
+                    },
+                    "blocks": [
+                        {
+                            "type": "contexts",
+                            "items": [
+                                {
+                                    "id": {"type": "activity", "tag": "work"},
+                                    "name": "Work" if english else "Работа",
+                                    "icon": None,
+                                    "mtsIcon": None,
+                                    "geocellIcon": None,
+                                    "idForFrom": "activity",
+                                    "restrictions": None,
+                                    "restrictions2": None,
+                                }
+                            ],
+                        }
+                    ],
+                    "settingRestrictions": {
+                        "diversity": {
+                            "type": "enum",
+                            "name": "Diversity" if english else "Разнообразие",
+                            "possibleValues": [
+                                {
+                                    "value": "any",
+                                    "name": "Any" if english else "Любое",
+                                    "serializedSeed": "settingDiversity:any",
+                                    "unspecified": True,
+                                },
+                                {
+                                    "value": "discover",
+                                    "name": "Discover" if english else "Открытия",
+                                    "serializedSeed": "settingDiversity:discover",
+                                },
+                            ],
+                        },
+                        "language": None,
+                    },
+                }
+            if url.endswith("/rotor/wave/last"):
+                return {
+                    "name": "Work Wave",
+                    "seeds": ["activity:work", "settingDiversity:discover"],
+                    "stationId": "user:onyourwave",
+                }
             if url.endswith("/account/settings"):
                 return {
                     "aiContentReductionEnabled": self._client.ai_content_reduction_enabled
@@ -625,6 +684,9 @@ class FakeYandexClient:
     rotor_session_feedback_track_started = Client.rotor_session_feedback_track_started
     rotor_session_feedback_track_finished = Client.rotor_session_feedback_track_finished
     rotor_session_feedback_skip = Client.rotor_session_feedback_skip
+    rotor_wave_settings = Client.rotor_wave_settings
+    rotor_wave_last = Client.rotor_wave_last
+    rotor_wave_last_reset = Client.rotor_wave_last_reset
 
     def tracks_download_info(self, track_id: str, get_direct_links: bool = True):
         del track_id, get_direct_links
@@ -1048,6 +1110,7 @@ def test_yandex_music_service_uses_radio_session_flow() -> None:
                 is_liked=False,
             ),
         ),
+        seeds=("user:onyourwave",),
     )
     assert continued.batch_id == "batch-2"
     assert client.radio_session_new_calls == [
@@ -1065,6 +1128,37 @@ def test_yandex_music_service_uses_radio_session_flow() -> None:
     assert all(call["event"]["timestamp"] for call in client.station_feedback_calls)
 
 
+def test_yandex_music_service_maps_localized_wave_settings_and_multiple_seeds() -> None:
+    client = FakeYandexClient()
+    service = YandexMusicService(
+        session=AuthSession(user_id="user-1", token="token"),
+        client=client,
+    )
+    service.set_language("en")
+
+    settings = service.get_wave_settings()
+    session = service.start_radio_session(
+        "user:onyourwave",
+        seeds=("activity:work", "settingDiversity:discover"),
+    )
+    service.reset_last_wave()
+
+    assert [station.title for station in settings.stations] == ["My Wave", "Work"]
+    assert settings.settings[0].title == "Diversity"
+    assert [option.title for option in settings.settings[0].options] == [
+        "Any",
+        "Discover",
+    ]
+    assert settings.selected_seeds == (
+        "activity:work",
+        "settingDiversity:discover",
+    )
+    assert session.seeds == settings.selected_seeds
+    assert client.radio_session_new_calls[-1]["seeds"] == list(settings.selected_seeds)
+    assert client.request.headers["Accept-Language"] == "en"
+    assert client.wave_reset_calls == 1
+
+
 def test_yandex_music_service_clones_unknown_radio_session_with_history() -> None:
     client = FakeYandexClient()
     client.radio_session_tracks_unknown = True
@@ -1072,7 +1166,10 @@ def test_yandex_music_service_clones_unknown_radio_session_with_history() -> Non
         session=AuthSession(user_id="user-1", token="token"),
         client=client,
     )
-    session = service.start_radio_session("user:onyourwave")
+    session = service.start_radio_session(
+        "user:onyourwave",
+        seeds=("activity:work", "settingDiversity:discover"),
+    )
 
     recovered = service.get_radio_session_tracks(
         session,
@@ -1081,6 +1178,7 @@ def test_yandex_music_service_clones_unknown_radio_session_with_history() -> Non
 
     assert recovered.session_id == "session-2"
     assert recovered.batch_id == "batch-recovered"
+    assert recovered.seeds == ("activity:work", "settingDiversity:discover")
     assert client.radio_session_clone_calls == [
         {
             "queue": ["track-1:album-1", "track-2:album-2"],
@@ -1097,14 +1195,18 @@ def test_yandex_music_service_starts_fresh_session_when_clone_is_unavailable() -
         session=AuthSession(user_id="user-1", token="token"),
         client=client,
     )
-    session = service.start_radio_session("user:onyourwave")
+    session = service.start_radio_session(
+        "user:onyourwave",
+        seeds=("activity:work", "settingDiversity:discover"),
+    )
 
     recovered = service.get_radio_session_tracks(session, queue=("track-1:album-1",))
 
     assert recovered.session_id == "session-3"
     assert recovered.batch_id == "batch-restarted"
+    assert recovered.seeds == ("activity:work", "settingDiversity:discover")
     assert client.radio_session_new_calls[-1] == {
-        "seeds": ["user:onyourwave"],
+        "seeds": ["activity:work", "settingDiversity:discover"],
         "queue": ["track-1:album-1"],
         "includeTracksInResponse": True,
     }

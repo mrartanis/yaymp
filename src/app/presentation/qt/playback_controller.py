@@ -203,8 +203,8 @@ class PlaybackController(QObject):
             )
         )
 
-    def play_station(self, station_id: str) -> None:
-        self._dispatch(lambda: self._playback_service.play_station(station_id))
+    def play_station(self, station_id: str, *, seeds: tuple[str, ...] = ()) -> None:
+        self._dispatch(lambda: self._playback_service.play_station(station_id, seeds=seeds))
 
     def clear_queue(self) -> None:
         self._dispatch(self._playback_service.clear_queue)

@@ -345,6 +345,7 @@ class FakeMusicService:
         self,
         station_id: str,
         *,
+        seeds: tuple[str, ...] = (),
         limit: int = 25,
     ):
         batch = self.get_station_track_batch(station_id, limit=limit)
@@ -354,6 +355,7 @@ class FakeMusicService:
             batch_id=batch.batch_id,
             feedback_from=f"radio-mobile-{station_id.replace(':', '-')}-default",
             tracks=batch.tracks,
+            seeds=seeds or (station_id,),
         )
 
     def get_radio_session_tracks(

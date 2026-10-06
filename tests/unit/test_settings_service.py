@@ -51,6 +51,7 @@ def test_settings_service_round_trips_volume_and_audio_quality() -> None:
     service.save_corner_style_preference("rounded")
     service.save_language_preference("ru")
     service.save_my_wave_history(["#123456", "#abcdef"])
+    service.save_my_wave_seeds(("activity:work", "settingDiversity:discover"))
     service.save_waveform_progress_enabled(True)
     service.save_ai_content_reduction_enabled(True)
     service.save_browser_view_mode("list")
@@ -61,6 +62,10 @@ def test_settings_service_round_trips_volume_and_audio_quality() -> None:
     assert service.load_corner_style_preference() == "rounded"
     assert service.load_language_preference() == "ru"
     assert service.load_my_wave_history() == ["#123456", "#abcdef"]
+    assert service.load_my_wave_seeds() == (
+        "activity:work",
+        "settingDiversity:discover",
+    )
     assert service.load_waveform_progress_enabled() is True
     assert service.load_ai_content_reduction_enabled() is True
     assert service.load_browser_view_mode() == "list"
