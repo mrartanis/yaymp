@@ -295,6 +295,9 @@ class FakeYandexClient:
         self.radio_session_clone_calls: list[dict[str, object]] = []
         self.radio_session_tracks_unknown = False
         self.radio_session_clone_unavailable = False
+        self.radio_session_new_failures_remaining = 0
+        self.radio_session_new_attempts = 0
+        self.wave_last_failures_remaining = 0
         self.wave_reset_calls = 0
         self.ai_content_reduction_enabled = False
         self.account_setting_writes: list[dict[str, object]] = []
@@ -346,6 +349,10 @@ class FakeYandexClient:
                 )
                 return {"aiContentReductionEnabled": self._client.ai_content_reduction_enabled}
             if url.endswith("/rotor/session/new"):
+                self._client.radio_session_new_attempts += 1
+                if self._client.radio_session_new_failures_remaining > 0:
+                    self._client.radio_session_new_failures_remaining -= 1
+                    raise RuntimeError("temporary radio session failure")
                 payload = json or data or {}
                 self._client.radio_session_new_calls.append(payload)
                 self._client.radio_session_new_headers.append(dict(self.headers))
@@ -455,6 +462,9 @@ class FakeYandexClient:
                     },
                 }
             if url.endswith("/rotor/wave/last"):
+                if self._client.wave_last_failures_remaining > 0:
+                    self._client.wave_last_failures_remaining -= 1
+                    raise RuntimeError("temporary last wave failure")
                 return {
                     "name": "Work Wave",
                     "seeds": ["activity:work", "settingDiversity:discover"],
@@ -1189,6 +1199,33 @@ def test_yandex_music_service_maps_localized_wave_settings_and_multiple_seeds() 
     assert client.wave_reset_calls == 1
 
 
+def test_yandex_music_service_uses_default_wave_when_last_selection_is_unavailable() -> None:
+    client = FakeYandexClient()
+    client.wave_last_failures_remaining = 2
+    service = YandexMusicService(
+        session=AuthSession(user_id="user-1", token="token"),
+        client=client,
+    )
+
+    settings = service.get_wave_settings()
+
+    assert settings.selected_seeds == ("user:onyourwave",)
+
+
+def test_yandex_music_service_retries_starting_radio_session_once() -> None:
+    client = FakeYandexClient()
+    client.radio_session_new_failures_remaining = 1
+    service = YandexMusicService(
+        session=AuthSession(user_id="user-1", token="token"),
+        client=client,
+    )
+
+    session = service.start_radio_session("user:onyourwave")
+
+    assert session.session_id == "session-1"
+    assert client.radio_session_new_attempts == 2
+
+
 def test_yandex_music_service_clones_unknown_radio_session_with_history() -> None:
     client = FakeYandexClient()
     client.radio_session_tracks_unknown = True
@@ -1297,6 +1334,47 @@ def test_yandex_music_service_accepts_mp3_fallback_for_lossless_quality() -> Non
 
     assert stream_ref == "https://stream.example/hq-fallback"
     assert client.file_info_calls[0]["codecs"] == ["flac-mp4", "mp3"]
+
+
+def test_yandex_music_service_falls_back_to_legacy_mp3_320_when_file_info_fails() -> None:
+    class FileInfoUnavailableClient(FakeYandexClient):
+        def tracks_file_info(
+            self,
+            track_id: str,
+            quality: str = "lossless",
+            codecs: list[str] | None = None,
+            transport: str = "raw",
+        ):
+            del track_id, quality, codecs, transport
+            raise RuntimeError("file-info is temporarily unavailable")
+
+    client = FileInfoUnavailableClient()
+    client.download_infos = [
+        DownloadInfoStub(
+            "https://stream.example/aac",
+            bitrate_in_kbps=512,
+            codec="aac",
+        ),
+        DownloadInfoStub(
+            "https://stream.example/mp3-192",
+            bitrate_in_kbps=192,
+        ),
+        DownloadInfoStub(
+            "https://stream.example/mp3-320",
+            bitrate_in_kbps=320,
+        ),
+    ]
+    service = YandexMusicService(
+        session=AuthSession(user_id="user-1", token="token"),
+        client=client,
+    )
+    service.set_audio_quality(AudioQuality.LOSSLESS)
+
+    stream_ref = service.resolve_stream_ref(
+        Track(id="track-1", title="Remote", artists=("Artist",), available=True)
+    )
+
+    assert stream_ref == "https://stream.example/mp3-320"
 
 
 def test_yandex_music_service_likes_and_unlikes_tracks() -> None:

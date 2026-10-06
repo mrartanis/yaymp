@@ -1321,6 +1321,35 @@ def test_refresh_schedules_stream_prefetch_without_waiting() -> None:
     assert music_service.resolved_track_ids == ["two"]
 
 
+def test_refresh_does_not_repeat_failed_stream_prefetch() -> None:
+    music_service = FakeMusicService(stream_ref=None)
+    service = PlaybackService(
+        playback_engine=FakePlaybackEngine(),
+        logger=TestLogger(),
+        music_service=music_service,
+    )
+    service.replace_queue(
+        (
+            Track(
+                id="one",
+                title="One",
+                artists=("Artist",),
+                stream_ref="local://one",
+            ),
+            Track(id="two", title="Two", artists=("Artist",)),
+        ),
+        start_index=0,
+        source_type="test",
+    )
+
+    service.refresh()
+    service.wait_for_pending_stream_prefetch(timeout=1.0)
+    service.refresh()
+    service.wait_for_pending_stream_prefetch(timeout=1.0)
+
+    assert music_service.resolved_track_ids == ["two"]
+
+
 def test_replace_queue_raises_when_stream_cannot_be_resolved() -> None:
     service = PlaybackService(
         playback_engine=FakePlaybackEngine(),

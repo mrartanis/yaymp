@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from copy import copy
 from datetime import datetime
 from typing import Any
@@ -588,12 +588,29 @@ class YandexMusicService(MusicService):
     def get_wave_settings(self) -> WaveSettings:
         client = self._require_client()
         try:
-            raw_settings = client.rotor_wave_settings()
-            last_wave = client.rotor_wave_last()
+            raw_settings = self._call_sdk_with_retry(
+                client.rotor_wave_settings,
+                operation_name="load My Wave settings",
+            )
         except Exception as exc:
             raise self._map_client_error(exc, "Failed to load My Wave settings") from exc
         if raw_settings is None:
             raise NetworkError("Yandex Music returned no My Wave settings")
+
+        try:
+            last_wave = self._call_sdk_with_retry(
+                client.rotor_wave_last,
+                operation_name="load last My Wave selection",
+            )
+        except Exception as exc:
+            mapped_error = self._map_client_error(exc, "Failed to load last My Wave selection")
+            if isinstance(mapped_error, AuthError):
+                raise mapped_error from exc
+            last_wave = None
+            self._log_sdk_failure(
+                "Last My Wave selection is unavailable; using the default",
+                exc,
+            )
 
         default_station = getattr(raw_settings, "default_station", None)
         default_seed = str(getattr(default_station, "station_id", None) or "user:onyourwave")
@@ -732,8 +749,12 @@ class YandexMusicService(MusicService):
         client = self._require_client()
         radio_seeds = tuple(seeds) or (station_id,)
         try:
-            result = self._radio_client(client).rotor_session_new(
-                list(radio_seeds), include_tracks_in_response=True
+            radio_client = self._radio_client(client)
+            result = self._call_sdk_with_retry(
+                lambda: radio_client.rotor_session_new(
+                    list(radio_seeds), include_tracks_in_response=True
+                ),
+                operation_name=f"start radio session for {station_id}",
             )
             return self._map_radio_session(
                 station_id=station_id,
@@ -757,7 +778,13 @@ class YandexMusicService(MusicService):
         client = self._require_client()
         radio_client = self._radio_client(client)
         try:
-            result = radio_client.rotor_session_tracks(session.session_id, queue=list(queue))
+            result = self._call_sdk_with_retry(
+                lambda: radio_client.rotor_session_tracks(
+                    session.session_id,
+                    queue=list(queue),
+                ),
+                operation_name=f"load radio session tracks for {session.station_id}",
+            )
         except Exception as exc:
             raise self._map_client_error(
                 exc,
@@ -1177,22 +1204,41 @@ class YandexMusicService(MusicService):
         if self._audio_quality is AudioQuality.LOSSLESS:
             return self._resolve_lossless_stream_ref(client, track.id)
 
+        return self._resolve_legacy_stream_ref(client, track.id)
+
+    def _resolve_legacy_stream_ref(
+        self,
+        client: Any,
+        track_id: str,
+        *,
+        prefer_mp3: bool = False,
+    ) -> str:
+
         try:
-            download_infos = client.tracks_download_info(track.id, get_direct_links=True)
+            download_infos = client.tracks_download_info(track_id, get_direct_links=True)
         except Exception as exc:
             mapped_error = self._map_client_error(
                 exc,
-                f"Failed to resolve stream for track {track.id}",
+                f"Failed to resolve stream for track {track_id}",
             )
             if isinstance(mapped_error, AuthError):
                 raise mapped_error from exc
-            raise StreamResolveError(f"Failed to resolve stream for track {track.id}") from exc
+            raise StreamResolveError(f"Failed to resolve stream for track {track_id}") from exc
 
         if not download_infos:
-            raise TrackUnavailableError(f"Track {track.id} has no playable stream")
+            raise TrackUnavailableError(f"Track {track_id} has no playable stream")
+
+        if prefer_mp3:
+            mp3_infos = tuple(
+                info
+                for info in download_infos
+                if str(getattr(info, "codec", "")).lower() == "mp3"
+            )
+            if mp3_infos:
+                download_infos = mp3_infos
 
         ranked_infos = self._rank_download_infos(download_infos)
-        self._log_download_quality_options(track.id, ranked_infos)
+        self._log_download_quality_options(track_id, ranked_infos)
         for info in ranked_infos:
             direct_link = getattr(info, "direct_link", None)
             if direct_link:
@@ -1202,12 +1248,12 @@ class YandexMusicService(MusicService):
                     resolved = info.get_direct_link()
                 except Exception as exc:
                     raise StreamResolveError(
-                        f"Failed to resolve stream for track {track.id}"
+                        f"Failed to resolve stream for track {track_id}"
                     ) from exc
                 if resolved:
                     return resolved
 
-        raise TrackUnavailableError(f"Track {track.id} has no playable stream")
+        raise TrackUnavailableError(f"Track {track_id} has no playable stream")
 
     def _resolve_lossless_stream_ref(self, client: Any, track_id: str) -> str:
         try:
@@ -1224,18 +1270,18 @@ class YandexMusicService(MusicService):
             )
             if isinstance(mapped_error, AuthError):
                 raise mapped_error from exc
-            raise StreamResolveError(
-                f"Failed to resolve lossless stream for track {track_id}"
-            ) from exc
+            return self._fallback_to_mp3(client, track_id, exc)
 
         download_info = getattr(file_info, "download_info", None)
         if download_info is None:
-            raise TrackUnavailableError(f"Track {track_id} has no playable lossless stream")
+            return self._fallback_to_mp3(client, track_id, "empty file-info response")
 
         transport = getattr(download_info, "transport", None)
         if transport != "raw":
-            raise StreamResolveError(
-                f"Yandex Music returned unsupported {transport!r} transport for track {track_id}"
+            return self._fallback_to_mp3(
+                client,
+                track_id,
+                f"unsupported {transport!r} transport",
             )
 
         urls = (
@@ -1244,7 +1290,7 @@ class YandexMusicService(MusicService):
         )
         stream_ref = next((url for url in urls if isinstance(url, str) and url), None)
         if stream_ref is None:
-            raise TrackUnavailableError(f"Track {track_id} has no playable lossless stream")
+            return self._fallback_to_mp3(client, track_id, "file-info response has no URL")
 
         if self._logger is not None:
             self._logger.info(
@@ -1256,6 +1302,41 @@ class YandexMusicService(MusicService):
                 transport,
             )
         return stream_ref
+
+    def _fallback_to_mp3(self, client: Any, track_id: str, reason: object) -> str:
+        if isinstance(reason, Exception):
+            reason_label = f"{type(reason).__name__}: {reason}"
+        else:
+            reason_label = str(reason)
+        if self._logger is not None:
+            self._logger.warning(
+                "Lossless stream unavailable for track %s (%s); falling back to MP3 320",
+                track_id,
+                reason_label,
+            )
+        return self._resolve_legacy_stream_ref(client, track_id, prefer_mp3=True)
+
+    def _call_sdk_with_retry(
+        self,
+        operation: Callable[[], Any],
+        *,
+        operation_name: str,
+    ) -> Any:
+        try:
+            return operation()
+        except Exception as exc:
+            if isinstance(self._map_client_error(exc, operation_name), AuthError):
+                raise
+            self._log_sdk_failure(f"Yandex Music could not {operation_name}; retrying once", exc)
+        try:
+            return operation()
+        except Exception as exc:
+            self._log_sdk_failure(f"Yandex Music could not {operation_name}", exc)
+            raise
+
+    def _log_sdk_failure(self, message: str, exc: Exception) -> None:
+        if self._logger is not None:
+            self._logger.warning("%s: %s: %s", message, type(exc).__name__, exc)
 
     def _map_client_error(
         self,
@@ -1281,10 +1362,27 @@ class YandexMusicService(MusicService):
             raise AuthError("yandex-music package is not installed") from exc
 
         try:
-            self._client = Client(self._session.token, language=self._language).init()
+            self._client = Client(
+                self._session.token,
+                language=self._language,
+                strict=False,
+                on_schema_mismatch=self._handle_schema_mismatch,
+            ).init()
         except Exception as exc:
             raise AuthError("Failed to initialize Yandex Music client") from exc
         return self._client
+
+    def _handle_schema_mismatch(self, mismatch: Any) -> None:
+        if self._logger is None:
+            return
+        self._logger.warning(
+            "Yandex Music API schema mismatch: model=%s missing=%s unknown=%s endpoint=%s sdk=%s",
+            getattr(mismatch, "model_name", "unknown"),
+            ",".join(sorted(getattr(mismatch, "missing_fields", ()))) or "none",
+            ",".join(sorted(getattr(mismatch, "unknown_fields", ()))) or "none",
+            getattr(mismatch, "endpoint", None) or "unknown",
+            getattr(mismatch, "version", "unknown"),
+        )
 
     def _map_track(
         self,
@@ -1613,7 +1711,7 @@ class YandexMusicService(MusicService):
         )
         if self._audio_quality is AudioQuality.LQ:
             return tuple(sorted_infos)
-        if self._audio_quality is AudioQuality.HQ:
+        if self._audio_quality in (AudioQuality.HQ, AudioQuality.LOSSLESS):
             return tuple(reversed(sorted_infos))
 
         target_bitrate = 192

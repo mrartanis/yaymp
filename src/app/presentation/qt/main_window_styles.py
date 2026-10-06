@@ -76,13 +76,13 @@ def build_main_window_stylesheet(
             QMainWindow {{
                 background: transparent;
                 color: {palette.text_primary};
-                font-family: "Avenir Next", "Segoe UI", sans-serif;
+                font-family: sans-serif;
                 font-size: 12px;
             }}
             QWidget {{
                 background: {palette.window_bg};
                 color: {palette.text_primary};
-                font-family: "Avenir Next", "Segoe UI", sans-serif;
+                font-family: sans-serif;
                 font-size: 12px;
             }}
             QWidget#window-root {{

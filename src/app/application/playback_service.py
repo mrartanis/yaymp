@@ -139,6 +139,7 @@ class PlaybackService:
         self._stream_prefetch_lock = Lock()
         self._stream_prefetch_in_flight: set[str] = set()
         self._stream_prefetch_results: dict[str, tuple[str, datetime]] = {}
+        self._stream_prefetch_failures: set[str] = set()
         self._playback_engine.on_ready_for_seek(self._apply_pending_restore_seek)
 
     def shutdown(self) -> None:
@@ -711,6 +712,8 @@ class PlaybackService:
                 resolve_started_at = monotonic()
                 stream_ref = self._music_service.resolve_stream_ref(item.track)
                 stream_ref_cached_at = datetime.now(tz=UTC)
+                with self._stream_prefetch_lock:
+                    self._stream_prefetch_failures.discard(item.track.id)
                 self._logger.debug(
                     "Synchronous stream resolve took %.3fs for track %s",
                     monotonic() - resolve_started_at,
@@ -1007,6 +1010,8 @@ class PlaybackService:
                 return
             if track.id in self._stream_prefetch_in_flight:
                 return
+            if track.id in self._stream_prefetch_failures:
+                return
             self._stream_prefetch_in_flight.add(track.id)
 
         def prefetch_safely() -> None:
@@ -1025,6 +1030,8 @@ class PlaybackService:
                     track.id,
                 )
             except Exception as exc:
+                with self._stream_prefetch_lock:
+                    self._stream_prefetch_failures.add(track.id)
                 self._logger.warning(
                     "Failed to prefetch stream for track %s: %s",
                     track.id,
@@ -1169,6 +1176,9 @@ class PlaybackService:
         previous_order = self._play_order
         previous_order_position = self._play_order_position
         previous_telemetry_session = self._telemetry_session
+
+        with self._stream_prefetch_lock:
+            self._stream_prefetch_failures.clear()
 
         self._finalize_active_playback(natural_end=False)
         self._queue = list(queue_items)
