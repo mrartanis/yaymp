@@ -2,18 +2,104 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import QPoint, Qt, Signal
+from PySide6.QtCore import QModelIndex, QPoint, QPointF, Qt, Signal
+from PySide6.QtGui import QPainter, QPaintEvent, QPalette, QPen
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QStyle,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
     QVBoxLayout,
     QWidget,
 )
 
 from app.domain import WaveSettings
+
+
+class _WaveSettingsItemDelegate(QStyledItemDelegate):
+    def paint(
+        self,
+        painter: QPainter,
+        option: QStyleOptionViewItem,
+        index: QModelIndex,
+    ) -> None:
+        styled_option = QStyleOptionViewItem(option)
+        self.initStyleOption(styled_option, index)
+        active_states = QStyle.StateFlag.State_MouseOver | QStyle.StateFlag.State_Selected
+        if styled_option.state & active_states:
+            painter.save()
+            try:
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(styled_option.palette.brush(QPalette.ColorRole.Highlight))
+                painter.drawRoundedRect(styled_option.rect.adjusted(4, 1, -4, -1), 6, 6)
+            finally:
+                painter.restore()
+            highlighted_text = styled_option.palette.brush(QPalette.ColorRole.HighlightedText)
+            styled_option.palette.setBrush(QPalette.ColorRole.Text, highlighted_text)
+            styled_option.palette.setBrush(QPalette.ColorRole.WindowText, highlighted_text)
+            styled_option.state &= ~active_states
+        super().paint(painter, styled_option, index)
+
+
+class _WaveSettingsComboBox(QComboBox):
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("wave-settings-combo")
+        self.setItemDelegate(_WaveSettingsItemDelegate(self))
+        self._prepare_popup_view()
+
+    def showPopup(self) -> None:  # noqa: N802
+        self._prepare_popup_view()
+        super().showPopup()
+
+    def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802
+        super().paintEvent(event)
+        color = self.palette().color(self.foregroundRole())
+        pen = QPen(color, 1.6)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        center_x = self.width() - 16.0
+        center_y = self.height() / 2.0
+        painter = QPainter(self)
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            painter.setPen(pen)
+            painter.drawLine(
+                QPointF(center_x - 4.0, center_y - 2.0),
+                QPointF(center_x, center_y + 2.0),
+            )
+            painter.drawLine(
+                QPointF(center_x, center_y + 2.0),
+                QPointF(center_x + 4.0, center_y - 2.0),
+            )
+        finally:
+            painter.end()
+
+    def _prepare_popup_view(self) -> None:
+        view: QAbstractItemView = self.view()
+        view.setObjectName("wave-settings-combo-view")
+        view.setFrameShape(QFrame.Shape.NoFrame)
+        view.setMouseTracking(True)
+        view.viewport().setMouseTracking(True)
+        popup = view.window()
+        popup.setObjectName("wave-settings-combo-popup")
+        popup.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        popup.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        popup.setAutoFillBackground(False)
+        popup_palette = popup.palette()
+        popup_palette.setColor(QPalette.ColorRole.Window, Qt.GlobalColor.transparent)
+        popup.setPalette(popup_palette)
+        if popup.layout() is not None:
+            popup.layout().setContentsMargins(0, 0, 0, 0)
+            popup.layout().setSpacing(0)
+        popup.style().unpolish(popup)
+        popup.style().polish(popup)
 
 
 class WaveSettingsPopup(QFrame):
@@ -55,7 +141,7 @@ class WaveSettingsPopup(QFrame):
 
         self._station_label = QLabel()
         self._station_label.setObjectName("settings-section")
-        self._station_combo = QComboBox()
+        self._station_combo = _WaveSettingsComboBox()
         self._station_combo.currentIndexChanged.connect(self._update_description)
         self._description_label = QLabel()
         self._description_label.setObjectName("wave-settings-description")
@@ -130,17 +216,13 @@ class WaveSettingsPopup(QFrame):
         for setting in settings.settings:
             label = QLabel(setting.title)
             label.setObjectName("settings-section")
-            combo = QComboBox()
+            combo = _WaveSettingsComboBox()
             if setting.optional:
                 combo.addItem(self._t("wave.settings.any"), "")
             for option in sorted(setting.options, key=lambda item: not item.unspecified):
                 combo.addItem(option.title, option.seed)
             selected_index = next(
-                (
-                    index
-                    for index in range(combo.count())
-                    if combo.itemData(index) in selected
-                ),
+                (index for index in range(combo.count()) if combo.itemData(index) in selected),
                 0,
             )
             combo.setCurrentIndex(selected_index)
@@ -259,9 +341,7 @@ class MainWindowWaveMixin:
         self._wave_settings = settings
         if settings.selected_seeds:
             self._wave_selected_seeds = settings.selected_seeds
-            self._container.services.settings_service.save_my_wave_seeds(
-                settings.selected_seeds
-            )
+            self._container.services.settings_service.save_my_wave_seeds(settings.selected_seeds)
         self._refresh_wave_button_text()
         if self._wave_settings_popup.isVisible():
             self._wave_settings_popup.set_settings(settings)
@@ -330,9 +410,7 @@ class MainWindowWaveMixin:
                 labels.append(option.title)
         summary = " · ".join(labels[:2])
         self._my_wave_top_button.setText(
-            self._t("wave.settings.button_summary", summary=summary)
-            if summary
-            else base_title
+            self._t("wave.settings.button_summary", summary=summary) if summary else base_title
         )
         tooltip = " · ".join([base_title, *labels]) if labels else base_title
         self._my_wave_top_button.setToolTip(tooltip)

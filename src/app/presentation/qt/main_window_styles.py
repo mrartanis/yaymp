@@ -415,6 +415,46 @@ def build_main_window_stylesheet(
                 selection-background-color: {accent};
                 selection-color: {accent_text};
             }}
+            QComboBox#wave-settings-combo {{
+                padding-right: 28px;
+            }}
+            QComboBox#wave-settings-combo::drop-down {{
+                background: transparent;
+                border: 0;
+                width: 28px;
+            }}
+            QComboBox#wave-settings-combo::down-arrow {{
+                image: none;
+                border: 0;
+                width: 0;
+                height: 0;
+            }}
+            QWidget#wave-settings-combo-popup,
+            QFrame#wave-settings-combo-popup {{
+                background: transparent;
+                border: 0;
+                margin: 0;
+                padding: 0;
+            }}
+            QListView#wave-settings-combo-view {{
+                background: {palette.popup_bg};
+                border: 0;
+                border-radius: {menu_radius}px;
+                padding: 4px;
+                outline: 0;
+            }}
+            QListView#wave-settings-combo-view::item {{
+                background: transparent;
+                border: 0;
+                border-radius: {menu_item_radius}px;
+                color: {palette.text_primary};
+                padding: 6px 10px;
+            }}
+            QListView#wave-settings-combo-view::item:hover,
+            QListView#wave-settings-combo-view::item:selected {{
+                background: {accent};
+                color: {accent_text};
+            }}
             QListWidget, QListView {{
                 background: {palette.list_bg};
                 border: 0;

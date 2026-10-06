@@ -137,6 +137,7 @@ Rules:
 - No persistence calls from widgets.
 - Main window should support classic player composition: controls, seek, volume, track info, library/navigation, content panel, queue/status area.
 - Prefer model/delegate rendering for large Qt lists; avoid `QListWidget + setItemWidget()` for queue-scale views.
+- For visual UI changes, render or capture the affected widget and inspect the result instead of relying only on stylesheet assertions. When running headless/offscreen, use screenshots to check geometry, colors, clipping, and widget chrome, but do not treat alpha blending or compositor-dependent transparency as authoritative; confirm those parts structurally or on a composited desktop.
 
 ## Concurrency Rules
 

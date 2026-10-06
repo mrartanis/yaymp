@@ -1,3 +1,6 @@
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QFrame
+
 from app.domain import WaveOption, WaveSetting, WaveSettings
 from app.presentation.qt.main_window_wave import WaveSettingsPopup
 
@@ -58,3 +61,15 @@ def test_wave_settings_popup_selects_last_server_wave(qtbot) -> None:
         "activity:work",
         "settingDiversity:discover",
     )
+
+    combos = (popup._station_combo, *popup._setting_combos)
+    assert all(combo.objectName() == "wave-settings-combo" for combo in combos)
+    for combo in combos:
+        view = combo.view()
+        assert view.objectName() == "wave-settings-combo-view"
+        assert view.frameShape() is QFrame.Shape.NoFrame
+        assert view.hasMouseTracking()
+        assert view.viewport().hasMouseTracking()
+        assert view.window().objectName() == "wave-settings-combo-popup"
+        assert view.window().testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        assert view.window().layout().contentsMargins().isNull()
