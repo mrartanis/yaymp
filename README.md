@@ -107,6 +107,7 @@ python -m pip install -e '.[dev]'
 ```bash
 ./scripts/run_lint.sh
 ./scripts/run_tests.sh
+./scripts/run_coverage.sh
 ```
 
 Локальный `pre-commit` hook для `ruff`:

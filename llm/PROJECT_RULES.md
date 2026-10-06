@@ -222,8 +222,14 @@ Formats:
 Testing philosophy:
 
 - Prefer integration-style tests over many fine-grained unit tests.
-- Test behavior and state transitions, not implementation trivia.
-- Prefer fakes over dynamic mocks.
+- Test observable behavior and state transitions through the highest practical public boundary.
+- Exercise real application and domain code together. Replace only external boundaries such as the Yandex API, playback engine, filesystem, operating system, or clock.
+- Prefer stateful fakes over dynamic mocks. When a scenario needs new external behavior or observations, improve the relevant fake so it models that contract and can be reused.
+- Do not add low-level tests that mock or monkeypatch internal collaborators, private methods, or chains of implementation calls. Such tests freeze the current code structure without proving the product scenario.
+- Do not assert private call order or helper implementation when the same behavior can be verified from returned data, persisted state, emitted application state, playback state, or visible UI state.
+- For a regression, reproduce it at the highest practical layer. A UI flow should normally cover the action from the widget or controller through the application service; an application flow should use real services with fake infrastructure adapters.
+- Use a narrow unit test only when the behavior is genuinely isolated and a higher-level scenario would be impractical, slow, or unable to identify the failure.
+- Treat coverage as a diagnostic for missing scenarios. Never add brittle low-level tests solely to increase the percentage.
 
 Primary test groups:
 
@@ -258,9 +264,11 @@ Rules:
 - Prefer the provided scripts first:
   - `./scripts/run_lint.sh`
   - `./scripts/run_tests.sh`
+  - `./scripts/run_coverage.sh`
   - `./scripts/run_smoke.sh`
   - `./scripts/run_app.sh`
 - These scripts already resolve `.venv/bin/...` and export `PYTHONPATH=src`; do not duplicate that logic unless a narrower one-off command is necessary.
+- Use `./scripts/run_coverage.sh` for the full line and branch coverage report. It prints uncovered line numbers in the terminal and writes only the ignored `.coverage` data file.
 - If you need a narrower direct invocation, prefer `.venv/bin/python -m pytest ...` or `.venv/bin/ruff ...` with `PYTHONPATH="${PROJECT_ROOT}/src"`.
 - When reporting verification status, distinguish clearly between:
   - full project script runs,
