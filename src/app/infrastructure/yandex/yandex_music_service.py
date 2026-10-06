@@ -29,7 +29,6 @@ from app.domain import (
     WaveSettings,
 )
 from app.domain.errors import AuthError, NetworkError, StreamResolveError, TrackUnavailableError
-from app.infrastructure.yandex.compat import apply_optional_user_login_backport
 
 try:
     from yandex_music.exceptions import (
@@ -186,14 +185,10 @@ class YandexMusicService(MusicService):
         client = self._require_client()
         session = self.get_auth_session()
         user_id = (
-            session.user_id
-            if session is not None
-            else str(getattr(client, "account_uid", ""))
+            session.user_id if session is not None else str(getattr(client, "account_uid", ""))
         )
         try:
-            likes = client.users_likes_tracks(
-                if_modified_since_revision=if_modified_since_revision
-            )
+            likes = client.users_likes_tracks(if_modified_since_revision=if_modified_since_revision)
         except Exception as exc:
             raise self._map_client_error(exc, "Failed to load liked track ids") from exc
         if likes is None:
@@ -216,9 +211,7 @@ class YandexMusicService(MusicService):
         client = self._require_client()
         session = self.get_auth_session()
         user_id = (
-            session.user_id
-            if session is not None
-            else str(getattr(client, "account_uid", ""))
+            session.user_id if session is not None else str(getattr(client, "account_uid", ""))
         )
         try:
             dislikes = client.users_dislikes_tracks(
@@ -603,9 +596,7 @@ class YandexMusicService(MusicService):
             raise NetworkError("Yandex Music returned no My Wave settings")
 
         default_station = getattr(raw_settings, "default_station", None)
-        default_seed = str(
-            getattr(default_station, "station_id", None) or "user:onyourwave"
-        )
+        default_seed = str(getattr(default_station, "station_id", None) or "user:onyourwave")
         default_title = (
             getattr(default_station, "rup_title", None)
             or getattr(default_station, "title", None)
@@ -766,9 +757,7 @@ class YandexMusicService(MusicService):
         client = self._require_client()
         radio_client = self._radio_client(client)
         try:
-            result = radio_client.rotor_session_tracks(
-                session.session_id, queue=list(queue)
-            )
+            result = radio_client.rotor_session_tracks(session.session_id, queue=list(queue))
         except Exception as exc:
             raise self._map_client_error(
                 exc,
@@ -1185,6 +1174,9 @@ class YandexMusicService(MusicService):
             raise TrackUnavailableError(f"Track {track.id} is unavailable")
 
         client = self._require_client()
+        if self._audio_quality is AudioQuality.LOSSLESS:
+            return self._resolve_lossless_stream_ref(client, track.id)
+
         try:
             download_infos = client.tracks_download_info(track.id, get_direct_links=True)
         except Exception as exc:
@@ -1217,6 +1209,54 @@ class YandexMusicService(MusicService):
 
         raise TrackUnavailableError(f"Track {track.id} has no playable stream")
 
+    def _resolve_lossless_stream_ref(self, client: Any, track_id: str) -> str:
+        try:
+            file_info = client.tracks_file_info(
+                track_id,
+                quality="lossless",
+                codecs=["flac-mp4", "mp3"],
+                transport="raw",
+            )
+        except Exception as exc:
+            mapped_error = self._map_client_error(
+                exc,
+                f"Failed to resolve lossless stream for track {track_id}",
+            )
+            if isinstance(mapped_error, AuthError):
+                raise mapped_error from exc
+            raise StreamResolveError(
+                f"Failed to resolve lossless stream for track {track_id}"
+            ) from exc
+
+        download_info = getattr(file_info, "download_info", None)
+        if download_info is None:
+            raise TrackUnavailableError(f"Track {track_id} has no playable lossless stream")
+
+        transport = getattr(download_info, "transport", None)
+        if transport != "raw":
+            raise StreamResolveError(
+                f"Yandex Music returned unsupported {transport!r} transport for track {track_id}"
+            )
+
+        urls = (
+            getattr(download_info, "url", None),
+            *(getattr(download_info, "urls", None) or ()),
+        )
+        stream_ref = next((url for url in urls if isinstance(url, str) and url), None)
+        if stream_ref is None:
+            raise TrackUnavailableError(f"Track {track_id} has no playable lossless stream")
+
+        if self._logger is not None:
+            self._logger.info(
+                "Yandex quality track=%s mode=%s selected=%s:%s transport=%s",
+                track_id,
+                self._audio_quality.value,
+                getattr(download_info, "codec", "?"),
+                getattr(download_info, "bitrate", "?"),
+                transport,
+            )
+        return stream_ref
+
     def _map_client_error(
         self,
         exc: Exception,
@@ -1241,7 +1281,6 @@ class YandexMusicService(MusicService):
             raise AuthError("yandex-music package is not installed") from exc
 
         try:
-            apply_optional_user_login_backport()
             self._client = Client(self._session.token, language=self._language).init()
         except Exception as exc:
             raise AuthError("Failed to initialize Yandex Music client") from exc
@@ -1599,8 +1638,7 @@ class YandexMusicService(MusicService):
         selected_label = "none"
         if selected is not None:
             selected_label = (
-                f"{getattr(selected, 'codec', '?')}:"
-                f"{getattr(selected, 'bitrate_in_kbps', '?')}"
+                f"{getattr(selected, 'codec', '?')}:{getattr(selected, 'bitrate_in_kbps', '?')}"
             )
         self._logger.info(
             "Yandex quality track=%s mode=%s selected=%s options=[%s]",

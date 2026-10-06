@@ -153,6 +153,29 @@ class DownloadInfoStub:
         self.codec = codec
 
 
+class FileDownloadInfoStub:
+    def __init__(
+        self,
+        url: str,
+        *,
+        quality: str = "lossless",
+        codec: str = "flac-mp4",
+        bitrate: int = 0,
+        transport: str = "raw",
+    ) -> None:
+        self.url = url
+        self.urls = [url]
+        self.quality = quality
+        self.codec = codec
+        self.bitrate = bitrate
+        self.transport = transport
+
+
+class FileInfoStub:
+    def __init__(self, download_info: FileDownloadInfoStub | None) -> None:
+        self.download_info = download_info
+
+
 class LikesStub:
     def __init__(self, tracks: list[TrackStub], *, revision: int = 3) -> None:
         self._tracks = tracks
@@ -194,6 +217,8 @@ class FakeYandexClient:
     def __init__(self) -> None:
         self.base_url = "https://api.music.yandex.net"
         self.report_unknown_fields = False
+        self.strict = False
+        self.on_schema_mismatch = lambda mismatch: None
         self.track = TrackStub(track_id="track-1", title="Remote", version="Live Version")
         self.album = AlbumStub("Album", album_id="album-1")
         self.single = AlbumStub("Single", album_id="single-1", album_type="single")
@@ -239,6 +264,8 @@ class FakeYandexClient:
         ]
         self.playlist_likes = [LikeStub(playlist=self.playlist)]
         self.download_infos = [DownloadInfoStub("https://stream.example/track-1")]
+        self.file_info = FileInfoStub(FileDownloadInfoStub("https://stream.example/lossless"))
+        self.file_info_calls: list[dict[str, object]] = []
         self.account = type("Account", (), {"uid": 7, "login": "listener"})()
         self.me = type("Me", (), {"account": self.account})()
         self.liked_track_ids: list[str] = []
@@ -317,9 +344,7 @@ class FakeYandexClient:
                 self._client.ai_content_reduction_enabled = (
                     payload.get("aiContentReductionEnabled") == "true"
                 )
-                return {
-                    "aiContentReductionEnabled": self._client.ai_content_reduction_enabled
-                }
+                return {"aiContentReductionEnabled": self._client.ai_content_reduction_enabled}
             if url.endswith("/rotor/session/new"):
                 payload = json or data or {}
                 self._client.radio_session_new_calls.append(payload)
@@ -329,9 +354,7 @@ class FakeYandexClient:
                     "radioSessionId": "session-3" if restarted else "session-1",
                     "batchId": "batch-restarted" if restarted else "batch-1",
                     "descriptionSeed": {"type": "user", "tag": "onyourwave"},
-                    "sequence": [
-                        {"type": "track", "liked": False, "track": self._track_payload()}
-                    ],
+                    "sequence": [{"type": "track", "liked": False, "track": self._track_payload()}],
                 }
             if url.endswith("/rotor/session/session-1/tracks"):
                 self._client.radio_session_tracks_headers.append(dict(self.headers))
@@ -343,9 +366,7 @@ class FakeYandexClient:
                     return {"unknownSession": True, "sequence": []}
                 return {
                     "batchId": "batch-2",
-                    "sequence": [
-                        {"type": "track", "liked": False, "track": self._track_payload()}
-                    ],
+                    "sequence": [{"type": "track", "liked": False, "track": self._track_payload()}],
                 }
             if url.endswith("/rotor/session/session-1/clone"):
                 payload = json if isinstance(json, dict) else data
@@ -356,9 +377,7 @@ class FakeYandexClient:
                     "radioSessionId": "session-2",
                     "batchId": "batch-recovered",
                     "descriptionSeed": {"type": "user", "tag": "onyourwave"},
-                    "sequence": [
-                        {"type": "track", "liked": False, "track": self._track_payload()}
-                    ],
+                    "sequence": [{"type": "track", "liked": False, "track": self._track_payload()}],
                 }
             if url.endswith("/rotor/session/session-1/feedback"):
                 payload = {"type": "session-feedback", **((json or data) or {})}
@@ -395,9 +414,7 @@ class FakeYandexClient:
                         "stationId": "user:onyourwave",
                         "title": "My Wave" if english else "Моя волна",
                         "rupTitle": "My Wave" if english else "Моя волна",
-                        "rupDescription": (
-                            "Music for you" if english else "Музыка для вас"
-                        ),
+                        "rupDescription": ("Music for you" if english else "Музыка для вас"),
                     },
                     "blocks": [
                         {
@@ -444,9 +461,7 @@ class FakeYandexClient:
                     "stationId": "user:onyourwave",
                 }
             if url.endswith("/account/settings"):
-                return {
-                    "aiContentReductionEnabled": self._client.ai_content_reduction_enabled
-                }
+                return {"aiContentReductionEnabled": self._client.ai_content_reduction_enabled}
             if url.endswith("/tracks/track-1/credits"):
                 return self._client.credits_payload
             if url.endswith("/dislikes/tracks"):
@@ -692,6 +707,23 @@ class FakeYandexClient:
         del track_id, get_direct_links
         return self.download_infos
 
+    def tracks_file_info(
+        self,
+        track_id: str,
+        quality: str = "lossless",
+        codecs: list[str] | None = None,
+        transport: str = "raw",
+    ):
+        self.file_info_calls.append(
+            {
+                "track_id": track_id,
+                "quality": quality,
+                "codecs": codecs,
+                "transport": transport,
+            }
+        )
+        return self.file_info
+
 
 def test_yandex_music_service_requires_session_before_use() -> None:
     service = YandexMusicService()
@@ -718,9 +750,7 @@ def test_yandex_music_service_maps_track_and_playlist_data() -> None:
         if_modified_since_revision=client.likes.revision
     )
     disliked_track_ids = service.get_disliked_track_ids()
-    unchanged_disliked_track_ids = service.get_disliked_track_ids(
-        if_modified_since_revision=4
-    )
+    unchanged_disliked_track_ids = service.get_disliked_track_ids(if_modified_since_revision=4)
     liked_albums = service.get_liked_albums()
     liked_artists = service.get_liked_artists()
     disliked_artists = service.get_disliked_artists()
@@ -833,7 +863,7 @@ def test_yandex_music_service_maps_artist_cover_from_nested_cover_uri() -> None:
                     "cover": type("CoverStub", (), {"uri": "covers/artist-nested.jpg"})(),
                 },
             )()
-        ]
+        ],
     )
     service = YandexMusicService(
         session=AuthSession(user_id="user-1", token="token"),
@@ -1008,9 +1038,7 @@ def test_yandex_music_service_adds_ai_content_reduction_header_to_new_session() 
         {"X-Yandex-Music-AI-Content-Rate": "reduced"},
         {"X-Yandex-Music-AI-Content-Rate": "reduced"},
     ]
-    assert client.radio_session_tracks_headers == [
-        {"X-Yandex-Music-AI-Content-Rate": "reduced"}
-    ]
+    assert client.radio_session_tracks_headers == [{"X-Yandex-Music-AI-Content-Rate": "reduced"}]
     assert client.request.headers == {}
 
 
@@ -1119,7 +1147,9 @@ def test_yandex_music_service_uses_radio_session_flow() -> None:
     assert client.radio_session_new_headers == [{}]
     assert client.radio_session_tracks_queue == [["track-1", "track-2"]]
     assert [call["event"]["type"] for call in client.station_feedback_calls] == [
-        "radioStarted", "trackStarted", "trackFinished"
+        "radioStarted",
+        "trackStarted",
+        "trackFinished",
     ]
     assert all(call["batchId"] == "batch-1" for call in client.station_feedback_calls)
     assert client.station_feedback_calls[0]["from"] == session.feedback_from
@@ -1233,6 +1263,40 @@ def test_yandex_music_service_selects_stream_by_audio_quality() -> None:
 
     service.set_audio_quality(AudioQuality.HQ)
     assert service.resolve_stream_ref(track) == "https://stream.example/hq"
+
+    service.set_audio_quality(AudioQuality.LOSSLESS)
+    assert service.resolve_stream_ref(track) == "https://stream.example/lossless"
+    assert client.file_info_calls == [
+        {
+            "track_id": "track-1",
+            "quality": "lossless",
+            "codecs": ["flac-mp4", "mp3"],
+            "transport": "raw",
+        }
+    ]
+
+
+def test_yandex_music_service_accepts_mp3_fallback_for_lossless_quality() -> None:
+    client = FakeYandexClient()
+    client.file_info = FileInfoStub(
+        FileDownloadInfoStub(
+            "https://stream.example/hq-fallback",
+            codec="mp3",
+            bitrate=320,
+        )
+    )
+    service = YandexMusicService(
+        session=AuthSession(user_id="user-1", token="token"),
+        client=client,
+    )
+    service.set_audio_quality(AudioQuality.LOSSLESS)
+
+    stream_ref = service.resolve_stream_ref(
+        Track(id="track-1", title="Remote", artists=("Artist",), available=True)
+    )
+
+    assert stream_ref == "https://stream.example/hq-fallback"
+    assert client.file_info_calls[0]["codecs"] == ["flac-mp4", "mp3"]
 
 
 def test_yandex_music_service_likes_and_unlikes_tracks() -> None:
@@ -1356,7 +1420,7 @@ def test_yandex_music_service_replaces_playlist_tracks_atomically() -> None:
             "op": "insert",
             "at": 0,
             "tracks": [{"id": "track-2", "albumId": "album-2"}],
-        }
+        },
     ]
 
 

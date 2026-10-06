@@ -56,7 +56,12 @@ class MainWindowPreferencesMixin:
         quality_row.setContentsMargins(0, 0, 0, 0)
         quality_row.setSpacing(6)
         self._quality_buttons: dict[AudioQuality, QPushButton] = {}
-        for quality in (AudioQuality.HQ, AudioQuality.SD, AudioQuality.LQ):
+        for quality in (
+            AudioQuality.LOSSLESS,
+            AudioQuality.HQ,
+            AudioQuality.SD,
+            AudioQuality.LQ,
+        ):
             button = QPushButton(quality.name)
             button.setObjectName("quality-option")
             button.setCheckable(True)

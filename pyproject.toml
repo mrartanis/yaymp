@@ -22,7 +22,7 @@ dependencies = [
     "winrt-Windows.Foundation>=3.2.1,<4.0; sys_platform == 'win32'",
     "winrt-Windows.Media>=3.2.1,<4.0; sys_platform == 'win32'",
     "winrt-Windows.Media.Playback>=3.2.1,<4.0; sys_platform == 'win32'",
-    "yandex-music>=3.1.0,<4.0",
+    "yandex-music[orjson]>=3.2.0,<4.0",
 ]
 
 [project.optional-dependencies]

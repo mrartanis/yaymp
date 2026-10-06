@@ -3,6 +3,7 @@ from __future__ import annotations
 import http.server
 import os
 import ssl
+import struct
 import threading
 import urllib.error
 import urllib.request
@@ -277,7 +278,7 @@ class StreamProxyService:
             )
             _append_contiguous_data(session, start_offset, chunk)
             session.contiguous_bytes = _contiguous_prefix_length(session.byte_ranges)
-            if session.waveform_mode == "plain" and _looks_like_mp3(session):
+            if session.waveform_mode == "plain" and _looks_like_waveform_audio(session):
                 session.waveform_mode = "loading"
             self._maybe_schedule_full_analysis(session)
 
@@ -288,7 +289,7 @@ class StreamProxyService:
             return
         if session.analysis_in_flight:
             return
-        if not _looks_like_mp3(session):
+        if not _looks_like_waveform_audio(session):
             return
         contiguous_size = len(session.contiguous_data)
         if session.total_size_bytes is None or contiguous_size < session.total_size_bytes:
@@ -297,17 +298,14 @@ class StreamProxyService:
         session.analysis_in_flight = True
         session.waveform_mode = "loading"
         self._logger.debug(
-            (
-                "Waveform analysis scheduled track=%s contiguous=%s total=%s "
-                "duration_ms=%s"
-            ),
+            ("Waveform analysis scheduled track=%s contiguous=%s total=%s duration_ms=%s"),
             session.track_id,
             contiguous_size,
             session.total_size_bytes,
             session.track_duration_ms,
         )
         future = self._waveform_executor.submit(
-            _decode_complete_mp3_bins,
+            _decode_complete_audio_bins,
             bytes(session.contiguous_data),
             session.track_duration_ms,
             _WAVEFORM_BIN_COUNT,
@@ -458,13 +456,17 @@ def _response_total_size(headers, start_offset: int) -> int | None:
     return None
 
 
-def _looks_like_mp3(session: _ProxySession) -> bool:
+def _looks_like_waveform_audio(session: _ProxySession) -> bool:
     if session.content_type and "mpeg" in session.content_type.lower():
         return True
-    prefix = bytes(session.contiguous_data[:3])
-    if prefix == b"ID3":
+    prefix = bytes(session.contiguous_data[:262_144])
+    if prefix.startswith(b"fLaC"):
         return True
-    frame = bytes(session.contiguous_data[:2])
+    if len(prefix) >= 12 and prefix[4:8] == b"ftyp" and b"dfLa" in prefix:
+        return True
+    if prefix[:3] == b"ID3":
+        return True
+    frame = prefix[:2]
     if len(frame) < 2:
         return False
     return frame[0] == 0xFF and (frame[1] & 0xE0) == 0xE0
@@ -506,11 +508,13 @@ def _drain_pending_chunks(session: _ProxySession) -> None:
             break
 
 
-def _decode_complete_mp3_bins(
+def _decode_complete_audio_bins(
     data: bytes,
     duration_ms: int,
     bin_count: int,
 ) -> tuple[tuple[float, ...], int]:
+    if len(data) >= 12 and data[4:8] == b"ftyp":
+        data = _extract_flac_from_mp4(data)
     decoded = miniaudio.decode(
         data,
         output_format=miniaudio.SampleFormat.SIGNED16,
@@ -521,12 +525,12 @@ def _decode_complete_mp3_bins(
     channels = max(1, decoded.nchannels)
     frames = len(samples) // channels
     if frames <= 0:
-        raise ValueError("decoded MP3 has no frames")
+        raise ValueError("decoded audio has no frames")
 
     decoded_duration_ms = int(frames * 1000 / decoded.sample_rate)
     known_position_ms = duration_ms or decoded_duration_ms
     if known_position_ms <= 0:
-        raise ValueError("decoded MP3 has no known duration")
+        raise ValueError("decoded audio has no known duration")
 
     known_bin_count = bin_count
     frames_per_bin = max(1, frames // known_bin_count)
@@ -555,3 +559,165 @@ def _decode_complete_mp3_bins(
     if peak > 0:
         bins = [min(1.0, value / peak) for value in bins]
     return tuple(bins), known_position_ms
+
+
+def _extract_flac_from_mp4(data: bytes) -> bytes:
+    moov = _find_mp4_box(data, 0, len(data), b"moov")
+    flac_metadata: bytes | None = None
+    sample_table: tuple[int, int] | None = None
+    for box_type, payload_start, box_end in _iter_mp4_boxes(data, *moov):
+        if box_type != b"trak":
+            continue
+        try:
+            mdia = _find_mp4_box(data, payload_start, box_end, b"mdia")
+            minf = _find_mp4_box(data, *mdia, b"minf")
+            stbl = _find_mp4_box(data, *minf, b"stbl")
+            stsd = _find_mp4_box(data, *stbl, b"stsd")
+            flac_metadata = _flac_metadata_from_sample_description(data, *stsd)
+        except (KeyError, ValueError, struct.error):
+            continue
+        sample_table = stbl
+        break
+
+    if flac_metadata is None or sample_table is None:
+        raise ValueError("MP4 contains no FLAC audio track")
+
+    sample_sizes = _mp4_sample_sizes(data, sample_table)
+    chunk_offsets = _mp4_chunk_offsets(data, sample_table)
+    samples_per_chunk = _mp4_samples_per_chunk(data, sample_table, len(chunk_offsets))
+    if sum(samples_per_chunk) != len(sample_sizes):
+        raise ValueError("MP4 FLAC sample table is inconsistent")
+
+    native_flac = bytearray(b"fLaC")
+    native_flac.extend(flac_metadata)
+    sample_index = 0
+    for chunk_offset, chunk_sample_count in zip(chunk_offsets, samples_per_chunk, strict=True):
+        offset = chunk_offset
+        for _ in range(chunk_sample_count):
+            sample_size = sample_sizes[sample_index]
+            sample_end = offset + sample_size
+            if offset < 0 or sample_end > len(data):
+                raise ValueError("MP4 FLAC sample points outside the file")
+            native_flac.extend(data[offset:sample_end])
+            offset = sample_end
+            sample_index += 1
+    return bytes(native_flac)
+
+
+def _iter_mp4_boxes(data: bytes, start: int, end: int):
+    offset = start
+    while offset + 8 <= end:
+        size, box_type = struct.unpack_from(">I4s", data, offset)
+        header_size = 8
+        if size == 1:
+            if offset + 16 > end:
+                raise ValueError("truncated extended MP4 box")
+            size = struct.unpack_from(">Q", data, offset + 8)[0]
+            header_size = 16
+        elif size == 0:
+            size = end - offset
+        if size < header_size or offset + size > end:
+            raise ValueError("invalid MP4 box size")
+        yield box_type, offset + header_size, offset + size
+        offset += size
+    if offset != end:
+        raise ValueError("trailing bytes in MP4 box")
+
+
+def _find_mp4_box(
+    data: bytes,
+    start: int,
+    end: int,
+    wanted_type: bytes,
+) -> tuple[int, int]:
+    for box_type, payload_start, box_end in _iter_mp4_boxes(data, start, end):
+        if box_type == wanted_type:
+            return payload_start, box_end
+    raise KeyError(wanted_type)
+
+
+def _flac_metadata_from_sample_description(data: bytes, start: int, end: int) -> bytes:
+    if start + 8 > end:
+        raise ValueError("truncated MP4 sample description")
+    entry_count = struct.unpack_from(">I", data, start + 4)[0]
+    entry_start = start + 8
+    for index, (codec, payload_start, entry_end) in enumerate(
+        _iter_mp4_boxes(data, entry_start, end)
+    ):
+        if index >= entry_count:
+            break
+        if codec != b"fLaC" or payload_start + 28 > entry_end:
+            continue
+        version = struct.unpack_from(">H", data, payload_start + 8)[0]
+        extension_offset = {0: 28, 1: 44, 2: 64}.get(version)
+        if extension_offset is None:
+            raise ValueError("unsupported MP4 audio sample entry version")
+        dfla = _find_mp4_box(data, payload_start + extension_offset, entry_end, b"dfLa")
+        metadata_start = dfla[0] + 4
+        if metadata_start + 4 > dfla[1]:
+            raise ValueError("truncated MP4 FLAC metadata")
+        metadata = data[metadata_start : dfla[1]]
+        block_type = metadata[0] & 0x7F
+        block_size = int.from_bytes(metadata[1:4], "big")
+        if block_type != 0 or block_size != 34 or len(metadata) < 38:
+            raise ValueError("MP4 FLAC metadata has no STREAMINFO block")
+        return metadata
+    raise KeyError(b"fLaC")
+
+
+def _mp4_sample_sizes(data: bytes, sample_table: tuple[int, int]) -> list[int]:
+    start, end = _find_mp4_box(data, *sample_table, b"stsz")
+    if start + 12 > end:
+        raise ValueError("truncated MP4 sample-size table")
+    default_size, sample_count = struct.unpack_from(">II", data, start + 4)
+    if default_size:
+        return [default_size] * sample_count
+    sizes_end = start + 12 + sample_count * 4
+    if sizes_end > end:
+        raise ValueError("truncated MP4 sample-size entries")
+    return list(struct.unpack_from(f">{sample_count}I", data, start + 12))
+
+
+def _mp4_chunk_offsets(data: bytes, sample_table: tuple[int, int]) -> list[int]:
+    try:
+        start, end = _find_mp4_box(data, *sample_table, b"stco")
+        value_size = 4
+        value_format = "I"
+    except KeyError:
+        start, end = _find_mp4_box(data, *sample_table, b"co64")
+        value_size = 8
+        value_format = "Q"
+    if start + 8 > end:
+        raise ValueError("truncated MP4 chunk-offset table")
+    chunk_count = struct.unpack_from(">I", data, start + 4)[0]
+    offsets_end = start + 8 + chunk_count * value_size
+    if offsets_end > end:
+        raise ValueError("truncated MP4 chunk-offset entries")
+    return list(struct.unpack_from(f">{chunk_count}{value_format}", data, start + 8))
+
+
+def _mp4_samples_per_chunk(
+    data: bytes,
+    sample_table: tuple[int, int],
+    chunk_count: int,
+) -> list[int]:
+    start, end = _find_mp4_box(data, *sample_table, b"stsc")
+    if start + 8 > end:
+        raise ValueError("truncated MP4 sample-to-chunk table")
+    entry_count = struct.unpack_from(">I", data, start + 4)[0]
+    entries_end = start + 8 + entry_count * 12
+    if entries_end > end or entry_count == 0:
+        raise ValueError("invalid MP4 sample-to-chunk entries")
+    entries = [
+        struct.unpack_from(">III", data, start + 8 + index * 12) for index in range(entry_count)
+    ]
+    result: list[int] = []
+    entry_index = 0
+    for chunk_number in range(1, chunk_count + 1):
+        while entry_index + 1 < len(entries) and entries[entry_index + 1][0] <= chunk_number:
+            entry_index += 1
+        first_chunk, sample_count, _description_index = entries[entry_index]
+        if first_chunk > chunk_number or sample_count <= 0:
+            raise ValueError("invalid MP4 sample-to-chunk mapping")
+        result.append(sample_count)
+    return result

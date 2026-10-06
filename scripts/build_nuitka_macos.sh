@@ -66,6 +66,7 @@ xattr -c "${VENDORED_MPV_LIBRARY}" 2>/dev/null || true
     --include-package-data=certifi \
     --include-package=cffi \
     --include-package=miniaudio \
+    --include-package=orjson \
     --include-package=app \
     --include-package-data=app.presentation.qt \
     --include-data-files="${VENDORED_MPV_LIBRARY}=lib/libmpv.2.dylib" \

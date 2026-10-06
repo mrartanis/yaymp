@@ -62,6 +62,7 @@ rm -rf \
     --include-package-data=certifi \
     --include-package=cffi \
     --include-package=miniaudio \
+    --include-package=orjson \
     --include-package=app \
     --include-package-data=app.presentation.qt \
     --include-data-files="${MPV_LIBRARY}=lib/${MPV_LIBRARY_NAME}" \

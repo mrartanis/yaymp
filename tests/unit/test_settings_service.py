@@ -46,7 +46,7 @@ def test_settings_service_round_trips_volume_and_audio_quality() -> None:
     service = SettingsService(settings_repo=repo, logger=RecordingLogger())
 
     service.save_volume(42)
-    service.save_audio_quality(AudioQuality.SD)
+    service.save_audio_quality(AudioQuality.LOSSLESS)
     service.save_theme_preference("dark")
     service.save_corner_style_preference("rounded")
     service.save_language_preference("ru")
@@ -57,7 +57,7 @@ def test_settings_service_round_trips_volume_and_audio_quality() -> None:
     service.save_browser_view_mode("list")
 
     assert service.load_volume() == 42
-    assert service.load_audio_quality() is AudioQuality.SD
+    assert service.load_audio_quality() is AudioQuality.LOSSLESS
     assert service.load_theme_preference() == "dark"
     assert service.load_corner_style_preference() == "rounded"
     assert service.load_language_preference() == "ru"

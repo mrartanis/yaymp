@@ -28,6 +28,40 @@ _SHORT_TONE_MP3 = base64.b64decode(
     "qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqg=="
 )
 
+_SHORT_TONE_FLAC_MP4 = base64.b64decode(
+    "AAAAHGZ0eXBpc29tAAACAGlzb21pc28ybXA0MQAAAs1tb292AAAAbG12aGQAAAAAAAAAAAAAAAAA"
+    "AAPoAAAAUAABAAABAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAEAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAAB93RyYWsAAABcdGtoZAAAAAMAAAAAAAAA"
+    "AAAAAAEAAAAAAAAAUAAAAAAAAAAAAAAAAQEAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAA"
+    "AAAAAEAAAAAAAAAAAAAAAAAAACRlZHRzAAAAHGVsc3QAAAAAAAAAAQAAAFAAAAAAAAEAAAAAAW9t"
+    "ZGlhAAAAIG1kaGQAAAAAAAAAAAAAAAAAAKxEAAANyFXEAAAAAAAtaGRscgAAAAAAAAAAc291bgAA"
+    "AAAAAAAAAAAAAFNvdW5kSGFuZGxlcgAAAAEabWluZgAAABBzbWhkAAAAAAAAAAAAAAAkZGluZgAA"
+    "ABxkcmVmAAAAAAAAAAEAAAAMdXJsIAAAAAEAAADec3RibAAAAHpzdHNkAAAAAAAAAAEAAABqZkxh"
+    "QwAAAAAAAAABAAAAAAAAAAAAAgAQAAAAAKxEAAAAAAAyZGZMYQAAAACAAAAiEgASAAAD6AAD6ArE"
+    "QvAAAA3IO6q84qabTjfZwzUyy1mErAAAABRidHJ0AAAAAAAB9AAAAYagAAAAGHN0dHMAAAAAAAAA"
+    "AQAAAAEAAA3IAAAAHHN0c2MAAAAAAAAAAQAAAAEAAAABAAAAAQAAABRzdHN6AAAAAAAAA+gAAAAB"
+    "AAAAFHN0Y28AAAAAAAAAAQAAAvkAAABidWR0YQAAAFptZXRhAAAAAAAAACFoZGxyAAAAAAAAAABt"
+    "ZGlyYXBwbAAAAAAAAAAAAAAAAC1pbHN0AAAAJal0b28AAAAdZGF0YQAAAAEAAAAATGF2ZjU4Ljc2"
+    "LjEwMAAAAAhmcmVlAAAD8G1kYXT/+HmIAA3H4k4AAAC1AWkCHQLOA3wEJwTO5qdAF9H0U7unXo8e"
+    "QH/DuAAczMnhpzzMzmZoZw8yTJPMnJDTIZmSTJyGdkyfJ8nJ6SclhnJTJnMyQ+EpyZkyTMk5MhPJ"
+    "JZJJSTw5T58kznmSzJLOS5k0yHk4ZMhLMmHKYSmZZmZk6ZhmknmGk5h8MpSHkhSUmTk84TYQ+STy"
+    "TmT5CXhPJycz5mTmSeEkyZMkyUlhnJMknJkpJMzDlMnJmSknOZzJKc5J5JzmYeEnknlM8nJ0k5zk"
+    "lJ585J5SSU5nJnDchMpJPkMzIeQnMmTShMmZOclmXMnzkzJ5knkkzKSczDTJpkzmSUKTJZMnTJnkm"
+    "knQk5mTJykJ8yTJJwmZJkM4ZMpCaYcz5OHMn8mTQ+Hkw0nwzyTMh5JOZMzhJsJZIeTJph+GyTSZk"
+    "6TMyZzMklJk8mZMk+TMM8k8mTNMnPJJsyc4aTJkmUphPkJnJLOGTkKTJzk5MlhNkhZT5J5yZmck5"
+    "JmTlkmcMw6QkpJyZyczMppDmk+SU2H5OE+ZknIcKTJzMkkmUhPhJNMwzMlkkyeS5PyHJzMzJCekP"
+    "JKTJzycOeEzIc5JSScM2TDLklmcnOcnCmZZJkyeQlJOchycnkM5OE0yeHhnwyzmTz5JmcyTmcychz"
+    "CeYZ8kk5kLMzyUnCfJLOZLhzJ0kD0yZOQyyQ6SSTSENkmTkmTnk8pKSmcz5zOTPJnhnJmGSSnJMk"
+    "ymGeSZTk8yTnkzJKczPhcklwmeSTkM4cOTJk/CHOechMz8mZlJOTknnzMOWcySkyScwnOGGScyTlC"
+    "TCUmczhPk8w0hmQzmHSSZyZwnIZNJhnJJKYczyczMnhpzzMzmZoZw8yTJPMnJDTIZmSTJyGdkyUO"
+    "T5OT0k5LDOSmTOZkh8JTkzJkmZJyZCeSSySSknhynz5JnPMlmSWclzJpkPJwyZCWZMOUwlMyzMzJ"
+    "0zDNJPMNJzD4ZSkPJCkpMnJ5wmwh8knknMnyEvCeTk5nzMnMM8JJkyZJkpLDOSZJOTJSSZmHKZOT"
+    "MlJOczmSU5yTySU5Jh4SeSeUzycnSTnOSUnnzknlJJTmcmcNyEykk+QzMh5CcyZNKEyZk5yWZcyf"
+    "OTMnmSeSTMpJzMNMmmTOZJQpMlkydMmeSaSdCTmZMnKQnzJMknCZkmQzhkykJphzPk4cyfyZND4eT"
+    "DSfDPJMyHkk5kzOEmwlkh5MmmH4bJNJmTpMzJnMySUmTyZkyT5MwzyTyZM0yc8kmzJzhpMmSZSmE"
+    "+Qmcks4ZOQpMnOTkyWE2SFlPknnJmZyTkmZOWSZwzDpCSknJnJzMymkOQAAAANJp"
+)
+
 
 class RecordingLogger:
     def __init__(self) -> None:
@@ -167,6 +201,36 @@ def test_full_mp3_download_builds_and_caches_waveform() -> None:
             track = Track("tone", "Tone", ("Generator",), duration_ms=80)
             proxy_url = service.create_session(track=track, stream_ref=origin.url)
             assert _read(proxy_url)[1] == _SHORT_TONE_MP3
+
+            _wait_until(
+                lambda: service.get_waveform_state(track.id).waveform_mode == "ready",
+                timeout=15,
+            )
+            state = service.get_waveform_state(track.id)
+            assert len(state.waveform_bins) == 100
+            assert max(state.waveform_bins) == pytest.approx(1.0)
+            assert state.waveform_known_position_ms == track.duration_ms
+            assert cache.saved_tracks[-1].id == track.id
+            assert cache.saved_tracks[-1].waveform_bins == state.waveform_bins
+    finally:
+        service.shutdown()
+
+
+def test_full_flac_mp4_download_builds_and_caches_waveform(tmp_path) -> None:
+    test_file = tmp_path / "tone-flac.m4a"
+    test_file.write_bytes(_SHORT_TONE_FLAC_MP4)
+    assert test_file.read_bytes()[4:12] == b"ftypisom"
+
+    cache = RecordingTrackCache()
+    service = StreamProxyService(
+        logger=RecordingLogger(),
+        library_cache_repo=cache,
+    )
+    try:
+        with HttpOrigin(test_file.read_bytes()) as origin:
+            track = Track("lossless-tone", "Tone", ("Generator",), duration_ms=80)
+            proxy_url = service.create_session(track=track, stream_ref=origin.url)
+            assert _read(proxy_url)[1] == _SHORT_TONE_FLAC_MP4
 
             _wait_until(
                 lambda: service.get_waveform_state(track.id).waveform_mode == "ready",
