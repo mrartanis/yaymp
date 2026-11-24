@@ -342,7 +342,7 @@ class FakeYandexClient:
             }
 
         def post(self, url: str, data=None, json=None, **kwargs):
-            del kwargs
+            headers = {**self.headers, **kwargs.get("headers", {})}
             if url.endswith("/account/settings"):
                 payload = data or {}
                 self._client.account_setting_writes.append(payload)
@@ -357,7 +357,7 @@ class FakeYandexClient:
                     raise RuntimeError("temporary radio session failure")
                 payload = json or data or {}
                 self._client.radio_session_new_calls.append(payload)
-                self._client.radio_session_new_headers.append(dict(self.headers))
+                self._client.radio_session_new_headers.append(headers)
                 restarted = bool(payload.get("queue"))
                 return {
                     "radioSessionId": "session-3" if restarted else "session-1",
@@ -366,7 +366,7 @@ class FakeYandexClient:
                     "sequence": [{"type": "track", "liked": False, "track": self._track_payload()}],
                 }
             if url.endswith("/rotor/session/session-1/tracks"):
-                self._client.radio_session_tracks_headers.append(dict(self.headers))
+                self._client.radio_session_tracks_headers.append(headers)
                 payload = json if isinstance(json, dict) else data
                 if isinstance(payload, dict):
                     queue = payload.get("queue") or []

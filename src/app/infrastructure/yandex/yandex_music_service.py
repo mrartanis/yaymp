@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Sequence
-from copy import copy
 from datetime import datetime
 from typing import Any
 
@@ -781,10 +780,11 @@ class YandexMusicService(MusicService):
         client = self._require_client()
         radio_seeds = tuple(seeds) or (station_id,)
         try:
-            radio_client = self._radio_client(client)
             result = self._call_sdk_with_retry(
-                lambda: radio_client.rotor_session_new(
-                    list(radio_seeds), include_tracks_in_response=True
+                lambda: client.rotor_session_new(
+                    list(radio_seeds),
+                    include_tracks_in_response=True,
+                    headers=self._radio_headers(),
                 ),
                 operation_name=f"start radio session for {station_id}",
             )
@@ -808,12 +808,12 @@ class YandexMusicService(MusicService):
         limit: int = 25,
     ) -> RadioSession:
         client = self._require_client()
-        radio_client = self._radio_client(client)
         try:
             result = self._call_sdk_with_retry(
-                lambda: radio_client.rotor_session_tracks(
+                lambda: client.rotor_session_tracks(
                     session.session_id,
                     queue=list(queue),
+                    headers=self._radio_headers(),
                 ),
                 operation_name=f"load radio session tracks for {session.station_id}",
             )
@@ -826,7 +826,7 @@ class YandexMusicService(MusicService):
             raise NetworkError(f"Radio session {session.session_id} is unavailable")
         if result.unknown_session:
             return self._recover_radio_session(
-                radio_client,
+                client,
                 session=session,
                 queue=queue,
                 limit=limit,
@@ -843,27 +843,29 @@ class YandexMusicService(MusicService):
 
     def _recover_radio_session(
         self,
-        radio_client: Any,
+        client: Any,
         *,
         session: RadioSession,
         queue: Sequence[str],
         limit: int,
     ) -> RadioSession:
         try:
-            result = radio_client.rotor_session_clone(
+            result = client.rotor_session_clone(
                 session.session_id,
                 queue=list(queue),
                 include_tracks_in_response=True,
+                headers=self._radio_headers(),
             )
         except Exception:
             result = None
 
         if result is None:
             try:
-                result = radio_client.rotor_session_new(
+                result = client.rotor_session_new(
                     list(session.seeds or (session.station_id,)),
                     queue=list(queue),
                     include_tracks_in_response=True,
+                    headers=self._radio_headers(),
                 )
             except Exception as exc:
                 raise self._map_client_error(
@@ -878,17 +880,10 @@ class YandexMusicService(MusicService):
             seeds=session.seeds or (session.station_id,),
         )
 
-    def _radio_client(self, client: Any) -> Any:
-        if not self._ai_content_reduction_enabled:
-            return client
-        radio_client = copy(client)
-        request = copy(client.request)
-        request.headers = {
-            **getattr(client.request, "headers", {}),
-            self._AI_CONTENT_RATE_HEADER: self._AI_CONTENT_REDUCED_VALUE,
-        }
-        radio_client._request = request
-        return radio_client
+    def _radio_headers(self) -> dict[str, str]:
+        if self._ai_content_reduction_enabled:
+            return {self._AI_CONTENT_RATE_HEADER: self._AI_CONTENT_REDUCED_VALUE}
+        return {}
 
     def _request_raw(
         self,
