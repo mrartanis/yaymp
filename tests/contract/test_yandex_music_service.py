@@ -266,6 +266,7 @@ class FakeYandexClient:
         self.playlist_likes = [LikeStub(playlist=self.playlist)]
         self.download_infos = [DownloadInfoStub("https://stream.example/track-1")]
         self.file_info = FileInfoStub(FileDownloadInfoStub("https://stream.example/lossless"))
+        self.file_info_v2: dict | None = None
         self.file_info_calls: list[dict[str, object]] = []
         self.account = type("Account", (), {"uid": 7, "login": "listener"})()
         self.me = type("Me", (), {"account": self.account})()
@@ -414,7 +415,10 @@ class FakeYandexClient:
             raise AssertionError(url)
 
         def get(self, url: str, params=None, **kwargs):
-            del kwargs
+            if url.endswith("/resources/v2/file-info"):
+                if self._client.file_info_v2 is None:
+                    raise NotFoundError("file-info v2 unavailable")
+                return self._client.file_info_v2
             if url.endswith("/rotor/wave/settings"):
                 english = self.headers.get("Accept-Language") == "en"
                 return {
@@ -1392,6 +1396,30 @@ def test_yandex_music_service_accepts_mp3_fallback_for_lossless_quality() -> Non
 
     assert stream_ref == "https://stream.example/hq-fallback"
     assert client.file_info_calls[0]["codecs"] == ["flac-mp4", "mp3"]
+
+
+@pytest.mark.parametrize("removed", [True, False])
+@pytest.mark.parametrize("wrapped", [True, False])
+def test_lossless_uses_v2_when_original_route_is_removed_or_empty(
+    removed: bool, wrapped: bool
+) -> None:
+    class RetiringClient(FakeYandexClient):
+        def tracks_file_info(self, *args, **kwargs):
+            if removed:
+                raise NotFoundError("endpoint removed")
+            return FileInfoStub(None)
+
+    client = RetiringClient()
+    file_info = {
+        "transport": "raw",
+        "codec": "flac-mp4",
+        "urls": ["https://stream.example/v2"],
+    }
+    client.file_info_v2 = {"fileInfo": file_info} if wrapped else file_info
+    service = YandexMusicService(token="token", client=client)
+    service.set_audio_quality(AudioQuality.LOSSLESS)
+    track = Track(id="123", title="Remote", artists=("Artist",), available=True)
+    assert service.resolve_stream_ref(track) == "https://stream.example/v2"
 
 
 def test_yandex_music_service_falls_back_to_legacy_mp3_320_when_file_info_fails() -> None:

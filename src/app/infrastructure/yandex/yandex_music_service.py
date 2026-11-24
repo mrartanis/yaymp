@@ -30,6 +30,8 @@ from app.domain import (
 )
 from app.domain.errors import AuthError, NetworkError, StreamResolveError, TrackUnavailableError
 
+from .file_info import get_lossless_file_info, get_lossless_file_info_v2
+
 try:
     from yandex_music.exceptions import (
         DeviceAuthError as YandexDeviceAuthError,
@@ -1286,64 +1288,38 @@ class YandexMusicService(MusicService):
         raise TrackUnavailableError(f"Track {track_id} has no playable stream")
 
     def _resolve_lossless_stream_ref(self, client: Any, track_id: str) -> str:
-        try:
-            file_info = client.tracks_file_info(
-                track_id,
-                quality="lossless",
-                codecs=["flac-mp4", "mp3"],
-                transport="raw",
-            )
-        except Exception as exc:
-            mapped_error = self._map_client_error(
-                exc,
-                f"Failed to resolve lossless stream for track {track_id}",
-            )
-            if isinstance(mapped_error, AuthError):
-                raise mapped_error from exc
-            return self._fallback_to_mp3(client, track_id, exc)
+        for path, fetch in (
+            ("get-file-info", get_lossless_file_info),
+            ("resources/v2/file-info", get_lossless_file_info_v2),
+        ):
+            try:
+                info = fetch(client, track_id)
+            except Exception as exc:
+                # The SDK also maps endpoint-specific HTTP 403s to UnauthorizedError.
+                # Let the alternate route (and ultimately download-info) check access.
+                if self._logger is not None:
+                    self._logger.warning("Yandex %s failed (%s)", path, type(exc).__name__)
+                continue
 
-        download_info = getattr(file_info, "download_info", None)
-        if download_info is None:
-            return self._fallback_to_mp3(client, track_id, "empty file-info response")
-
-        transport = getattr(download_info, "transport", None)
-        if transport != "raw":
-            return self._fallback_to_mp3(
-                client,
-                track_id,
-                f"unsupported {transport!r} transport",
-            )
-
-        urls = (
-            getattr(download_info, "url", None),
-            *(getattr(download_info, "urls", None) or ()),
-        )
-        stream_ref = next((url for url in urls if isinstance(url, str) and url), None)
-        if stream_ref is None:
-            return self._fallback_to_mp3(client, track_id, "file-info response has no URL")
+            if info.get("transport") != "raw":
+                continue
+            urls = info.get("urls")
+            candidates = (info.get("url"), *(urls if isinstance(urls, list | tuple) else ()))
+            for url in candidates:
+                if isinstance(url, str) and url:
+                    if self._logger is not None:
+                        self._logger.info(
+                            "Yandex quality track=%s mode=%s selected=%s:%s transport=raw via=%s",
+                            track_id,
+                            self._audio_quality.value,
+                            info.get("codec"),
+                            info.get("bitrate"),
+                            path,
+                        )
+                    return url
 
         if self._logger is not None:
-            self._logger.info(
-                "Yandex quality track=%s mode=%s selected=%s:%s transport=%s",
-                track_id,
-                self._audio_quality.value,
-                getattr(download_info, "codec", "?"),
-                getattr(download_info, "bitrate", "?"),
-                transport,
-            )
-        return stream_ref
-
-    def _fallback_to_mp3(self, client: Any, track_id: str, reason: object) -> str:
-        if isinstance(reason, Exception):
-            reason_label = f"{type(reason).__name__}: {reason}"
-        else:
-            reason_label = str(reason)
-        if self._logger is not None:
-            self._logger.warning(
-                "Lossless stream unavailable for track %s (%s); falling back to MP3 320",
-                track_id,
-                reason_label,
-            )
+            self._logger.warning("No playable raw file for track %s; trying MP3", track_id)
         return self._resolve_legacy_stream_ref(client, track_id, prefer_mp3=True)
 
     def _call_sdk_with_retry(
